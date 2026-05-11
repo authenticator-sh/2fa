@@ -30,3 +30,7 @@ coverage/
 
 # Misc
 *.tsbuildinfo
+
+# Release artifacts (upload to GitHub Releases, not committed)
+SHA256SUMS-*.txt
+authenticator-*.zip
