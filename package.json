@@ -1,0 +1,33 @@
+{
+  "name": "authenticator-extension",
+  "version": "1.0.0",
+  "description": "Modern Google Authenticator Chrome Extension",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "generate-icons": "node generate-icons.cjs"
+  },
+  "dependencies": {
+    "framer-motion": "^12.31.1",
+    "html5-qrcode": "^2.3.8",
+    "lucide-react": "^0.300.0",
+    "otpauth": "^9.2.3",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "zustand": "^4.4.7"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.258",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10"
+  }
+}
