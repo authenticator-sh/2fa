@@ -213,6 +213,7 @@ const strings: TranslationStrings = {
   "onboarding.other.steps": "Hầu hết ứng dụng khác không cho xuất tài khoản. Bạn sẽ phải thiết lập lại từng cái — vài phút mỗi tài khoản.\nTrên trang của dịch vụ, tắt xác thực hai bước rồi bật lại ngay.\nNó sẽ hiện mã QR mới — thêm vào đây.\nLàm lần lượt từng dịch vụ, và giữ ứng dụng cũ cho tới khi chắc chắn mã ở đây hoạt động.",
   "onboarding.key.label": "Tôi có tệp sao lưu hoặc khóa bí mật",
   "onboarding.key.steps": "Bản sao lưu từ tiện ích này? Bấm bên dưới và chọn tệp. Nếu có mật khẩu, chúng tôi sẽ hỏi.\nChỉ có khóa bí mật (16–32 chữ và số)? Thêm tài khoản → Thủ công rồi dán vào.\nMã khôi phục từ trang web không phải khóa bí mật: đó là mã dùng một lần, giữ trên giấy.",
+  "common.support": "Trợ giúp & hỗ trợ",
 };
 
 export default strings;

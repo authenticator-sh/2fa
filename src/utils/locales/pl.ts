@@ -213,6 +213,7 @@ const strings: TranslationStrings = {
   "onboarding.other.steps": "Większość innych aplikacji nie pozwala wyeksportować kont. Każde trzeba skonfigurować od nowa — kilka minut na konto.\nNa stronie usługi wyłącz uwierzytelnianie dwuskładnikowe i od razu włącz je ponownie.\nPokaże nowy kod QR — dodaj go tutaj.\nRób to po jednej usłudze i zachowaj starą aplikację, dopóki nie sprawdzisz, że kod stąd działa.",
   "onboarding.key.label": "Mam plik kopii zapasowej albo klucz",
   "onboarding.key.steps": "Kopia z tego rozszerzenia? Kliknij poniżej i wybierz plik. Jeśli ma hasło, zapytamy o nie.\nTylko klucz (16–32 liter i cyfr)? Dodaj konto → Ręcznie i wklej go.\nKody odzyskiwania ze strony to nie klucze — to jednorazowe kody trzymane na papierze.",
+  "common.support": "Pomoc i wsparcie",
 };
 
 export default strings;

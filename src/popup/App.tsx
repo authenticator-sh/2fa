@@ -19,6 +19,7 @@ import { VaultPrompt } from '@/components/VaultPrompt';
 import { VaultSettings } from '@/components/VaultSettings';
 import { VaultSetupModal } from '@/components/VaultSetupModal';
 import { EmptyStateGuide } from '@/components/EmptyStateGuide';
+import { SupportFooter } from '@/components/SupportFooter';
 import { getTimeSyncNotice, dismissTimeNotice } from '@/utils/time-sync';
 import { createT, loadLanguage, type Language } from '@/utils/i18n';
 import { addMultipleAccounts, getAccounts } from '@/utils/storage';
@@ -420,6 +421,7 @@ function App() {
             </div>
           </div>
           <LockScreen language={language} onUnlock={vault.unlock} onRecovered={vault.refresh} />
+          <SupportFooter language={language} />
           <FeedbackHost />
         </div>
       </div>
@@ -687,11 +689,13 @@ function App() {
       </div>
       )}
 
+      <SupportFooter language={language} />
+
       {/* Add Button (Floating Action Button) */}
       {!showSettings && !showFAQ && accounts.length > 0 && (
         <button
           onClick={() => setShowAddModal(true)}
-          className="fixed bottom-4 right-4 w-14 h-14 bg-[#4285F4] hover:bg-[#3367D6] text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center"
+          className="fixed bottom-10 right-4 w-14 h-14 bg-[#4285F4] hover:bg-[#3367D6] text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center"
           title={t('accounts.addAccount')}
         >
           <Plus size={24} />

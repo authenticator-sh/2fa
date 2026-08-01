@@ -213,6 +213,7 @@ const strings: TranslationStrings = {
   "onboarding.other.steps": "Diğer uygulamaların çoğu hesapları dışa aktarmanıza izin vermez. Her birini yeniden kurmanız gerekir — hesap başına birkaç dakika.\nServisin sitesinde iki adımlı doğrulamayı kapatıp hemen tekrar açın.\nSize yeni bir QR kodu gösterecek — onu buraya ekleyin.\nTek tek ilerleyin ve buradaki bir kodun çalıştığını görene kadar eski uygulamayı silmeyin.",
   "onboarding.key.label": "Yedek dosyam veya gizli anahtarım var",
   "onboarding.key.steps": "Bu uzantıdan bir yedek mi? Aşağıya tıklayıp dosyayı seçin. Parolalıysa parola sorulur.\nSadece gizli anahtar mı (16–32 harf ve rakam)? Hesap ekle → Elle ve yapıştırın.\nSitelerin kurtarma kodları gizli anahtar değildir: kâğıtta saklanan tek kullanımlık kodlardır.",
+  "common.support": "Yardım ve destek",
 };
 
 export default strings;

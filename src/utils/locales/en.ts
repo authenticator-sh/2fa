@@ -213,6 +213,7 @@ const strings: TranslationStrings = {
   "onboarding.other.steps": "Most other authenticator apps don't let you export your accounts. You'll have to set each one up again — a couple of minutes per account.\nOn the service's website, turn two-factor authentication off, then straight back on.\nIt will show you a new QR code — add that here.\nDo one service at a time, and keep the old app until you've checked that a code from here actually works.",
   "onboarding.key.label": "I have a backup file or a secret key",
   "onboarding.key.steps": "Backup file from this extension? Click below and choose the file. If it's password protected, you'll be asked for that password.\nJust a secret key (16–32 letters and digits)? Use Add account → Manually and paste it in.\nRecovery codes from a website are not secret keys — those are one-time codes you keep on paper, and they don't go here.",
+  "common.support": "Help & support",
 };
 
 export default strings;

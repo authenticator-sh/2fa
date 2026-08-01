@@ -213,6 +213,7 @@ const strings: TranslationStrings = {
   "onboarding.other.steps": "Die meisten anderen Apps lassen keinen Export zu. Du musst jedes Konto neu einrichten — ein paar Minuten pro Konto.\nSchalte auf der Website des Dienstes die Zwei-Faktor-Anmeldung aus und sofort wieder ein.\nDu bekommst einen neuen QR-Code — füge ihn hier hinzu.\nMach das Dienst für Dienst und behalte die alte App, bis du geprüft hast, dass ein Code von hier funktioniert.",
   "onboarding.key.label": "Ich habe eine Sicherungsdatei oder einen geheimen Schlüssel",
   "onboarding.key.steps": "Sicherungsdatei aus dieser Erweiterung? Klicke unten und wähle die Datei. Ist sie passwortgeschützt, fragen wir danach.\nNur ein geheimer Schlüssel (16–32 Buchstaben und Ziffern)? Konto hinzufügen → Manuell und einfügen.\nWiederherstellungscodes einer Website sind keine geheimen Schlüssel — das sind Einmalcodes für den Notfall.",
+  "common.support": "Hilfe & Support",
 };
 
 export default strings;

@@ -233,6 +233,7 @@ type VaultTranslationKeys = {
   'import.wrongPassword': string;
 
   'common.cancel': string;
+  'common.support': string;
 
   'update.feature.vault': string;
   'update.feature.encryptedExport': string;

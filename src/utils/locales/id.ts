@@ -213,6 +213,7 @@ const strings: TranslationStrings = {
   "onboarding.other.steps": "Kebanyakan aplikasi lain tidak mengizinkan ekspor. Anda harus menyiapkan tiap akun lagi — beberapa menit per akun.\nDi situs layanan, matikan verifikasi dua langkah lalu nyalakan lagi.\nAkan muncul kode QR baru — tambahkan di sini.\nLakukan satu layanan sekaligus, dan simpan aplikasi lama sampai Anda yakin kode dari sini berfungsi.",
   "onboarding.key.label": "Saya punya berkas cadangan atau kunci rahasia",
   "onboarding.key.steps": "Cadangan dari ekstensi ini? Klik di bawah dan pilih berkasnya. Jika berkata sandi, kami akan menanyakannya.\nHanya kunci rahasia (16–32 huruf dan angka)? Tambah akun → Manual, lalu tempel.\nKode pemulihan dari situs bukan kunci rahasia: itu kode sekali pakai yang disimpan di kertas.",
+  "common.support": "Bantuan & dukungan",
 };
 
 export default strings;

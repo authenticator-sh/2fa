@@ -213,6 +213,7 @@ const strings: TranslationStrings = {
   "onboarding.other.steps": "A maioria dos outros apps não permite exportar. Você terá que configurar cada conta de novo — poucos minutos por conta.\nNo site do serviço, desative a verificação em duas etapas e ative de novo em seguida.\nEle mostrará um novo código QR — adicione aqui.\nFaça um serviço por vez e mantenha o app antigo até confirmar que um código daqui funciona.",
   "onboarding.key.label": "Tenho um arquivo de backup ou uma chave secreta",
   "onboarding.key.steps": "Backup desta extensão? Clique abaixo e escolha o arquivo. Se tiver senha, ela será solicitada.\nSó uma chave secreta (16–32 letras e números)? Adicionar conta → Manualmente e cole.\nCódigos de recuperação de um site não são chaves secretas: são códigos de uso único guardados no papel.",
+  "common.support": "Ajuda e suporte",
 };
 
 export default strings;
