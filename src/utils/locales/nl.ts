@@ -214,6 +214,7 @@ const strings: TranslationStrings = {
   "onboarding.key.label": "Ik heb een back-upbestand of een geheime sleutel",
   "onboarding.key.steps": "Back-up van deze extensie? Klik hieronder en kies het bestand. Is het beveiligd, dan vragen we het wachtwoord.\nAlleen een geheime sleutel (16–32 letters en cijfers)? Account toevoegen → Handmatig en plak hem.\nHerstelcodes van een website zijn geen geheime sleutels: dat zijn eenmalige codes die je op papier bewaart.",
   "common.support": "Help en ondersteuning",
+  "settings.syncOverflow": "Te veel accounts om te synchroniseren — ze blijven op deze computer",
 };
 
 export default strings;

@@ -33,7 +33,7 @@ import { parseQRCode, generateRandomColor } from '@/utils/qr-parser';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, loadTimeOffset } from '@/utils/totp';
 import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
-import { isSyncEnabled, setSyncEnabled } from '@/utils/storage';
+import { isSyncEnabled, setSyncEnabled, hasSyncOverflowed } from '@/utils/storage';
 import { WHATS_NEW } from '@/utils/update-notes';
 import type { Account } from '@/types';
 
@@ -66,6 +66,7 @@ function App() {
   const [showVaultSetup, setShowVaultSetup] = useState(false);
   const [suggestionsOn, setSuggestionsOn] = useState(true);
   const [syncOn, setSyncOn] = useState(true);
+  const [syncOverflow, setSyncOverflow] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
   const [currentDomain, setCurrentDomain] = useState<string | null>(null);
   const [suggestedAccountId, setSuggestedAccountId] = useState<string | null>(null);
@@ -96,6 +97,7 @@ function App() {
   useEffect(() => {
     areSuggestionsEnabled().then(setSuggestionsOn);
     isSyncEnabled().then(setSyncOn);
+    hasSyncOverflowed().then(setSyncOverflow);
   }, []);
 
   const handleSyncToggle = async () => {
@@ -561,6 +563,13 @@ function App() {
             checked={syncOn}
             onChange={handleSyncToggle}
           />
+
+          {syncOn && syncOverflow && (
+            <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-yellow-700 dark:text-yellow-500">
+              <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+              {t('settings.syncOverflow')}
+            </p>
+          )}
 
           <SettingToggle
             label={t('settings.suggested')}

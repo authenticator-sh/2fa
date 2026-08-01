@@ -214,6 +214,7 @@ const strings: TranslationStrings = {
   "onboarding.key.label": "Jag har en säkerhetskopia eller en hemlig nyckel",
   "onboarding.key.steps": "Säkerhetskopia från det här tillägget? Klicka nedan och välj filen. Är den lösenordsskyddad frågar vi efter lösenordet.\nBara en hemlig nyckel (16–32 bokstäver och siffror)? Lägg till konto → Manuellt och klistra in den.\nÅterställningskoder från en webbplats är inte hemliga nycklar — det är engångskoder att spara på papper.",
   "common.support": "Hjälp och support",
+  "settings.syncOverflow": "För många konton för att synka — de stannar på den här datorn",
 };
 
 export default strings;

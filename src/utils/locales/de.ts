@@ -214,6 +214,7 @@ const strings: TranslationStrings = {
   "onboarding.key.label": "Ich habe eine Sicherungsdatei oder einen geheimen Schlüssel",
   "onboarding.key.steps": "Sicherungsdatei aus dieser Erweiterung? Klicke unten und wähle die Datei. Ist sie passwortgeschützt, fragen wir danach.\nNur ein geheimer Schlüssel (16–32 Buchstaben und Ziffern)? Konto hinzufügen → Manuell und einfügen.\nWiederherstellungscodes einer Website sind keine geheimen Schlüssel — das sind Einmalcodes für den Notfall.",
   "common.support": "Hilfe & Support",
+  "settings.syncOverflow": "Zu viele Konten zum Synchronisieren — sie bleiben auf diesem Computer",
 };
 
 export default strings;

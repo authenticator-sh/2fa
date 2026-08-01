@@ -214,6 +214,7 @@ const strings: TranslationStrings = {
   "onboarding.key.label": "J'ai un fichier de sauvegarde ou une clé secrète",
   "onboarding.key.steps": "Une sauvegarde de cette extension ? Cliquez ci-dessous et choisissez le fichier. S'il est protégé, le mot de passe vous sera demandé.\nSeulement une clé secrète (16 à 32 lettres et chiffres) ? Ajouter un compte → Manuellement, puis collez-la.\nLes codes de récupération d'un site ne sont pas des clés secrètes : ce sont des codes à usage unique conservés sur papier.",
   "common.support": "Aide et assistance",
+  "settings.syncOverflow": "Trop de comptes à synchroniser — ils restent sur cet ordinateur",
 };
 
 export default strings;

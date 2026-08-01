@@ -29,6 +29,7 @@ import {
   unwrapMasterKey,
   wrapMasterKey,
 } from './crypto';
+import { isSyncEnabled } from './sync-preference';
 
 const VAULT_META_KEY = 'vault_meta';
 const SESSION_KEY = 'vault_session';
@@ -159,8 +160,15 @@ export async function saveVaultMeta(meta: VaultMeta): Promise<void> {
   meta = { ...meta, updatedAt: Date.now() };
   await chrome.storage.local.set({ [VAULT_META_KEY]: meta });
   // Metadata is a few hundred bytes — it fits sync's per-item limit even when
-  // the account list does not, so cross-device unlock keeps working.
-  chrome.storage.sync.set({ [VAULT_META_KEY]: meta }).catch(() => {});
+  // the account list does not, so cross-device unlock keeps working. It must
+  // honour the sync preference: this is the wrapped master key, and leaving it
+  // on Google's servers after the user asked us to stop syncing would make the
+  // setting a lie.
+  if (await isSyncEnabled()) {
+    chrome.storage.sync.set({ [VAULT_META_KEY]: meta }).catch(() => {});
+  } else {
+    chrome.storage.sync.remove(VAULT_META_KEY).catch(() => {});
+  }
 }
 
 export async function clearVaultMeta(): Promise<void> {

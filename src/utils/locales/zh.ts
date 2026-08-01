@@ -214,6 +214,7 @@ const strings: TranslationStrings = {
   "onboarding.key.label": "我有备份文件或密钥",
   "onboarding.key.steps": "本扩展导出的备份？点击下方选择文件。如果设置了密码，会提示你输入。\n只有密钥（16–32 位字母数字）？用「添加账户」→「手动」粘贴进去。\n网站给的恢复码不是密钥——那是写在纸上的一次性代码，不能加到这里。",
   "common.support": "帮助与支持",
+  "settings.syncOverflow": "账户太多，无法同步——它们只保留在这台电脑上",
 };
 
 export default strings;

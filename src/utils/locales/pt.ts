@@ -214,6 +214,7 @@ const strings: TranslationStrings = {
   "onboarding.key.label": "Tenho um arquivo de backup ou uma chave secreta",
   "onboarding.key.steps": "Backup desta extensão? Clique abaixo e escolha o arquivo. Se tiver senha, ela será solicitada.\nSó uma chave secreta (16–32 letras e números)? Adicionar conta → Manualmente e cole.\nCódigos de recuperação de um site não são chaves secretas: são códigos de uso único guardados no papel.",
   "common.support": "Ajuda e suporte",
+  "settings.syncOverflow": "Contas demais para sincronizar — elas ficam neste computador",
 };
 
 export default strings;

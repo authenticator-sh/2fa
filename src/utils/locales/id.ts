@@ -214,6 +214,7 @@ const strings: TranslationStrings = {
   "onboarding.key.label": "Saya punya berkas cadangan atau kunci rahasia",
   "onboarding.key.steps": "Cadangan dari ekstensi ini? Klik di bawah dan pilih berkasnya. Jika berkata sandi, kami akan menanyakannya.\nHanya kunci rahasia (16–32 huruf dan angka)? Tambah akun → Manual, lalu tempel.\nKode pemulihan dari situs bukan kunci rahasia: itu kode sekali pakai yang disimpan di kertas.",
   "common.support": "Bantuan & dukungan",
+  "settings.syncOverflow": "Terlalu banyak akun untuk disinkronkan — semuanya tetap di komputer ini",
 };
 
 export default strings;

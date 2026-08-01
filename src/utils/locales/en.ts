@@ -214,6 +214,7 @@ const strings: TranslationStrings = {
   "onboarding.key.label": "I have a backup file or a secret key",
   "onboarding.key.steps": "Backup file from this extension? Click below and choose the file. If it's password protected, you'll be asked for that password.\nJust a secret key (16–32 letters and digits)? Use Add account → Manually and paste it in.\nRecovery codes from a website are not secret keys — those are one-time codes you keep on paper, and they don't go here.",
   "common.support": "Help & support",
+  "settings.syncOverflow": "Too many accounts to sync — they stay on this computer",
 };
 
 export default strings;

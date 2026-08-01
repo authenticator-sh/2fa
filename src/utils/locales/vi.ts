@@ -214,6 +214,7 @@ const strings: TranslationStrings = {
   "onboarding.key.label": "Tôi có tệp sao lưu hoặc khóa bí mật",
   "onboarding.key.steps": "Bản sao lưu từ tiện ích này? Bấm bên dưới và chọn tệp. Nếu có mật khẩu, chúng tôi sẽ hỏi.\nChỉ có khóa bí mật (16–32 chữ và số)? Thêm tài khoản → Thủ công rồi dán vào.\nMã khôi phục từ trang web không phải khóa bí mật: đó là mã dùng một lần, giữ trên giấy.",
   "common.support": "Trợ giúp & hỗ trợ",
+  "settings.syncOverflow": "Quá nhiều tài khoản để đồng bộ — chúng ở lại máy tính này",
 };
 
 export default strings;

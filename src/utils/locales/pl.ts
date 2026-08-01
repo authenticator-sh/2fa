@@ -214,6 +214,7 @@ const strings: TranslationStrings = {
   "onboarding.key.label": "Mam plik kopii zapasowej albo klucz",
   "onboarding.key.steps": "Kopia z tego rozszerzenia? Kliknij poniżej i wybierz plik. Jeśli ma hasło, zapytamy o nie.\nTylko klucz (16–32 liter i cyfr)? Dodaj konto → Ręcznie i wklej go.\nKody odzyskiwania ze strony to nie klucze — to jednorazowe kody trzymane na papierze.",
   "common.support": "Pomoc i wsparcie",
+  "settings.syncOverflow": "Zbyt wiele kont do synchronizacji — zostają na tym komputerze",
 };
 
 export default strings;

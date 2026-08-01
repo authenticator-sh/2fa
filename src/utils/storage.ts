@@ -15,9 +15,9 @@ import {
   verifyPassword,
 } from './vault';
 import { replaceAllBackups } from './auto-backup';
+import { isSyncEnabled, setSyncPreference } from './sync-preference';
 
 const STORAGE_KEY = 'authenticator_accounts';
-const SYNC_ENABLED_KEY = 'syncEnabled';
 const SYNC_OVERFLOW_KEY = 'syncOverflow';
 
 // chrome.storage.sync caps a single key at 8 KB but allows 100 KB in total, so
@@ -37,16 +37,18 @@ const USAGE_HISTORY_KEY = 'accountUsageByDomain';
 // account, so it is worth being able to switch off — and switching it off has
 // to remove what is already up there, not merely stop adding to it.
 
-export async function isSyncEnabled(): Promise<boolean> {
-  const result = await chrome.storage.local.get(SYNC_ENABLED_KEY);
-  return result[SYNC_ENABLED_KEY] !== false;
-}
+export { isSyncEnabled };
 
 export async function setSyncEnabled(enabled: boolean): Promise<void> {
-  await chrome.storage.local.set({ [SYNC_ENABLED_KEY]: enabled });
+  await setSyncPreference(enabled);
 
   if (enabled) {
     await pushToSync(await getStoredAccounts()).catch(() => {});
+
+    // The metadata has to go back up as well, or a second device sees the
+    // synced records and has no way to derive the key that opens them.
+    const meta = await getVaultMeta();
+    if (meta) await saveVaultMeta(meta);
     return;
   }
 

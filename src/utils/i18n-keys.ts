@@ -44,6 +44,7 @@ type TranslationKeys = {
   'settings.import': string;
   'settings.sync': string;
   'settings.syncHint': string;
+  'settings.syncOverflow': string;
   'settings.suggested': string;
   'settings.suggestedHint': string;
   'settings.viewMode': string;

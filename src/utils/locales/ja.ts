@@ -214,6 +214,7 @@ const strings: TranslationStrings = {
   "onboarding.key.label": "バックアップファイルか秘密鍵があります",
   "onboarding.key.steps": "この拡張機能のバックアップですか？下のボタンからファイルを選んでください。パスワード付きなら入力を求めます。\n秘密鍵だけ（英数字16〜32文字）ですか？「アカウントを追加」→「手動」で貼り付けてください。\nサイトのリカバリーコードは秘密鍵ではありません。紙で保管する使い捨てコードです。",
   "common.support": "ヘルプとサポート",
+  "settings.syncOverflow": "同期するにはアカウントが多すぎます。このパソコンにのみ保存されます",
 };
 
 export default strings;

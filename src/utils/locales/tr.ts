@@ -214,6 +214,7 @@ const strings: TranslationStrings = {
   "onboarding.key.label": "Yedek dosyam veya gizli anahtarım var",
   "onboarding.key.steps": "Bu uzantıdan bir yedek mi? Aşağıya tıklayıp dosyayı seçin. Parolalıysa parola sorulur.\nSadece gizli anahtar mı (16–32 harf ve rakam)? Hesap ekle → Elle ve yapıştırın.\nSitelerin kurtarma kodları gizli anahtar değildir: kâğıtta saklanan tek kullanımlık kodlardır.",
   "common.support": "Yardım ve destek",
+  "settings.syncOverflow": "Eşitlemek için çok fazla hesap — bu bilgisayarda kalıyorlar",
 };
 
 export default strings;

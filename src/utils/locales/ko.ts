@@ -214,6 +214,7 @@ const strings: TranslationStrings = {
   "onboarding.key.label": "백업 파일이나 비밀 키가 있습니다",
   "onboarding.key.steps": "이 확장 프로그램의 백업인가요? 아래를 눌러 파일을 고르세요. 비밀번호가 걸려 있으면 물어봅니다.\n비밀 키만 있나요(영문·숫자 16~32자)? 계정 추가 → 직접 입력에서 붙여넣으세요.\n사이트의 복구 코드는 비밀 키가 아닙니다. 종이에 보관하는 일회용 코드입니다.",
   "common.support": "도움말 및 지원",
+  "settings.syncOverflow": "동기화하기에 계정이 너무 많습니다. 이 컴퓨터에만 저장됩니다",
 };
 
 export default strings;

@@ -119,6 +119,30 @@ export async function run(): Promise<void> {
   check('stale chunks are removed', afterShrink.length < syncKeys.length, `${afterShrink.length} left`);
   check('the remaining accounts are intact', (await storage.getAccounts()).length === 10);
 
+  // The setting says it removes data from Google's servers. The wrapped master
+  // key is the part that matters most, and it used to come back on the next
+  // password change.
+  scenario('Turning sync off keeps the vault metadata off too');
+  await resetState();
+  await storage.saveAccounts(ACCOUNTS);
+  await (await storage.prepareVault(PASSWORD)).commit();
+  await flush();
+  check('vault metadata reaches sync while sync is on', 'vault_meta' in areas.sync);
+
+  await storage.setSyncEnabled(false);
+  await flush();
+  check('turning sync off removes it', !('vault_meta' in areas.sync));
+
+  await vault.changePassword(PASSWORD, 'an entirely different password');
+  await flush();
+  check('a password change does not push it back', !('vault_meta' in areas.sync));
+  check('and the new password still works locally', !!(await vault.unlockWithPassword('an entirely different password')));
+
+  await storage.setSyncEnabled(true);
+  await flush();
+  check('re-enabling restores the metadata too', 'vault_meta' in areas.sync);
+  check('along with the accounts', syncAccountKeys().length > 0);
+
   scenario('Enabling the vault scrubs the per-site usage history');
   await resetState();
   await storage.saveAccounts(ACCOUNTS);
