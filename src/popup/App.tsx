@@ -689,13 +689,18 @@ function App() {
       </div>
       )}
 
-      <SupportFooter language={language} />
+      {/* Not on the working screen: once there are codes to read, the bar only
+          takes space from them. It belongs where someone is likely to be stuck —
+          an empty list, settings, the FAQ, and the lock screen. */}
+      {(accounts.length === 0 || showSettings || showFAQ) && (
+        <SupportFooter language={language} />
+      )}
 
       {/* Add Button (Floating Action Button) */}
       {!showSettings && !showFAQ && accounts.length > 0 && (
         <button
           onClick={() => setShowAddModal(true)}
-          className="fixed bottom-10 right-4 w-14 h-14 bg-[#4285F4] hover:bg-[#3367D6] text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center"
+          className="fixed bottom-4 right-4 w-14 h-14 bg-[#4285F4] hover:bg-[#3367D6] text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center"
           title={t('accounts.addAccount')}
         >
           <Plus size={24} />
