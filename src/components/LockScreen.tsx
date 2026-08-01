@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { AlertTriangle, Eye, EyeOff, Lock } from 'lucide-react';
+import { AlertTriangle, Download, Eye, EyeOff, Lock } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { createT, type Language } from '@/utils/i18n';
 import { MIN_PASSWORD_LENGTH } from '@/utils/crypto';
 import { resetPasswordWithRecoveryCode } from '@/utils/vault';
+import { downloadBackupFile } from '@/utils/backup-file';
+import { normalizeRecoveryCode } from '@/utils/crypto';
 
 interface LockScreenProps {
   language: Language;
@@ -20,6 +22,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
   const [recoveryCode, setRecoveryCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRecoveryCode, setNewRecoveryCode] = useState<string | null>(null);
+  const [typedRecovery, setTypedRecovery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -60,20 +63,59 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
   };
 
   if (newRecoveryCode) {
+    // The code the user just used is spent, and this replacement exists nowhere
+    // else. A popup dies on any focus loss, so it cannot be dismissed with a
+    // single click — it has to be typed back, same as during setup.
+    const confirmed =
+      normalizeRecoveryCode(typedRecovery) === normalizeRecoveryCode(newRecoveryCode);
+
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center bg-gray-50 dark:bg-dark-900">
-        <Logo size={40} className="mb-3" />
+      <div className="flex-1 flex flex-col justify-center p-6 bg-gray-50 dark:bg-dark-900">
+        <div className="flex items-center gap-2 mb-3">
+          <Logo size={26} />
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+            {t('vault.recovery.title')}
+          </h2>
+        </div>
         <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">{t('vault.recover.rotated')}</p>
-        <div className="w-full bg-gray-100 dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-lg p-3 mb-4">
-          <code className="block text-sm font-mono font-semibold tracking-wider text-gray-900 dark:text-gray-100 break-all">
+
+        <div className="w-full bg-gray-100 dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-lg p-3 mb-2">
+          <code className="block text-center text-sm font-mono font-semibold tracking-wider text-gray-900 dark:text-gray-100 break-all">
             {newRecoveryCode}
           </code>
         </div>
+
+        <button
+          onClick={() =>
+            downloadBackupFile(
+              `${t('vault.recovery.title')}\n\n${newRecoveryCode}\n\n${t('vault.recovery.warning')}\n`,
+              'authenticator-recovery-code.txt'
+            )
+          }
+          className="w-full flex items-center justify-center gap-1.5 text-xs font-medium py-2 mb-3 rounded-lg border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors"
+        >
+          <Download size={14} />
+          {t('vault.recovery.download')}
+        </button>
+
+        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+          {t('vault.recovery.confirm')}
+        </label>
+        <input
+          type="text"
+          value={typedRecovery}
+          onChange={e => setTypedRecovery(e.target.value)}
+          autoFocus
+          spellCheck={false}
+          className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4] mb-3"
+        />
+
         <button
           onClick={onRecovered}
-          className="w-full bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
+          disabled={!confirmed}
+          className="w-full bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
         >
-          {t('update.gotIt')}
+          {t('vault.recovery.finish')}
         </button>
       </div>
     );

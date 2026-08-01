@@ -16,7 +16,7 @@ export interface ParsedQRResult {
 
 export function parseOTPAuthURL(url: string): ParsedOTPAuth | null {
   try {
-    console.log('Parsing OTP Auth URL:', url);
+    // Never log the URL itself — it carries ?secret=.
 
     // Trim whitespace and check if it starts with otpauth://
     const trimmedUrl = url.trim();
@@ -98,7 +98,7 @@ export function parseQRCode(url: string): ParsedQRResult | null {
         period: 30, // Google Authenticator uses 30 seconds by default
       }));
 
-      console.log('Successfully parsed migration accounts:', accounts);
+      console.log(`Parsed ${accounts.length} account(s) from a migration QR`);
 
       return {
         type: 'migration',

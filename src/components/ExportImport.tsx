@@ -7,6 +7,8 @@ import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret } from '@/utils/totp';
 import { createT, type Language } from '@/utils/i18n';
 import { MIN_PASSWORD_LENGTH } from '@/utils/crypto';
+import { describeImport } from '@/utils/import-message';
+import { confirmDialog, promptDialog, toast } from '@/utils/ui-feedback';
 import {
   backupFileName,
   buildEncryptedBackupFile,
@@ -29,14 +31,14 @@ interface ExportImportProps {
  */
 export async function importBackupText(
   text: string,
-  promptForPassword: () => string | null
+  promptForPassword: () => Promise<string | null> | string | null
 ): Promise<boolean> {
   if (!isEncryptedBackupFile(text)) {
     await importAccounts(text);
     return true;
   }
 
-  const password = promptForPassword();
+  const password = await promptForPassword();
   // Cancelled at the password prompt — the caller must not report success.
   if (!password) return false;
 
@@ -61,7 +63,13 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
 
       // Existing safety net: never let a partial export masquerade as a full one.
       if (accounts.length !== currentAccounts.length) {
-        const proceed = confirm(`⚠️ ${t('export.warningPartial', accounts.length, currentAccounts.length)}`);
+        const proceed = await confirmDialog({
+          title: t('export.plainConfirmTitle'),
+          body: t('export.warningPartial', accounts.length, currentAccounts.length),
+          confirmLabel: t('common.confirm'),
+          cancelLabel: t('common.cancel'),
+          danger: true,
+        });
         if (!proceed) return;
       }
 
@@ -75,7 +83,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
       onExportComplete?.();
       setShowExportChoice(false);
       setExportPassword('');
-      alert(encrypted ? t('export.encryptedDone', accounts.length) : `✓ ${t('export.success', accounts.length)}`);
+      toast('success', encrypted ? t('export.encryptedDone', accounts.length) : t('export.success', accounts.length));
     } catch (error) {
       console.error('Export failed:', error);
       setExportError(t('export.failed'));
@@ -101,17 +109,23 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
         await handleQRImport(file);
       } else {
         const imported = await importBackupText(await file.text(), () =>
-          prompt(`${t('import.passwordTitle')}\n\n${t('import.passwordText')}`)
+          promptDialog({
+            title: t('import.passwordTitle'),
+            body: t('import.passwordText'),
+            password: true,
+            confirmLabel: t('common.ok'),
+            cancelLabel: t('common.cancel'),
+          })
         );
         if (imported) {
           await markBackupDone(0); // Mark as backed up to suppress reminder
           onImportComplete();
-          alert(t('import.success'));
+          toast('success', t('import.success'));
         }
       }
     } catch (error) {
       console.error('Import failed:', error);
-      alert(error instanceof Error && error.name === 'WrongExportPasswordError'
+      toast('error', error instanceof Error && error.name === 'WrongExportPasswordError'
         ? t('import.wrongPassword')
         : t('import.failed'));
     }
@@ -145,14 +159,14 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
         // Add all accounts at once
         const importResult = await addMultipleAccounts(accountsToAdd);
         onImportComplete();
-        alert(t('import.qrSuccess', importResult.added));
+        toast(importResult.added > 0 ? 'success' : 'info', describeImport(importResult, language));
       } else {
         throw new Error(t('addAccount.errorInvalidQR'));
       }
     } catch (error) {
       console.error('QR import failed:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(t('import.qrFailed', errorMessage));
+      toast('error', t('import.qrFailed', errorMessage));
     }
   };
 

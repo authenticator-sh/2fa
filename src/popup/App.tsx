@@ -13,6 +13,7 @@ import { UpdateModal } from '@/components/UpdateModal';
 import { PromoBanner } from '@/components/PromoBanner';
 import { Logo } from '@/components/Logo';
 import { LanguageSelector } from '@/components/LanguageSelector';
+import { SettingToggle } from '@/components/SettingToggle';
 import { LockScreen } from '@/components/LockScreen';
 import { VaultPrompt } from '@/components/VaultPrompt';
 import { VaultSettings } from '@/components/VaultSettings';
@@ -22,20 +23,32 @@ import { createT, loadLanguage, type Language } from '@/utils/i18n';
 import { addMultipleAccounts, getAccounts } from '@/utils/storage';
 import { shouldShowBackupReminder, markBackupDone } from '@/utils/backup-reminder';
 import { shouldShowVaultPrompt, markVaultPromptShown } from '@/utils/vault-prompt';
+import { describeImport } from '@/utils/import-message';
+import { confirmDialog, promptDialog, toast } from '@/utils/ui-feedback';
+import { FeedbackHost } from '@/components/FeedbackHost';
 import { shouldShowPromoBanner, recordFirstOpen } from '@/utils/promo-banner';
 import { parseQRCode, generateRandomColor } from '@/utils/qr-parser';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, loadTimeOffset } from '@/utils/totp';
 import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
+import { isSyncEnabled, setSyncEnabled } from '@/utils/storage';
 import { WHATS_NEW } from '@/utils/update-notes';
 import type { Account } from '@/types';
 
-const REVIEW_URL = 'https://authenticator.sh/rate';
+// Straight to the Web Store review form: authenticator.sh/rate is a landing
+// page, and every extra hop between "tapped 4 stars" and the review box costs
+// reviews.
+const REVIEW_URL = 'https://chromewebstore.google.com/detail/2fa/ebhcbenbgjmaebpgbldimndmfomjmphd/reviews';
+const FEEDBACK_URL = 'https://authenticator.sh/rate';
 
 function App() {
   const vault = useVault();
   const { accounts, loading, error, addAccount, deleteAccount, updateAccount, reorderAccounts, reload } =
-    useAccounts(vault.enabled === true && vault.locked);
+    // Unknown vault state counts as locked. `enabled` starts as null while
+    // storage is read, and `null === true` is false — so the account list used
+    // to start loading in parallel with the vault check and could win the race,
+    // painting live codes over a locked vault.
+    useAccounts(vault.enabled === null || (vault.enabled && vault.locked));
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -50,6 +63,7 @@ function App() {
   const [showVaultPrompt, setShowVaultPrompt] = useState(false);
   const [showVaultSetup, setShowVaultSetup] = useState(false);
   const [suggestionsOn, setSuggestionsOn] = useState(true);
+  const [syncOn, setSyncOn] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
   const [currentDomain, setCurrentDomain] = useState<string | null>(null);
   const [suggestedAccountId, setSuggestedAccountId] = useState<string | null>(null);
@@ -79,7 +93,15 @@ function App() {
 
   useEffect(() => {
     areSuggestionsEnabled().then(setSuggestionsOn);
+    isSyncEnabled().then(setSyncOn);
   }, []);
+
+  const handleSyncToggle = async () => {
+    const next = !syncOn;
+    setSyncOn(next);
+    await setSyncEnabled(next);
+    toast('success', t('vault.settings.saved'));
+  };
 
   const handleSuggestionsToggle = async () => {
     const next = !suggestionsOn;
@@ -138,24 +160,34 @@ function App() {
 
   const handleAddAccount = async (account: Account | Account[]) => {
     if (Array.isArray(account)) {
-      await addMultipleAccounts(account);
+      const result = await addMultipleAccounts(account);
       reload();
+      toast(result.added > 0 ? 'success' : 'info', describeImport(result, language));
     } else {
       await addAccount(account);
+      toast('success', t('accounts.added'));
     }
   };
 
   const handleDeleteAccount = async (id: string) => {
     const account = accounts.find(a => a.id === id);
-    const confirmMessage = t('accounts.deleteConfirmMsg', account?.issuer || '', account?.name || '');
+    const confirmed = await confirmDialog({
+      title: t('accounts.deleteAccount'),
+      body: t('accounts.deleteConfirmMsg', account?.issuer || '', account?.name || ''),
+      confirmLabel: t('accounts.deleteAccount'),
+      cancelLabel: t('common.cancel'),
+      danger: true,
+    });
 
-    if (confirm(confirmMessage)) {
+    if (confirmed) {
       await deleteAccount(id);
+      toast('success', t('accounts.deleted'));
     }
   };
 
   const handleEditAccount = async (id: string, updates: Partial<Account>) => {
     await updateAccount(id, updates);
+    toast('success', t('accounts.updated'));
   };
 
   const handleDragStart = (_e: React.DragEvent, id: string) => {
@@ -193,19 +225,26 @@ function App() {
         await handleQRImport(file);
       } else {
         const imported = await importBackupText(await file.text(), () =>
-          prompt(`${t('import.passwordTitle')}\n\n${t('import.passwordText')}`)
+          promptDialog({
+            title: t('import.passwordTitle'),
+            body: t('import.passwordText'),
+            password: true,
+            confirmLabel: t('common.ok'),
+            cancelLabel: t('common.cancel'),
+          })
         );
         if (imported) {
           const currentAccounts = await getAccounts();
           await markBackupDone(currentAccounts.length);
           setShowBackupReminder(false);
           reload();
-          alert(t('import.success'));
+          toast('success', t('import.success'));
         }
       }
     } catch (error) {
       console.error('Import failed:', error);
-      alert(
+      toast(
+        'error',
         error instanceof Error && error.name === 'WrongExportPasswordError'
           ? t('import.wrongPassword')
           : t('import.failed')
@@ -236,16 +275,16 @@ function App() {
           color: generateRandomColor(),
         }));
 
-        await addMultipleAccounts(accountsToAdd);
+        const result = await addMultipleAccounts(accountsToAdd);
         reload();
-        alert(t('import.qrSuccess', accountsToAdd.length));
+        toast(result.added > 0 ? 'success' : 'info', describeImport(result, language));
       } else {
         throw new Error(t('addAccount.errorInvalidQR'));
       }
     } catch (error) {
       console.error('QR import failed:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(t('import.qrFailed', errorMessage));
+      toast('error', t('import.qrFailed', errorMessage));
     }
   };
 
@@ -274,12 +313,13 @@ function App() {
     });
   }, []);
 
+  // Happy users go straight to the Web Store review box; unhappy ones go to our
+  // own feedback page instead, where the complaint reaches us rather than
+  // becoming a public one-star review.
   const handleRate = (stars: number) => {
     chrome.storage.local.set({ reviewDismissed: true });
     setReviewDismissed(true);
-    if (stars >= 4) {
-      chrome.tabs.create({ url: REVIEW_URL });
-    }
+    chrome.tabs.create({ url: stars >= 4 ? REVIEW_URL : FEEDBACK_URL });
   };
 
   // Check if backup reminder should be shown
@@ -342,6 +382,17 @@ function App() {
     getSuggestedAccountId(currentDomain, accounts).then(setSuggestedAccountId);
   }, [currentDomain, accounts, suggestionsOn]);
 
+  // Nothing renders until we know whether there is a vault: the alternative is
+  // a flash of either the account list or the "no accounts yet" empty state,
+  // and on a 2FA app the latter reads as "my accounts are gone".
+  if (vault.enabled === null) {
+    return (
+      <div className={`w-[400px] min-h-[500px] max-h-[600px] flex items-center justify-center bg-white dark:bg-dark-900 ${darkMode ? 'dark' : ''}`}>
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 dark:border-dark-600 border-t-gray-900 dark:border-t-gray-300" />
+      </div>
+    );
+  }
+
   // A locked vault replaces the whole UI: no account list, no search, no
   // add button. useAccounts has already dropped the decrypted accounts from
   // state, so there is nothing here to leak.
@@ -368,6 +419,7 @@ function App() {
             </div>
           </div>
           <LockScreen language={language} onUnlock={vault.unlock} onRecovered={vault.refresh} />
+          <FeedbackHost />
         </div>
       </div>
     );
@@ -492,32 +544,27 @@ function App() {
         />
       )}
 
-      {/* Settings Panel */}
+      {/* Settings Panel — a screen of its own: it takes the scrollable area and
+          the account list is not rendered underneath it. Codes and settings
+          sharing one scroll made the popup read as a single long page. */}
       {showSettings && (
-        <div className="p-4 bg-gray-50 dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600">
+        <div className="flex-1 overflow-y-auto p-4 bg-gray-50 dark:bg-dark-800">
           <h3 className="text-gray-900 dark:text-gray-100 font-medium mb-3 text-sm">{t('settings.backupRestore')}</h3>
           <ExportImport onImportComplete={reload} onExportComplete={() => setShowBackupReminder(false)} language={language} />
 
-          <div className="mt-4 flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <span className="text-sm text-gray-700 dark:text-gray-300">{t('settings.suggested')}</span>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{t('settings.suggestedHint')}</p>
-            </div>
-            <button
-              role="switch"
-              aria-checked={suggestionsOn}
-              onClick={handleSuggestionsToggle}
-              className={`relative w-9 h-5 rounded-full flex-shrink-0 mt-0.5 transition-colors ${
-                suggestionsOn ? 'bg-[#4285F4]' : 'bg-gray-300 dark:bg-dark-500'
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
-                  suggestionsOn ? 'translate-x-[18px]' : 'translate-x-0.5'
-                }`}
-              />
-            </button>
-          </div>
+          <SettingToggle
+            label={t('settings.sync')}
+            hint={t('settings.syncHint')}
+            checked={syncOn}
+            onChange={handleSyncToggle}
+          />
+
+          <SettingToggle
+            label={t('settings.suggested')}
+            hint={t('settings.suggestedHint')}
+            checked={suggestionsOn}
+            onChange={handleSuggestionsToggle}
+          />
 
           <div className="mt-4 flex items-center justify-between">
             <span className="text-sm text-gray-700 dark:text-gray-300">{t('settings.viewMode')}</span>
@@ -555,6 +602,7 @@ function App() {
       {showFAQ && <FAQ language={language} openId={faqOpenId} />}
 
       {/* Accounts List */}
+      {!showSettings && (
       <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-dark-900">
         {loading ? (
           <div className="flex items-center justify-center h-full">
@@ -654,6 +702,7 @@ function App() {
           </div>
         )}
       </div>
+      )}
 
       {/* Add Button (Floating Action Button) */}
       {!showSettings && !showFAQ && accounts.length > 0 && (
@@ -717,6 +766,8 @@ function App() {
         onChange={handleImportFile}
         className="hidden"
       />
+
+      <FeedbackHost />
       </div>
     </div>
   );

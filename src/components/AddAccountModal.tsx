@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Upload, Monitor, Loader2 } from 'lucide-react';
+import { X, Upload, Monitor, Loader2, Camera } from 'lucide-react';
 import type { Account } from '@/types';
 import { validateSecret, cleanSecret } from '@/utils/totp';
 import { parseQRCode, generateRandomColor } from '@/utils/qr-parser';
@@ -85,7 +85,7 @@ export function AddAccountModal({ onClose, onAdd, language }: AddAccountModalPro
 
       const parsed = parseQRCode(result);
       if (parsed) {
-        console.log('Parsed QR data:', parsed);
+        // Parsed QR data contains the secret; not logged.
 
         // Handle migration (multiple accounts)
         if (parsed.type === 'migration' && parsed.accounts.length > 1) {
@@ -125,7 +125,7 @@ export function AddAccountModal({ onClose, onAdd, language }: AddAccountModalPro
         await onAdd(account);
         onClose();
       } else {
-        console.error('Failed to parse QR code. Scanned content:', result);
+        console.error('Failed to parse QR code (content withheld)');
         setError(
           `${t('addAccount.errorInvalidQR')}.\n` +
           `Scanned: ${result.substring(0, 100)}${result.length > 100 ? '...' : ''}`
@@ -404,6 +404,14 @@ export function AddAccountModal({ onClose, onAdd, language }: AddAccountModalPro
                 </div>
                 <span className="relative bg-white dark:bg-dark-800 px-3 text-xs text-gray-500 dark:text-gray-400">{t('accounts.or')}</span>
               </div>
+
+              <button
+                onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('scan.html') })}
+                className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 hover:bg-gray-50 dark:hover:bg-dark-600 text-gray-700 dark:text-gray-200 font-medium text-sm transition-all"
+              >
+                <Camera size={16} />
+                {t('addAccount.scanWithCamera')}
+              </button>
 
               <button
                 onClick={handleScanFromScreen}

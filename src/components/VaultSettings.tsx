@@ -4,6 +4,7 @@ import { createT, type Language } from '@/utils/i18n';
 import { MIN_PASSWORD_LENGTH } from '@/utils/crypto';
 import { AUTO_LOCK_OPTIONS, changePassword } from '@/utils/vault';
 import { disableVault } from '@/utils/storage';
+import { confirmDialog, promptDialog, toast } from '@/utils/ui-feedback';
 
 interface VaultSettingsProps {
   language: Language;
@@ -47,7 +48,8 @@ export function VaultSettings({
     setBusy(true);
     try {
       await changePassword(currentPassword, newPassword);
-      setMessage({ text: t('vault.settings.saved'), ok: true });
+      toast('success', t('vault.settings.saved'));
+      setMessage(null);
       setCurrentPassword('');
       setNewPassword('');
       setShowChangeForm(false);
@@ -60,17 +62,31 @@ export function VaultSettings({
   };
 
   const handleDisable = async () => {
-    if (!confirm(t('vault.settings.disableConfirm'))) return;
+    const confirmed = await confirmDialog({
+      title: t('vault.settings.disable'),
+      body: t('vault.settings.disableConfirm'),
+      confirmLabel: t('vault.settings.disable'),
+      cancelLabel: t('common.cancel'),
+      danger: true,
+    });
+    if (!confirmed) return;
 
     // The password is required even while unlocked: turning this off rewrites
     // every secret in the clear, which must never be one stray click away.
-    const password = prompt(t('vault.settings.currentPassword'));
+    const password = await promptDialog({
+      title: t('vault.settings.disable'),
+      body: t('vault.settings.currentPassword'),
+      password: true,
+      confirmLabel: t('common.confirm'),
+      cancelLabel: t('common.cancel'),
+    });
     if (!password) return;
 
     setBusy(true);
     try {
       await disableVault(password);
       setMessage(null);
+      toast('success', t('vault.settings.saved'));
       onChanged();
     } catch {
       setMessage({ text: t('vault.lock.wrong'), ok: false });

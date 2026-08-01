@@ -2,8 +2,14 @@ import { useState } from 'react';
 import { AlertTriangle, Check, Download, Eye, EyeOff, Lock, ShieldCheck } from 'lucide-react';
 import { createT, type Language } from '@/utils/i18n';
 import { assessPasswordStrength, MIN_PASSWORD_LENGTH, normalizeRecoveryCode } from '@/utils/crypto';
-import { enableVault } from '@/utils/storage';
+import { prepareVault, type PreparedVault } from '@/utils/storage';
 import { downloadBackupFile } from '@/utils/backup-file';
+import {
+  AUTO_LOCK_OPTIONS,
+  DEFAULT_AUTO_LOCK_MINUTES,
+  lock as lockVault,
+  setAutoLockMinutes,
+} from '@/utils/vault';
 
 interface VaultSetupModalProps {
   language: Language;
@@ -28,9 +34,11 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState('');
+  const [prepared, setPrepared] = useState<PreparedVault | null>(null);
   const [typedRecovery, setTypedRecovery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [autoLock, setAutoLock] = useState(DEFAULT_AUTO_LOCK_MINUTES);
 
   const strength = assessPasswordStrength(password);
   const strengthStyle = STRENGTH_STYLE[strength];
@@ -48,9 +56,33 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
     setBusy(true);
     setError(null);
     try {
-      const { recoveryCode: code } = await enableVault(password);
-      setRecoveryCode(code);
+      // Builds and verifies the vault in memory only. Nothing is written until
+      // the user has confirmed they saved the recovery code below — otherwise a
+      // popup closed at the wrong moment strands them with an encrypted store
+      // and no way back in.
+      const result = await prepareVault(password);
+      setPrepared(result);
+      setRecoveryCode(result.recoveryCode);
       setStep('recovery');
+    } catch (err) {
+      console.error('Failed to prepare vault:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleConfirmRecovery = async () => {
+    if (normalizeRecoveryCode(typedRecovery) !== normalizeRecoveryCode(recoveryCode)) {
+      setError(t('vault.recovery.mismatch'));
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      await prepared!.commit();
+      setStep('done');
     } catch (err) {
       console.error('Failed to enable vault:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -59,16 +91,27 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
     }
   };
 
-  const handleConfirmRecovery = () => {
-    if (normalizeRecoveryCode(typedRecovery) !== normalizeRecoveryCode(recoveryCode)) {
-      setError(t('vault.recovery.mismatch'));
-      return;
-    }
-    setError(null);
-    setStep('done');
+  const handleFinish = () => {
+    onEnabled();
+    onClose();
   };
 
-  const handleFinish = () => {
+  const autoLockLabel = (minutes: number) => {
+    if (minutes === 0) return t('vault.settings.autoLockEveryOpen');
+    if (minutes < 0) return t('vault.settings.autoLockBrowser');
+    return t('vault.settings.autoLockMins', minutes);
+  };
+
+  const handleAutoLockChange = async (minutes: number) => {
+    setAutoLock(minutes);
+    await setAutoLockMinutes(minutes);
+  };
+
+  // Locking straight away answers the question every user has at this point —
+  // "did that actually do anything?" — and proves they can still get back in
+  // with the password they just chose, while they still remember typing it.
+  const handleLockNow = async () => {
+    await lockVault();
     onEnabled();
     onClose();
   };
@@ -219,10 +262,10 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
 
               <button
                 onClick={handleConfirmRecovery}
-                disabled={!typedRecovery}
+                disabled={busy || !typedRecovery}
                 className="w-full bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
               >
-                {t('vault.recovery.finish')}
+                {busy ? t('vault.setup.working') : t('vault.recovery.finish')}
               </button>
             </>
           )}
@@ -235,13 +278,44 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
                   {t('vault.done.title')}
                 </h2>
               </div>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{t('vault.done.text')}</p>
-              <button
-                onClick={handleFinish}
-                className="w-full bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
-              >
-                {t('update.gotIt')}
-              </button>
+              <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">{t('vault.done.text')}</p>
+
+              <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                {t('vault.done.askTitle')}
+              </p>
+              <div className="grid grid-cols-2 gap-1.5 mb-4">
+                {AUTO_LOCK_OPTIONS.map(minutes => (
+                  <button
+                    key={minutes}
+                    type="button"
+                    onClick={() => handleAutoLockChange(minutes)}
+                    className={`text-xs font-medium py-2 px-2 rounded-lg border transition-colors ${
+                      autoLock === minutes
+                        ? 'border-[#4285F4] bg-blue-50 dark:bg-blue-900/20 text-[#4285F4]'
+                        : 'border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
+                    }`}
+                  >
+                    {autoLockLabel(minutes)}
+                  </button>
+                ))}
+              </div>
+
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-2">{t('vault.done.tryHint')}</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleLockNow}
+                  className="flex-1 flex items-center justify-center gap-1.5 text-sm font-medium py-2.5 rounded-lg border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors"
+                >
+                  <Lock size={14} />
+                  {t('vault.settings.lockNow')}
+                </button>
+                <button
+                  onClick={handleFinish}
+                  className="flex-1 bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
+                >
+                  {t('update.gotIt')}
+                </button>
+              </div>
             </>
           )}
         </div>

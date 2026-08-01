@@ -21,6 +21,11 @@ function copyFilesPlugin() {
       );
       writeFileSync(resolve(__dirname, 'dist/popup.html'), popupHtml);
 
+      const scanHtml = rewriteAbsoluteAssets(
+        readFileSync(resolve(__dirname, 'dist/src/scan/index.html'), 'utf-8')
+      );
+      writeFileSync(resolve(__dirname, 'dist/scan.html'), scanHtml);
+
       // The generated HTML has been rewritten and moved to the dist root; the
       // nested copy would otherwise ship as dead weight inside the package.
       rmSync(resolve(__dirname, 'dist/src'), { recursive: true, force: true });
@@ -90,6 +95,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'src/popup/index.html'),
+        scan: resolve(__dirname, 'src/scan/index.html'),
         'background/service-worker': resolve(__dirname, 'src/background/service-worker.ts'),
       },
       output: {

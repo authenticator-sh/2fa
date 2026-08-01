@@ -20,6 +20,16 @@ export interface EncryptedAccount {
   id: string;
   fp: string;
   enc: string;
+  /**
+   * Id of the vault that produced this ciphertext.
+   *
+   * Without it there is no way to tell "wrong key" from "corrupt record", so a
+   * record encrypted by a vault that no longer exists — one left behind in
+   * chrome.storage.sync after the vault was disabled, say — looks like
+   * corruption and gets dropped. Records whose vault id does not match the
+   * active vault are quarantined instead of decrypted.
+   */
+  v?: string;
 }
 
 /** What getAccounts reads and saveAccounts writes: plaintext or encrypted. */

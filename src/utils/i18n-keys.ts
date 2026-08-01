@@ -31,6 +31,8 @@ type TranslationKeys = {
   'settings.backupRestore': string;
   'settings.export': string;
   'settings.import': string;
+  'settings.sync': string;
+  'settings.syncHint': string;
   'settings.suggested': string;
   'settings.suggestedHint': string;
   'settings.viewMode': string;
@@ -172,6 +174,8 @@ type VaultTranslationKeys = {
 
   'vault.done.title': string;
   'vault.done.text': string;
+  'vault.done.askTitle': string;
+  'vault.done.tryHint': string;
 
   'vault.lock.title': string;
   'vault.lock.subtitle': string;
@@ -223,6 +227,30 @@ type VaultTranslationKeys = {
   'update.feature.encryptedExport': string;
   'update.feature.recovery': string;
   'update.feature.suggestedToggle': string;
+  'update.feature.cameraScan': string;
+  'import.qrNothingNew': string;
+  'import.qrSuccessPartial': string;
+  'common.ok': string;
+  'common.confirm': string;
+  'accounts.added': string;
+  'accounts.updated': string;
+  'accounts.deleted': string;
+  'export.plainConfirmTitle': string;
+  'addAccount.scanWithCamera': string;
+  'scan.title': string;
+  'scan.hint': string;
+  'scan.starting': string;
+  'scan.retry': string;
+  'scan.done': string;
+  'scan.scanAnother': string;
+  'scan.addedBody': string;
+  'scan.deniedTitle': string;
+  'scan.deniedBody': string;
+  'scan.noCameraTitle': string;
+  'scan.noCameraBody': string;
+  'scan.lockedTitle': string;
+  'scan.lockedBody': string;
+  'scan.errorTitle': string;
 };
 
 /** A complete set of strings for one language. */

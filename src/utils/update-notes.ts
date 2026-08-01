@@ -6,7 +6,8 @@ type UpdateHighlightKey =
   | 'update.feature.vault'
   | 'update.feature.encryptedExport'
   | 'update.feature.recovery'
-  | 'update.feature.suggestedToggle';
+  | 'update.feature.suggestedToggle'
+  | 'update.feature.cameraScan';
 
 // Maps an extension version to the changelog bullets shown in the "What's New"
 // modal right after that version is installed. Versions with no entry here
@@ -19,5 +20,6 @@ export const WHATS_NEW: Record<string, UpdateHighlightKey[]> = {
     'update.feature.encryptedExport',
     'update.feature.recovery',
     'update.feature.suggestedToggle',
+    'update.feature.cameraScan',
   ],
 };

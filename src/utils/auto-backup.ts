@@ -121,6 +121,38 @@ async function cleanOldBackups(): Promise<void> {
 }
 
 /**
+ * Replace every snapshot with a single new one, in one transaction.
+ *
+ * Used when the vault is switched on or off, where the existing snapshots are
+ * in the wrong form: cleartext copies that would survive encryption, or
+ * ciphertext nothing can open once the key metadata is gone. Doing the clear
+ * and the write separately left a window with no backups at all, which is
+ * precisely the wrong moment to be interrupted.
+ */
+export async function replaceAllBackups(accounts: StoredAccount[]): Promise<void> {
+  const db = await openDB();
+  const transaction = db.transaction([STORE_NAME], 'readwrite');
+  const store = transaction.objectStore(STORE_NAME);
+
+  store.clear();
+  store.add({
+    id: `backup_${Date.now()}`,
+    timestamp: Date.now(),
+    accounts,
+    version: chrome.runtime.getManifest().version,
+    accountCount: accounts.length,
+  } satisfies Backup);
+
+  await new Promise<void>((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+
+  db.close();
+}
+
+/**
  * Delete every snapshot. Called when the vault is switched on or off, where
  * the existing snapshots are in the wrong form: cleartext copies that would
  * survive encryption, or ciphertext nothing can open once the key metadata is

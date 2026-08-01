@@ -198,7 +198,7 @@ function parseOtpParameters(buffer: Uint8Array): MigrationAccount {
  */
 export function parseMigrationURL(url: string): MigrationAccount[] | null {
   try {
-    console.log('Parsing migration URL:', url);
+    // The migration payload holds every secret — log nothing from it.
 
     // Check if it's a migration URL
     if (!url.startsWith('otpauth-migration://')) {
@@ -252,7 +252,7 @@ export function parseMigrationURL(url: string): MigrationAccount[] | null {
       }
     }
 
-    console.log('Parsed migration accounts:', accounts);
+    console.log(`Migration parser recovered ${accounts.length} account(s)`);
     return accounts.length > 0 ? accounts : null;
   } catch (error) {
     console.error('Error parsing migration URL:', error);

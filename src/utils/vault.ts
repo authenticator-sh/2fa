@@ -51,6 +51,17 @@ export interface VaultMeta {
   recoverySalt: string;
   wrappedByRecovery: string;
   createdAt: number;
+  /**
+   * Bumped on every write. Without it, a device that cached the metadata from
+   * sync never noticed a password change made elsewhere: the user's new, correct
+   * password was rejected here forever, while the old one kept unwrapping the
+   * same master key — a live backdoor on every other device.
+   */
+  updatedAt?: number;
+}
+
+function metaVersion(meta: VaultMeta): number {
+  return meta.updatedAt ?? meta.createdAt;
 }
 
 interface SessionState {
@@ -116,23 +127,28 @@ async function writeSession(state: SessionState | null): Promise<void> {
 // --- vault metadata -------------------------------------------------------
 
 export async function getVaultMeta(): Promise<VaultMeta | null> {
-  const local = await chrome.storage.local.get(VAULT_META_KEY);
-  if (local[VAULT_META_KEY]) return local[VAULT_META_KEY] as VaultMeta;
+  const localMeta = (await chrome.storage.local.get(VAULT_META_KEY))[VAULT_META_KEY] as
+    | VaultMeta
+    | undefined;
 
-  // A second device with a fresh install has the encrypted records from sync
-  // but no local metadata — without this it could never derive the master key.
+  let syncedMeta: VaultMeta | undefined;
   try {
-    const synced = await chrome.storage.sync.get(VAULT_META_KEY);
-    const meta = synced[VAULT_META_KEY] as VaultMeta | undefined;
-    if (meta) {
-      await chrome.storage.local.set({ [VAULT_META_KEY]: meta });
-      return meta;
-    }
+    syncedMeta = (await chrome.storage.sync.get(VAULT_META_KEY))[VAULT_META_KEY] as
+      | VaultMeta
+      | undefined;
   } catch {
-    // Sync unavailable — treat as no vault.
+    // Sync unavailable — fall back to whatever is local.
   }
 
-  return null;
+  // Always compare, never just cache. A fresh install on a second device has
+  // the synced records but no local metadata; an existing device may hold
+  // metadata that a password change elsewhere has superseded.
+  if (syncedMeta && (!localMeta || metaVersion(syncedMeta) > metaVersion(localMeta))) {
+    await chrome.storage.local.set({ [VAULT_META_KEY]: syncedMeta });
+    return syncedMeta;
+  }
+
+  return localMeta ?? null;
 }
 
 export async function isVaultEnabled(): Promise<boolean> {
@@ -140,6 +156,7 @@ export async function isVaultEnabled(): Promise<boolean> {
 }
 
 export async function saveVaultMeta(meta: VaultMeta): Promise<void> {
+  meta = { ...meta, updatedAt: Date.now() };
   await chrome.storage.local.set({ [VAULT_META_KEY]: meta });
   // Metadata is a few hundred bytes — it fits sync's per-item limit even when
   // the account list does not, so cross-device unlock keeps working.
@@ -178,6 +195,7 @@ export async function createVaultMeta(password: string): Promise<{
     recoverySalt: toBase64(recoverySalt),
     wrappedByRecovery: await wrapMasterKey(masterKeyBytes, recoveryKey),
     createdAt: Date.now(),
+    updatedAt: Date.now(),
   };
 
   return { meta, masterKeyBytes, recoveryCode };

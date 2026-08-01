@@ -1,6 +1,6 @@
 # 2FA Authenticator
 
-A privacy-focused TOTP/HOTP authenticator for Chrome. All secrets stay in your browser — no servers, no tracking, no telemetry.
+A privacy-focused TOTP/HOTP authenticator for Chrome. We operate no servers, collect no analytics and receive none of your data. Accounts are stored by the browser, and optionally synced through your own Google account — see [Where your data lives](#where-your-data-lives).
 
 - **Chrome Web Store:** [2FA Authenticator](https://chromewebstore.google.com/detail/2fa/ebhcbenbgjmaebpgbldimndmfomjmphd)
 - **Website:** [authenticator.sh](https://authenticator.sh)
@@ -9,7 +9,7 @@ A privacy-focused TOTP/HOTP authenticator for Chrome. All secrets stay in your b
 ## Features
 
 - TOTP and HOTP code generation (SHA-1, SHA-256, SHA-512; 6 or 8 digits)
-- QR code import from image upload or visible tab
+- QR code import from image upload, the visible tab, or a camera
 - **Optional password protection** — AES-256-GCM encryption of every account
   record and backup, with a recovery code so a forgotten password is not a
   dead end (see [Password protection](#password-protection))
@@ -23,17 +23,24 @@ A privacy-focused TOTP/HOTP authenticator for Chrome. All secrets stay in your b
 
 The extension requests the **minimum permissions** required for its functionality:
 
-| Permission   | Reason                                                                |
-|--------------|-----------------------------------------------------------------------|
-| `storage`    | Store account secrets and settings locally in `chrome.storage`        |
-| `activeTab`  | Allow QR scan from the current tab (only after explicit user action)  |
+| Permission   | Reason                                                                          |
+|--------------|---------------------------------------------------------------------------------|
+| `storage`    | Store accounts and settings in `chrome.storage` (local, session and optional sync) |
+| `activeTab`  | Read the current tab's hostname to highlight the matching account, and capture the tab for QR scanning |
+
+Camera scanning needs no manifest permission: it uses the browser's standard
+camera prompt on an extension page, granted per extension origin and revocable
+in site settings. It is never requested until the scanner is opened.
 
 The extension does **not** request:
 - `host_permissions` of any kind
 - Content scripts on web pages
 - `tabs`, `cookies`, `webRequest`, or any other broad permissions
 
-This means the extension **cannot read or modify any website** you visit.
+This means the extension **cannot read or modify the content of any page** you
+visit. Under `activeTab` it does read the active tab's hostname when the popup
+is open, to highlight the account matching that site; that behaviour can be
+switched off in Settings, which also erases the history it collected.
 
 ## Password protection
 
@@ -108,6 +115,18 @@ The resulting `dist/` directory is the unpacked extension.
 npm run dev
 ```
 
+### Tests
+
+```bash
+npm test
+```
+
+End-to-end scenarios for the storage and vault paths — enabling, locking,
+password change, recovery-code reset, encrypted export, disabling — run against
+real WebCrypto with `chrome.storage` and IndexedDB mocked. These cover the code
+where a bug means permanent loss of a user's 2FA seeds, so they run the real
+modules rather than stubs.
+
 ## Verifying the Chrome Web Store Build
 
 To verify that the version published on the Chrome Web Store was built from this source code:
@@ -133,6 +152,8 @@ src/
 ├── popup/
 │   ├── App.tsx              # Main UI
 │   └── index.tsx
+├── scan/
+│   └── App.tsx              # Camera QR scanner (own tab — see the file header)
 ├── components/              # React components
 ├── hooks/
 │   ├── useAccounts.ts       # Account state + auto-backup
@@ -165,11 +186,36 @@ The extension makes **no automatic network requests** during normal use. The onl
 | `https://worldtimeapi.org/api/timezone/...` | Popup open (optional, cached) | Clock drift detection for TOTP |
 | `https://timeapi.io/api/time/current/zone`  | Fallback if the above fails   | Clock drift detection for TOTP |
 
+Camera scanning uses `getUserMedia` on an extension page opened in a tab. That
+needs no manifest permission — it goes through the browser's standard camera
+prompt, granted per extension origin and revocable in site settings. It is
+never requested until the user opens the scanner.
+
 The clock-drift requests are unauthenticated GETs that carry no user data, are
 cached, and fail silently. No fonts, scripts, or styles are loaded from remote
 hosts — everything needed to render the popup is bundled.
 
-All TOTP secrets, account data, and backups stay on the device.
+## Where your data lives
+
+| Store | Contents | Default |
+|-------|----------|---------|
+| `chrome.storage.local` | Accounts (encrypted when password protection is on), settings, per-site usage history | Always used; primary |
+| `chrome.storage.session` | The unlocked master key, memory only, cleared when the browser closes | Only while unlocked |
+| `chrome.storage.sync` | A copy of the accounts and the vault metadata, replicated by Chrome **through the user's own Google account** | On, switchable off |
+| IndexedDB | Seven rolling snapshots, in the same form as the primary store | Always used |
+
+Two consequences worth stating plainly:
+
+- **With password protection off, accounts sit in sync in the clear**, which
+  means Chrome replicates them to Google. That is the user's own Google account
+  and we never see them, but it is not "on the device only". Turning password
+  protection on encrypts them before they are ever handed to sync; turning sync
+  off in Settings stops the replication and removes what is already there.
+- **The per-site usage history is not covered by the vault** while it is being
+  collected. Enabling password protection deletes it, and it can be switched off
+  independently.
+
+We operate no servers and receive no user data on any path.
 
 ## Security
 
