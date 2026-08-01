@@ -5,6 +5,7 @@ A privacy-focused TOTP/HOTP authenticator for Chrome. We operate no servers, col
 - **Chrome Web Store:** [2FA Authenticator](https://chromewebstore.google.com/detail/2fa/ebhcbenbgjmaebpgbldimndmfomjmphd)
 - **Website:** [authenticator.sh](https://authenticator.sh)
 - **Security policy:** [authenticator.sh/security](https://authenticator.sh/security)
+- **Privacy policy:** [authenticator.sh/privacy](https://authenticator.sh/privacy)
 
 ## Features
 
