@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "When should we ask for your password?",
   "vault.done.tryHint": "Lock it now to check your password works.",
   "vault.done.text": "Your codes are now scrambled on this device and in sync. Choose when we should ask for the password — you can change this later in Settings.",
+  "onboarding.title": "Let's add your first account",
+  "onboarding.question": "Where are your codes right now?",
+  "onboarding.back": "Back",
+  "onboarding.ga.label": "In Google Authenticator on my phone",
+  "onboarding.ga.steps": "Open Google Authenticator on your phone.\nTap the ⋮ menu (top right) → Transfer accounts → Export accounts.\nPick the accounts and tap Next. Your phone now shows a QR code.\nClick the button below and point your computer's camera at the phone screen.\nNo camera? Photograph the QR with another device, send the picture to this computer, then use Add account → QR code → Choose image.",
+  "onboarding.new.label": "I'm turning on 2-factor authentication right now",
+  "onboarding.new.steps": "On the website, go to security settings and turn on two-factor authentication.\nIt will show a QR code on this screen.\nClick Add account → QR code → Scan QR from screen. No phone needed.\nIf the site won't show a QR, look for \"Can't scan?\" or \"Enter manually\" to get a secret key, and type that in instead.",
+  "onboarding.other.label": "In another app — Authy, Microsoft, Duo…",
+  "onboarding.other.steps": "Most other authenticator apps don't let you export your accounts. You'll have to set each one up again — a couple of minutes per account.\nOn the service's website, turn two-factor authentication off, then straight back on.\nIt will show you a new QR code — add that here.\nDo one service at a time, and keep the old app until you've checked that a code from here actually works.",
+  "onboarding.key.label": "I have a backup file or a secret key",
+  "onboarding.key.steps": "Backup file from this extension? Click below and choose the file. If it's password protected, you'll be asked for that password.\nJust a secret key (16–32 letters and digits)? Use Add account → Manually and paste it in.\nRecovery codes from a website are not secret keys — those are one-time codes you keep on paper, and they don't go here.",
 };
 
 export default strings;

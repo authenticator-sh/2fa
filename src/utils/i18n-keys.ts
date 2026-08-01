@@ -26,6 +26,17 @@ type TranslationKeys = {
   'accounts.copied': string;
   'accounts.clickToCopy': string;
   'accounts.suggested': string;
+  'onboarding.title': string;
+  'onboarding.question': string;
+  'onboarding.back': string;
+  'onboarding.ga.label': string;
+  'onboarding.ga.steps': string;
+  'onboarding.new.label': string;
+  'onboarding.new.steps': string;
+  'onboarding.other.label': string;
+  'onboarding.other.steps': string;
+  'onboarding.key.label': string;
+  'onboarding.key.steps': string;
 
   // Settings
   'settings.backupRestore': string;

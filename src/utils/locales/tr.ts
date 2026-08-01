@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "Parolanızı ne zaman soralım?",
   "vault.done.tryHint": "Parolanızın çalıştığını görmek için şimdi kilitleyin.",
   "vault.done.text": "Kodlarınız artık bu cihazda ve senkronizasyonda şifreli. Parolanın ne zaman sorulacağını seçin — sonradan Ayarlar'dan değiştirebilirsiniz.",
+  "onboarding.title": "İlk hesabınızı ekleyelim",
+  "onboarding.question": "Kodlarınız şu anda nerede?",
+  "onboarding.back": "Geri",
+  "onboarding.ga.label": "Telefonumdaki Google Authenticator'da",
+  "onboarding.ga.steps": "Telefonunuzda Google Authenticator'ı açın.\n⋮ menüsüne dokunun (sağ üst) → Hesapları aktar → Hesapları dışa aktar.\nHesapları seçip İleri'ye dokunun. Telefonda bir QR kodu görünecek.\nAşağıdaki düğmeye tıklayın ve bilgisayarınızın kamerasını telefon ekranına doğrultun.\nKamera yok mu? QR'ı başka bir cihazla fotoğraflayın, görseli bu bilgisayara gönderin ve Hesap ekle → QR kodu → Resim seç yolunu kullanın.",
+  "onboarding.new.label": "Şu anda iki adımlı doğrulamayı açıyorum",
+  "onboarding.new.steps": "Web sitesinde güvenlik ayarlarına gidip iki adımlı doğrulamayı açın.\nBu ekranda bir QR kodu gösterecek.\nHesap ekle → QR kodu → Ekrandan QR tara'ya tıklayın. Telefon gerekmez.\nSite QR göstermiyorsa «Tarayamıyor musunuz?» ya da «Elle girin» seçeneğinden gizli anahtarı alın.",
+  "onboarding.other.label": "Başka bir uygulamada — Authy, Microsoft, Duo…",
+  "onboarding.other.steps": "Diğer uygulamaların çoğu hesapları dışa aktarmanıza izin vermez. Her birini yeniden kurmanız gerekir — hesap başına birkaç dakika.\nServisin sitesinde iki adımlı doğrulamayı kapatıp hemen tekrar açın.\nSize yeni bir QR kodu gösterecek — onu buraya ekleyin.\nTek tek ilerleyin ve buradaki bir kodun çalıştığını görene kadar eski uygulamayı silmeyin.",
+  "onboarding.key.label": "Yedek dosyam veya gizli anahtarım var",
+  "onboarding.key.steps": "Bu uzantıdan bir yedek mi? Aşağıya tıklayıp dosyayı seçin. Parolalıysa parola sorulur.\nSadece gizli anahtar mı (16–32 harf ve rakam)? Hesap ekle → Elle ve yapıştırın.\nSitelerin kurtarma kodları gizli anahtar değildir: kâğıtta saklanan tek kullanımlık kodlardır.",
 };
 
 export default strings;

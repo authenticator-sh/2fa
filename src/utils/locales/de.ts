@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "Wann sollen wir nach dem Passwort fragen?",
   "vault.done.tryHint": "Sperre jetzt, um zu prüfen, dass dein Passwort funktioniert.",
   "vault.done.text": "Deine Codes sind jetzt auf diesem Gerät und in der Synchronisierung verschlüsselt. Wähle, wann wir nach dem Passwort fragen — änderbar in den Einstellungen.",
+  "onboarding.title": "Fügen wir dein erstes Konto hinzu",
+  "onboarding.question": "Wo sind deine Codes gerade?",
+  "onboarding.back": "Zurück",
+  "onboarding.ga.label": "In Google Authenticator auf meinem Handy",
+  "onboarding.ga.steps": "Öffne Google Authenticator auf deinem Handy.\nTippe auf ⋮ (oben rechts) → Konten übertragen → Konten exportieren.\nWähle die Konten und tippe auf Weiter. Auf dem Handy erscheint ein QR-Code.\nKlicke unten und richte die Kamera deines Computers auf den Handybildschirm.\nKeine Kamera? Fotografiere den QR-Code mit einem anderen Gerät, schicke das Bild an diesen Computer und nutze Konto hinzufügen → QR-Code → Bild auswählen.",
+  "onboarding.new.label": "Ich aktiviere die Zwei-Faktor-Anmeldung gerade",
+  "onboarding.new.steps": "Gehe auf der Website in die Sicherheitseinstellungen und aktiviere die Zwei-Faktor-Authentifizierung.\nSie zeigt einen QR-Code auf diesem Bildschirm.\nKlicke auf Konto hinzufügen → QR-Code → QR vom Bildschirm scannen. Kein Handy nötig.\nZeigt die Seite keinen QR-Code, suche nach „Kann nicht scannen?“ oder „Manuell eingeben“, um einen geheimen Schlüssel zu erhalten.",
+  "onboarding.other.label": "In einer anderen App — Authy, Microsoft, Duo…",
+  "onboarding.other.steps": "Die meisten anderen Apps lassen keinen Export zu. Du musst jedes Konto neu einrichten — ein paar Minuten pro Konto.\nSchalte auf der Website des Dienstes die Zwei-Faktor-Anmeldung aus und sofort wieder ein.\nDu bekommst einen neuen QR-Code — füge ihn hier hinzu.\nMach das Dienst für Dienst und behalte die alte App, bis du geprüft hast, dass ein Code von hier funktioniert.",
+  "onboarding.key.label": "Ich habe eine Sicherungsdatei oder einen geheimen Schlüssel",
+  "onboarding.key.steps": "Sicherungsdatei aus dieser Erweiterung? Klicke unten und wähle die Datei. Ist sie passwortgeschützt, fragen wir danach.\nNur ein geheimer Schlüssel (16–32 Buchstaben und Ziffern)? Konto hinzufügen → Manuell und einfügen.\nWiederherstellungscodes einer Website sind keine geheimen Schlüssel — das sind Einmalcodes für den Notfall.",
 };
 
 export default strings;

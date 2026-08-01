@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "Kiedy pytać o hasło?",
   "vault.done.tryHint": "Zablokuj teraz, aby sprawdzić, że hasło działa.",
   "vault.done.text": "Twoje kody są teraz zaszyfrowane na tym urządzeniu i w synchronizacji. Wybierz, kiedy pytać o hasło — można to później zmienić w Ustawieniach.",
+  "onboarding.title": "Dodajmy pierwsze konto",
+  "onboarding.question": "Gdzie są teraz Twoje kody?",
+  "onboarding.back": "Wstecz",
+  "onboarding.ga.label": "W Google Authenticator na telefonie",
+  "onboarding.ga.steps": "Otwórz Google Authenticator na telefonie.\nDotknij menu ⋮ (prawy górny róg) → Przenieś konta → Eksportuj konta.\nWybierz konta i dotknij Dalej. Na telefonie pojawi się kod QR.\nKliknij przycisk poniżej i skieruj kamerę komputera na ekran telefonu.\nBrak kamery? Zrób zdjęcie kodu innym urządzeniem, prześlij je na ten komputer i użyj Dodaj konto → Kod QR → Wybierz obraz.",
+  "onboarding.new.label": "Właśnie włączam uwierzytelnianie dwuskładnikowe",
+  "onboarding.new.steps": "Na stronie przejdź do ustawień bezpieczeństwa i włącz uwierzytelnianie dwuskładnikowe.\nNa tym ekranie pojawi się kod QR.\nKliknij Dodaj konto → Kod QR → Skanuj QR z ekranu. Telefon nie jest potrzebny.\nJeśli strona nie pokazuje kodu QR, poszukaj „Nie możesz zeskanować?” lub „Wpisz ręcznie”, aby uzyskać klucz.",
+  "onboarding.other.label": "W innej aplikacji — Authy, Microsoft, Duo…",
+  "onboarding.other.steps": "Większość innych aplikacji nie pozwala wyeksportować kont. Każde trzeba skonfigurować od nowa — kilka minut na konto.\nNa stronie usługi wyłącz uwierzytelnianie dwuskładnikowe i od razu włącz je ponownie.\nPokaże nowy kod QR — dodaj go tutaj.\nRób to po jednej usłudze i zachowaj starą aplikację, dopóki nie sprawdzisz, że kod stąd działa.",
+  "onboarding.key.label": "Mam plik kopii zapasowej albo klucz",
+  "onboarding.key.steps": "Kopia z tego rozszerzenia? Kliknij poniżej i wybierz plik. Jeśli ma hasło, zapytamy o nie.\nTylko klucz (16–32 liter i cyfr)? Dodaj konto → Ręcznie i wklej go.\nKody odzyskiwania ze strony to nie klucze — to jednorazowe kody trzymane na papierze.",
 };
 
 export default strings;

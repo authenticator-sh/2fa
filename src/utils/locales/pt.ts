@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "Quando devemos pedir sua senha?",
   "vault.done.tryHint": "Bloqueie agora para conferir que sua senha funciona.",
   "vault.done.text": "Seus códigos agora estão criptografados neste dispositivo e na sincronização. Escolha quando pedir a senha — dá para mudar depois nas Configurações.",
+  "onboarding.title": "Vamos adicionar sua primeira conta",
+  "onboarding.question": "Onde estão seus códigos agora?",
+  "onboarding.back": "Voltar",
+  "onboarding.ga.label": "No Google Authenticator, no meu celular",
+  "onboarding.ga.steps": "Abra o Google Authenticator no celular.\nToque no menu ⋮ (canto superior direito) → Transferir contas → Exportar contas.\nEscolha as contas e toque em Avançar. O celular mostrará um código QR.\nClique no botão abaixo e aponte a câmera do computador para a tela do celular.\nSem câmera? Fotografe o QR com outro aparelho, envie a imagem para este computador e use Adicionar conta → Código QR → Escolher imagem.",
+  "onboarding.new.label": "Estou ativando a verificação em duas etapas agora",
+  "onboarding.new.steps": "No site, vá em configurações de segurança e ative a verificação em duas etapas.\nUm código QR aparecerá nesta tela.\nClique em Adicionar conta → Código QR → Escanear QR da tela. Não precisa do celular.\nSe o site não mostrar um QR, procure «Não consegue escanear?» ou «Inserir manualmente» para obter a chave secreta.",
+  "onboarding.other.label": "Em outro app — Authy, Microsoft, Duo…",
+  "onboarding.other.steps": "A maioria dos outros apps não permite exportar. Você terá que configurar cada conta de novo — poucos minutos por conta.\nNo site do serviço, desative a verificação em duas etapas e ative de novo em seguida.\nEle mostrará um novo código QR — adicione aqui.\nFaça um serviço por vez e mantenha o app antigo até confirmar que um código daqui funciona.",
+  "onboarding.key.label": "Tenho um arquivo de backup ou uma chave secreta",
+  "onboarding.key.steps": "Backup desta extensão? Clique abaixo e escolha o arquivo. Se tiver senha, ela será solicitada.\nSó uma chave secreta (16–32 letras e números)? Adicionar conta → Manualmente e cole.\nCódigos de recuperação de um site não são chaves secretas: são códigos de uso único guardados no papel.",
 };
 
 export default strings;

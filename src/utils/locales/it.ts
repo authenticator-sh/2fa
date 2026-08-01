@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "Quando chiedere la password?",
   "vault.done.tryHint": "Blocca ora per verificare che la password funzioni.",
   "vault.done.text": "I tuoi codici sono ora cifrati su questo dispositivo e nella sincronizzazione. Scegli quando chiedere la password — modificabile poi nelle Impostazioni.",
+  "onboarding.title": "Aggiungiamo il tuo primo account",
+  "onboarding.question": "Dove sono i tuoi codici adesso?",
+  "onboarding.back": "Indietro",
+  "onboarding.ga.label": "In Google Authenticator sul telefono",
+  "onboarding.ga.steps": "Apri Google Authenticator sul telefono.\nTocca il menu ⋮ (in alto a destra) → Trasferisci account → Esporta account.\nScegli gli account e tocca Avanti. Sul telefono comparirà un codice QR.\nTocca il pulsante qui sotto e punta la fotocamera del computer verso lo schermo del telefono.\nNiente fotocamera? Fotografa il QR con un altro dispositivo, invia l'immagine a questo computer e usa Aggiungi account → Codice QR → Scegli immagine.",
+  "onboarding.new.label": "Sto attivando la verifica in due passaggi adesso",
+  "onboarding.new.steps": "Sul sito, vai nelle impostazioni di sicurezza e attiva la verifica in due passaggi.\nMostrerà un codice QR su questo schermo.\nTocca Aggiungi account → Codice QR → Scansiona QR dallo schermo. Il telefono non serve.\nSe il sito non mostra un QR, cerca «Non riesci a scansionare?» o «Inserisci manualmente» per ottenere una chiave segreta.",
+  "onboarding.other.label": "In un'altra app — Authy, Microsoft, Duo…",
+  "onboarding.other.steps": "La maggior parte delle altre app non permette di esportare. Dovrai riconfigurare ogni account — un paio di minuti ciascuno.\nSul sito del servizio, disattiva la verifica in due passaggi e riattivala subito.\nTi mostrerà un nuovo codice QR: aggiungilo qui.\nProcedi un servizio alla volta e tieni la vecchia app finché non hai verificato che un codice da qui funziona.",
+  "onboarding.key.label": "Ho un file di backup o una chiave segreta",
+  "onboarding.key.steps": "Backup di questa estensione? Tocca qui sotto e scegli il file. Se è protetto, ti chiederemo la password.\nSolo una chiave segreta (16–32 lettere e numeri)? Aggiungi account → Manualmente e incollala.\nI codici di recupero di un sito non sono chiavi segrete: sono codici usa e getta da tenere su carta.",
 };
 
 export default strings;

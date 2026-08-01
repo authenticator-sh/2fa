@@ -18,6 +18,7 @@ import { LockScreen } from '@/components/LockScreen';
 import { VaultPrompt } from '@/components/VaultPrompt';
 import { VaultSettings } from '@/components/VaultSettings';
 import { VaultSetupModal } from '@/components/VaultSetupModal';
+import { EmptyStateGuide } from '@/components/EmptyStateGuide';
 import { getTimeSyncNotice, dismissTimeNotice } from '@/utils/time-sync';
 import { createT, loadLanguage, type Language } from '@/utils/i18n';
 import { addMultipleAccounts, getAccounts } from '@/utils/storage';
@@ -611,44 +612,26 @@ function App() {
         ) : showFAQ ? (
           null
         ) : filteredAccounts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-[340px] text-center p-6">
-            <Logo size={48} className="mb-3 opacity-30" />
-            <h2 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-1">
-              {searchQuery ? t('accounts.noAccountsFound') : t('accounts.noAccounts')}
-            </h2>
-            {searchQuery ? (
-              <p className="text-gray-500 dark:text-gray-400 text-xs mb-4">{t('accounts.tryDifferentSearch')}</p>
-            ) : (
-              <>
-                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 mb-4 text-left max-w-xs">
-                  <p className="text-xs text-gray-700 dark:text-gray-300 mb-2 font-medium">{t('accounts.howToAdd')}</p>
-                  <ol className="text-xs text-gray-600 dark:text-gray-400 space-y-1 list-decimal list-inside">
-                    <li>{t('accounts.step1')}</li>
-                    <li>{t('accounts.step2')}</li>
-                    <li>{t('accounts.step3')}</li>
-                    <li>{t('accounts.step4')}</li>
-                  </ol>
-                </div>
-                <div className="flex flex-col items-center gap-2">
-                  <button
-                    onClick={() => setShowAddModal(true)}
-                    className="bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2 px-4 rounded-lg transition-colors"
-                  >
-                    {t('accounts.addAccount')}
-                  </button>
-                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                    <span>{t('accounts.or')}</span>
-                    <button
-                      onClick={handleImportClick}
-                      className="text-[#4285F4] hover:text-[#3367D6] font-medium hover:underline"
-                    >
-                      {t('accounts.importFromBackup')}
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+          searchQuery ? (
+            <div className="flex flex-col items-center justify-center h-[340px] text-center p-6">
+              <Logo size={48} className="mb-3 opacity-30" />
+              <h2 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-1">
+                {t('accounts.noAccountsFound')}
+              </h2>
+              <p className="text-gray-500 dark:text-gray-400 text-xs mb-4">
+                {t('accounts.tryDifferentSearch')}
+              </p>
+            </div>
+          ) : (
+            <EmptyStateGuide
+              language={language}
+              onAddAccount={() => setShowAddModal(true)}
+              onImport={handleImportClick}
+              onScanWithCamera={() =>
+                chrome.tabs.create({ url: chrome.runtime.getURL('scan.html') })
+              }
+            />
+          )
         ) : (
           <div className="bg-white dark:bg-dark-800 pb-20">
             {suggestedAccount && (

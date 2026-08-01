@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "언제 비밀번호를 물어볼까요?",
   "vault.done.tryHint": "지금 잠가서 비밀번호가 작동하는지 확인하세요.",
   "vault.done.text": "이제 코드가 이 기기와 동기화 모두에서 암호화되었습니다. 비밀번호를 언제 물어볼지 선택하세요. 나중에 설정에서 변경할 수 있습니다.",
+  "onboarding.title": "첫 계정을 추가해 볼까요",
+  "onboarding.question": "지금 코드는 어디에 있나요?",
+  "onboarding.back": "뒤로",
+  "onboarding.ga.label": "휴대폰의 Google Authenticator에 있습니다",
+  "onboarding.ga.steps": "휴대폰에서 Google Authenticator를 엽니다.\n오른쪽 위 ⋮ 메뉴 → 계정 이전 → 계정 내보내기를 누릅니다.\n계정을 고르고 다음을 누르면 휴대폰에 QR 코드가 나타납니다.\n아래 버튼을 누르고 컴퓨터 카메라를 휴대폰 화면에 비추세요.\n카메라가 없다면 다른 기기로 QR을 촬영해 이 컴퓨터로 보낸 뒤, 계정 추가 → QR 코드 → 이미지 선택을 사용하세요.",
+  "onboarding.new.label": "지금 2단계 인증을 켜는 중입니다",
+  "onboarding.new.steps": "웹사이트의 보안 설정에서 2단계 인증을 켭니다.\n이 화면에 QR 코드가 표시됩니다.\n계정 추가 → QR 코드 → 화면에서 QR 스캔을 누르세요. 휴대폰이 필요 없습니다.\nQR이 보이지 않으면 «스캔할 수 없나요?» 또는 «직접 입력»에서 비밀 키를 받으세요.",
+  "onboarding.other.label": "다른 앱에 있습니다 — Authy, Microsoft, Duo…",
+  "onboarding.other.steps": "대부분의 다른 앱은 내보내기를 지원하지 않습니다. 계정마다 다시 설정해야 하며, 하나에 몇 분 걸립니다.\n서비스 웹사이트에서 2단계 인증을 껐다가 바로 다시 켜세요.\n새 QR 코드가 나오면 여기에 추가합니다.\n한 번에 한 서비스씩 진행하고, 여기의 코드가 실제로 되는지 확인할 때까지 기존 앱을 남겨 두세요.",
+  "onboarding.key.label": "백업 파일이나 비밀 키가 있습니다",
+  "onboarding.key.steps": "이 확장 프로그램의 백업인가요? 아래를 눌러 파일을 고르세요. 비밀번호가 걸려 있으면 물어봅니다.\n비밀 키만 있나요(영문·숫자 16~32자)? 계정 추가 → 직접 입력에서 붙여넣으세요.\n사이트의 복구 코드는 비밀 키가 아닙니다. 종이에 보관하는 일회용 코드입니다.",
 };
 
 export default strings;

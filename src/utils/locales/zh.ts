@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "何时询问你的密码？",
   "vault.done.tryHint": "现在就锁定，确认密码可用。",
   "vault.done.text": "你的验证码现已在本设备和同步中加密。请选择何时询问密码——之后可在设置中更改。",
+  "onboarding.title": "来添加第一个账户",
+  "onboarding.question": "你的验证码现在在哪里？",
+  "onboarding.back": "返回",
+  "onboarding.ga.label": "在手机上的 Google Authenticator 里",
+  "onboarding.ga.steps": "在手机上打开 Google Authenticator。\n点右上角 ⋮ →「转移账号」→「导出账号」。\n选择账号后点「下一步」，手机上会出现一个二维码。\n点击下方按钮，把电脑摄像头对准手机屏幕。\n没有摄像头？用另一台设备拍下二维码，把照片传到这台电脑，然后用「添加账户」→「二维码」→「选择图片」。",
+  "onboarding.new.label": "我正在开启两步验证",
+  "onboarding.new.steps": "在网站的安全设置里开启两步验证。\n它会在这个屏幕上显示一个二维码。\n点击「添加账户」→「二维码」→「从屏幕扫描二维码」。不需要手机。\n如果网站不显示二维码，找找「无法扫描？」或「手动输入」，获取密钥后手动填入。",
+  "onboarding.other.label": "在别的应用里 — Authy、Microsoft、Duo…",
+  "onboarding.other.steps": "大多数其他应用不支持导出账户。你需要逐个重新设置，每个账户几分钟。\n在该服务的网站上关闭两步验证，然后立即重新开启。\n它会给你一个新的二维码——添加到这里。\n一次处理一个服务，并保留旧应用，直到确认这里的验证码确实能用。",
+  "onboarding.key.label": "我有备份文件或密钥",
+  "onboarding.key.steps": "本扩展导出的备份？点击下方选择文件。如果设置了密码，会提示你输入。\n只有密钥（16–32 位字母数字）？用「添加账户」→「手动」粘贴进去。\n网站给的恢复码不是密钥——那是写在纸上的一次性代码，不能加到这里。",
 };
 
 export default strings;

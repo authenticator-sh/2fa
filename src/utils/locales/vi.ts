@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "Khi nào nên hỏi mật khẩu?",
   "vault.done.tryHint": "Khóa ngay để kiểm tra mật khẩu của bạn hoạt động.",
   "vault.done.text": "Mã của bạn giờ đã được mã hóa trên thiết bị này và trong đồng bộ. Chọn khi nào hỏi mật khẩu — có thể đổi sau trong Cài đặt.",
+  "onboarding.title": "Cùng thêm tài khoản đầu tiên",
+  "onboarding.question": "Mã của bạn hiện đang ở đâu?",
+  "onboarding.back": "Quay lại",
+  "onboarding.ga.label": "Trong Google Authenticator trên điện thoại",
+  "onboarding.ga.steps": "Mở Google Authenticator trên điện thoại.\nChạm menu ⋮ (góc trên bên phải) → Chuyển tài khoản → Xuất tài khoản.\nChọn các tài khoản rồi chạm Tiếp. Điện thoại sẽ hiện một mã QR.\nBấm nút bên dưới và hướng camera máy tính vào màn hình điện thoại.\nKhông có camera? Chụp mã QR bằng thiết bị khác, gửi ảnh sang máy tính này, rồi dùng Thêm tài khoản → Mã QR → Chọn ảnh.",
+  "onboarding.new.label": "Tôi đang bật xác thực hai bước ngay bây giờ",
+  "onboarding.new.steps": "Trên trang web, vào cài đặt bảo mật và bật xác thực hai bước.\nMột mã QR sẽ hiện trên màn hình này.\nBấm Thêm tài khoản → Mã QR → Quét QR từ màn hình. Không cần điện thoại.\nNếu trang không hiện QR, tìm «Không quét được?» hoặc «Nhập thủ công» để lấy khóa bí mật.",
+  "onboarding.other.label": "Trong ứng dụng khác — Authy, Microsoft, Duo…",
+  "onboarding.other.steps": "Hầu hết ứng dụng khác không cho xuất tài khoản. Bạn sẽ phải thiết lập lại từng cái — vài phút mỗi tài khoản.\nTrên trang của dịch vụ, tắt xác thực hai bước rồi bật lại ngay.\nNó sẽ hiện mã QR mới — thêm vào đây.\nLàm lần lượt từng dịch vụ, và giữ ứng dụng cũ cho tới khi chắc chắn mã ở đây hoạt động.",
+  "onboarding.key.label": "Tôi có tệp sao lưu hoặc khóa bí mật",
+  "onboarding.key.steps": "Bản sao lưu từ tiện ích này? Bấm bên dưới và chọn tệp. Nếu có mật khẩu, chúng tôi sẽ hỏi.\nChỉ có khóa bí mật (16–32 chữ và số)? Thêm tài khoản → Thủ công rồi dán vào.\nMã khôi phục từ trang web không phải khóa bí mật: đó là mã dùng một lần, giữ trên giấy.",
 };
 
 export default strings;

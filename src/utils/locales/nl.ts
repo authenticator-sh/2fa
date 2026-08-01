@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "Wanneer moeten we om je wachtwoord vragen?",
   "vault.done.tryHint": "Vergrendel nu om te controleren of je wachtwoord werkt.",
   "vault.done.text": "Je codes zijn nu versleuteld op dit apparaat en in de synchronisatie. Kies wanneer we om het wachtwoord vragen — later te wijzigen in Instellingen.",
+  "onboarding.title": "Laten we je eerste account toevoegen",
+  "onboarding.question": "Waar staan je codes nu?",
+  "onboarding.back": "Terug",
+  "onboarding.ga.label": "In Google Authenticator op mijn telefoon",
+  "onboarding.ga.steps": "Open Google Authenticator op je telefoon.\nTik op het ⋮-menu (rechtsboven) → Accounts overzetten → Accounts exporteren.\nKies de accounts en tik op Volgende. Je telefoon toont nu een QR-code.\nKlik op de knop hieronder en richt de camera van je computer op het scherm van de telefoon.\nGeen camera? Fotografeer de QR met een ander apparaat, stuur de foto naar deze computer en gebruik Account toevoegen → QR-code → Afbeelding kiezen.",
+  "onboarding.new.label": "Ik zet tweestapsverificatie nu aan",
+  "onboarding.new.steps": "Ga op de website naar de beveiligingsinstellingen en zet tweestapsverificatie aan.\nEr verschijnt een QR-code op dit scherm.\nKlik op Account toevoegen → QR-code → QR van scherm scannen. Geen telefoon nodig.\nToont de site geen QR? Zoek naar \"Kun je niet scannen?\" of \"Handmatig invoeren\" voor een geheime sleutel.",
+  "onboarding.other.label": "In een andere app — Authy, Microsoft, Duo…",
+  "onboarding.other.steps": "De meeste andere apps laten je niets exporteren. Je moet elk account opnieuw instellen — een paar minuten per account.\nZet op de site van de dienst tweestapsverificatie uit en meteen weer aan.\nJe krijgt een nieuwe QR-code — voeg die hier toe.\nDoe één dienst tegelijk en houd de oude app tot je hebt gecontroleerd dat een code hiervandaan werkt.",
+  "onboarding.key.label": "Ik heb een back-upbestand of een geheime sleutel",
+  "onboarding.key.steps": "Back-up van deze extensie? Klik hieronder en kies het bestand. Is het beveiligd, dan vragen we het wachtwoord.\nAlleen een geheime sleutel (16–32 letters en cijfers)? Account toevoegen → Handmatig en plak hem.\nHerstelcodes van een website zijn geen geheime sleutels: dat zijn eenmalige codes die je op papier bewaart.",
 };
 
 export default strings;

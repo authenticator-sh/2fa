@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "Quand demander votre mot de passe ?",
   "vault.done.tryHint": "Verrouillez maintenant pour vérifier que votre mot de passe fonctionne.",
   "vault.done.text": "Vos codes sont désormais chiffrés sur cet appareil et dans la synchronisation. Choisissez quand demander le mot de passe — modifiable ensuite dans les Paramètres.",
+  "onboarding.title": "Ajoutons votre premier compte",
+  "onboarding.question": "Où sont vos codes actuellement ?",
+  "onboarding.back": "Retour",
+  "onboarding.ga.label": "Dans Google Authenticator sur mon téléphone",
+  "onboarding.ga.steps": "Ouvrez Google Authenticator sur votre téléphone.\nTouchez le menu ⋮ (en haut à droite) → Transférer les comptes → Exporter les comptes.\nChoisissez les comptes et touchez Suivant. Un code QR s'affiche sur le téléphone.\nCliquez sur le bouton ci-dessous et dirigez la caméra de votre ordinateur vers l'écran du téléphone.\nPas de caméra ? Photographiez le QR avec un autre appareil, envoyez l'image à cet ordinateur, puis utilisez Ajouter un compte → Code QR → Choisir une image.",
+  "onboarding.new.label": "J'active la double authentification maintenant",
+  "onboarding.new.steps": "Sur le site, allez dans les paramètres de sécurité et activez la double authentification.\nUn code QR apparaîtra sur cet écran.\nCliquez sur Ajouter un compte → Code QR → Scanner le QR à l'écran. Pas besoin du téléphone.\nSi le site n'affiche pas de QR, cherchez « Impossible de scanner ? » ou « Saisir manuellement » pour obtenir une clé secrète.",
+  "onboarding.other.label": "Dans une autre appli — Authy, Microsoft, Duo…",
+  "onboarding.other.steps": "La plupart des autres applis ne permettent pas d'exporter. Il faudra reconfigurer chaque compte — quelques minutes par compte.\nSur le site du service, désactivez la double authentification puis réactivez-la aussitôt.\nUn nouveau code QR s'affiche — ajoutez-le ici.\nProcédez service par service et gardez l'ancienne appli jusqu'à avoir vérifié qu'un code d'ici fonctionne.",
+  "onboarding.key.label": "J'ai un fichier de sauvegarde ou une clé secrète",
+  "onboarding.key.steps": "Une sauvegarde de cette extension ? Cliquez ci-dessous et choisissez le fichier. S'il est protégé, le mot de passe vous sera demandé.\nSeulement une clé secrète (16 à 32 lettres et chiffres) ? Ajouter un compte → Manuellement, puis collez-la.\nLes codes de récupération d'un site ne sont pas des clés secrètes : ce sont des codes à usage unique conservés sur papier.",
 };
 
 export default strings;

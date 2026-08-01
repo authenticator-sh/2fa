@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "¿Cuándo debemos pedir la contraseña?",
   "vault.done.tryHint": "Bloquéelo ahora para comprobar que su contraseña funciona.",
   "vault.done.text": "Sus códigos ya están cifrados en este dispositivo y en la sincronización. Elija cuándo pedir la contraseña; podrá cambiarlo después en Ajustes.",
+  "onboarding.title": "Añadamos su primera cuenta",
+  "onboarding.question": "¿Dónde están sus códigos ahora?",
+  "onboarding.back": "Atrás",
+  "onboarding.ga.label": "En Google Authenticator, en mi teléfono",
+  "onboarding.ga.steps": "Abra Google Authenticator en su teléfono.\nToque el menú ⋮ (arriba a la derecha) → Transferir cuentas → Exportar cuentas.\nElija las cuentas y toque Siguiente. El teléfono mostrará un código QR.\nPulse el botón de abajo y apunte la cámara del ordenador a la pantalla del teléfono.\n¿Sin cámara? Fotografíe el QR con otro dispositivo, envíe la imagen a este ordenador y use Añadir cuenta → Código QR → Elegir imagen.",
+  "onboarding.new.label": "Estoy activando la verificación en dos pasos ahora",
+  "onboarding.new.steps": "En el sitio web, vaya a los ajustes de seguridad y active la verificación en dos pasos.\nMostrará un código QR en esta pantalla.\nPulse Añadir cuenta → Código QR → Escanear QR de la pantalla. No hace falta el teléfono.\nSi el sitio no muestra un QR, busque «¿No puede escanear?» o «Introducir manualmente» para obtener una clave secreta.",
+  "onboarding.other.label": "En otra app — Authy, Microsoft, Duo…",
+  "onboarding.other.steps": "La mayoría de las otras apps no permiten exportar sus cuentas. Tendrá que configurar cada una de nuevo: un par de minutos por cuenta.\nEn el sitio del servicio, desactive la verificación en dos pasos y vuelva a activarla.\nLe mostrará un nuevo código QR: añádalo aquí.\nHágalo servicio por servicio y conserve la app anterior hasta comprobar que un código de aquí funciona.",
+  "onboarding.key.label": "Tengo un archivo de copia o una clave secreta",
+  "onboarding.key.steps": "¿Copia de seguridad de esta extensión? Pulse abajo y elija el archivo. Si tiene contraseña, se la pediremos.\n¿Solo una clave secreta (16–32 letras y números)? Use Añadir cuenta → Manualmente y péguela.\nLos códigos de recuperación de un sitio no son claves secretas: son códigos de un solo uso que se guardan en papel.",
 };
 
 export default strings;

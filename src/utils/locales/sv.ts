@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "När ska vi fråga efter lösenordet?",
   "vault.done.tryHint": "Lås nu för att kontrollera att lösenordet fungerar.",
   "vault.done.text": "Dina koder är nu krypterade på den här enheten och i synkroniseringen. Välj när vi ska fråga efter lösenordet — kan ändras i Inställningar.",
+  "onboarding.title": "Nu lägger vi till ditt första konto",
+  "onboarding.question": "Var finns dina koder just nu?",
+  "onboarding.back": "Tillbaka",
+  "onboarding.ga.label": "I Google Authenticator på min telefon",
+  "onboarding.ga.steps": "Öppna Google Authenticator på telefonen.\nTryck på ⋮-menyn (uppe till höger) → Överför konton → Exportera konton.\nVälj kontona och tryck på Nästa. Telefonen visar nu en QR-kod.\nKlicka på knappen nedan och rikta datorns kamera mot telefonens skärm.\nIngen kamera? Fotografera QR-koden med en annan enhet, skicka bilden till datorn och använd Lägg till konto → QR-kod → Välj bild.",
+  "onboarding.new.label": "Jag slår på tvåstegsverifiering just nu",
+  "onboarding.new.steps": "Gå till säkerhetsinställningarna på webbplatsen och slå på tvåstegsverifiering.\nEn QR-kod visas på den här skärmen.\nKlicka på Lägg till konto → QR-kod → Skanna QR från skärmen. Ingen telefon behövs.\nVisar sidan ingen QR-kod? Leta efter ”Kan du inte skanna?” eller ”Ange manuellt” för att få en hemlig nyckel.",
+  "onboarding.other.label": "I en annan app — Authy, Microsoft, Duo…",
+  "onboarding.other.steps": "De flesta andra appar låter dig inte exportera. Du får ställa in varje konto på nytt — ett par minuter per konto.\nSlå av tvåstegsverifieringen på tjänstens webbplats och slå på den igen direkt.\nDu får en ny QR-kod — lägg till den här.\nTa en tjänst i taget och behåll den gamla appen tills du kontrollerat att en kod härifrån fungerar.",
+  "onboarding.key.label": "Jag har en säkerhetskopia eller en hemlig nyckel",
+  "onboarding.key.steps": "Säkerhetskopia från det här tillägget? Klicka nedan och välj filen. Är den lösenordsskyddad frågar vi efter lösenordet.\nBara en hemlig nyckel (16–32 bokstäver och siffror)? Lägg till konto → Manuellt och klistra in den.\nÅterställningskoder från en webbplats är inte hemliga nycklar — det är engångskoder att spara på papper.",
 };
 
 export default strings;

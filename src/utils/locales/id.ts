@@ -202,6 +202,17 @@ const strings: TranslationStrings = {
   "vault.done.askTitle": "Kapan kami harus meminta kata sandi?",
   "vault.done.tryHint": "Kunci sekarang untuk memastikan kata sandi Anda bekerja.",
   "vault.done.text": "Kode Anda kini terenkripsi di perangkat ini dan di sinkronisasi. Pilih kapan kata sandi diminta — bisa diubah nanti di Pengaturan.",
+  "onboarding.title": "Mari tambahkan akun pertama Anda",
+  "onboarding.question": "Di mana kode Anda sekarang?",
+  "onboarding.back": "Kembali",
+  "onboarding.ga.label": "Di Google Authenticator pada ponsel saya",
+  "onboarding.ga.steps": "Buka Google Authenticator di ponsel Anda.\nKetuk menu ⋮ (kanan atas) → Transfer akun → Ekspor akun.\nPilih akun lalu ketuk Berikutnya. Ponsel akan menampilkan kode QR.\nKlik tombol di bawah dan arahkan kamera komputer ke layar ponsel.\nTidak ada kamera? Foto kode QR dengan perangkat lain, kirim gambarnya ke komputer ini, lalu gunakan Tambah akun → Kode QR → Pilih gambar.",
+  "onboarding.new.label": "Saya sedang mengaktifkan verifikasi dua langkah",
+  "onboarding.new.steps": "Di situsnya, buka pengaturan keamanan dan aktifkan verifikasi dua langkah.\nKode QR akan muncul di layar ini.\nKlik Tambah akun → Kode QR → Pindai QR dari layar. Tidak perlu ponsel.\nJika situs tidak menampilkan QR, cari «Tidak bisa memindai?» atau «Masukkan manual» untuk mendapat kunci rahasia.",
+  "onboarding.other.label": "Di aplikasi lain — Authy, Microsoft, Duo…",
+  "onboarding.other.steps": "Kebanyakan aplikasi lain tidak mengizinkan ekspor. Anda harus menyiapkan tiap akun lagi — beberapa menit per akun.\nDi situs layanan, matikan verifikasi dua langkah lalu nyalakan lagi.\nAkan muncul kode QR baru — tambahkan di sini.\nLakukan satu layanan sekaligus, dan simpan aplikasi lama sampai Anda yakin kode dari sini berfungsi.",
+  "onboarding.key.label": "Saya punya berkas cadangan atau kunci rahasia",
+  "onboarding.key.steps": "Cadangan dari ekstensi ini? Klik di bawah dan pilih berkasnya. Jika berkata sandi, kami akan menanyakannya.\nHanya kunci rahasia (16–32 huruf dan angka)? Tambah akun → Manual, lalu tempel.\nKode pemulihan dari situs bukan kunci rahasia: itu kode sekali pakai yang disimpan di kertas.",
 };
 
 export default strings;
