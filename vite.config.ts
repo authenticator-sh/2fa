@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync } from 'fs';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, rmSync } from 'fs';
 
 // Plugin to copy files after build
 function copyFilesPlugin() {
@@ -11,11 +11,19 @@ function copyFilesPlugin() {
       // Ensure dist directory exists
       mkdirSync(resolve(__dirname, 'dist'), { recursive: true });
 
-      // Copy and rename HTML file, fix paths
-      let htmlContent = readFileSync(resolve(__dirname, 'dist/src/popup/index.html'), 'utf-8');
-      htmlContent = htmlContent.replace(/src="\/popup\.js"/g, 'src="./popup.js"');
-      htmlContent = htmlContent.replace(/href="\/popup\.css"/g, 'href="./popup.css"');
-      writeFileSync(resolve(__dirname, 'dist/popup.html'), htmlContent);
+      // Rewrite absolute asset URLs to relative paths and move HTML to dist root.
+      const rewriteAbsoluteAssets = (html: string) =>
+        html
+          .replace(/(src|href)="\/([^"]+)"/g, '$1="./$2"');
+
+      const popupHtml = rewriteAbsoluteAssets(
+        readFileSync(resolve(__dirname, 'dist/src/popup/index.html'), 'utf-8')
+      );
+      writeFileSync(resolve(__dirname, 'dist/popup.html'), popupHtml);
+
+      // The generated HTML has been rewritten and moved to the dist root; the
+      // nested copy would otherwise ship as dead weight inside the package.
+      rmSync(resolve(__dirname, 'dist/src'), { recursive: true, force: true });
 
       // Copy manifest.json
       copyFileSync(
@@ -37,6 +45,17 @@ function copyFilesPlugin() {
           console.log(`Icon ${icon} not found, skipping`);
         }
       });
+
+      // Copy any bundled images (none at present — the welcome page is hosted
+      // at authenticator.sh/welcome and no longer ships with the extension)
+      const imagesDir = resolve(__dirname, 'public/images');
+      if (existsSync(imagesDir)) {
+        const destImages = resolve(__dirname, 'dist/images');
+        mkdirSync(destImages, { recursive: true });
+        readdirSync(imagesDir).forEach((file) => {
+          copyFileSync(resolve(imagesDir, file), resolve(destImages, file));
+        });
+      }
 
       // Copy translations to _locales
       const translationsDir = resolve(__dirname, 'public/translations');
@@ -61,6 +80,11 @@ function copyFilesPlugin() {
 
 export default defineConfig({
   plugins: [react(), copyFilesPlugin()],
+  // Everything under public/ is placed deliberately by copyFilesPlugin —
+  // manifest to the root, icons to icons/, translations to _locales/. Letting
+  // Vite also mirror public/ verbatim shipped a second, unused 488 KB copy of
+  // every translation file inside the extension package.
+  publicDir: false,
   build: {
     outDir: 'dist',
     rollupOptions: {

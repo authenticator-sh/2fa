@@ -1,14 +1,19 @@
-import type { Account } from '@/types';
+import type { StoredAccount } from '@/types';
 
 const DB_NAME = 'AuthenticatorBackupDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'backups';
 const MAX_BACKUPS = 7; // Keep last 7 backups
 
+// Snapshots hold records in whatever form storage.ts persists them: cleartext
+// while the vault is off, ciphertext once it is on. Storing the already
+// encrypted records means the backups inherit the vault's protection without a
+// second crypto path to get wrong — and without them, seven readable copies of
+// every secret would sit next to the encrypted store and defeat the point.
 interface Backup {
   id: string;
   timestamp: number;
-  accounts: Account[];
+  accounts: StoredAccount[];
   version: string;
   accountCount: number;
 }
@@ -32,7 +37,7 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 // Save backup to IndexedDB
-export async function saveBackup(accounts: Account[]): Promise<void> {
+export async function saveBackup(accounts: StoredAccount[]): Promise<void> {
   try {
     const db = await openDB();
     const transaction = db.transaction([STORE_NAME], 'readwrite');
@@ -115,8 +120,32 @@ async function cleanOldBackups(): Promise<void> {
   }
 }
 
+/**
+ * Delete every snapshot. Called when the vault is switched on or off, where
+ * the existing snapshots are in the wrong form: cleartext copies that would
+ * survive encryption, or ciphertext nothing can open once the key metadata is
+ * gone. Callers must write a fresh snapshot immediately afterwards.
+ */
+export async function wipeAllBackups(): Promise<void> {
+  try {
+    const db = await openDB();
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
+    transaction.objectStore(STORE_NAME).clear();
+
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+
+    db.close();
+  } catch (error) {
+    console.error('Failed to wipe backups:', error);
+    throw error;
+  }
+}
+
 // Auto backup function - should be called periodically
-export async function autoBackup(accounts: Account[]): Promise<void> {
+export async function autoBackup(accounts: StoredAccount[]): Promise<void> {
   try {
     const latestBackup = await getLatestBackup();
     const now = Date.now();
@@ -133,7 +162,7 @@ export async function autoBackup(accounts: Account[]): Promise<void> {
 }
 
 // Restore from backup
-export async function restoreFromBackup(backupId: string): Promise<Account[]> {
+export async function restoreFromBackup(backupId: string): Promise<StoredAccount[]> {
   try {
     const db = await openDB();
     const transaction = db.transaction([STORE_NAME], 'readonly');

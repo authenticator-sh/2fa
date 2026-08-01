@@ -10,10 +10,14 @@ A privacy-focused TOTP/HOTP authenticator for Chrome. All secrets stay in your b
 
 - TOTP and HOTP code generation (SHA-1, SHA-256, SHA-512; 6 or 8 digits)
 - QR code import from image upload or visible tab
-- Automatic local backups in IndexedDB with rotation
+- **Optional password protection** — AES-256-GCM encryption of every account
+  record and backup, with a recovery code so a forgotten password is not a
+  dead end (see [Password protection](#password-protection))
+- **Password-protected backup files** on export
+- Automatic local backups in IndexedDB with rotation (7 latest)
 - Export and import for cross-device migration
 - 20 UI languages
-- Works fully offline
+- Works fully offline — the popup makes no network request to render
 
 ## Permissions
 
@@ -30,6 +34,51 @@ The extension does **not** request:
 - `tabs`, `cookies`, `webRequest`, or any other broad permissions
 
 This means the extension **cannot read or modify any website** you visit.
+
+## Password protection
+
+Password protection is **optional and off by default**. With it off, account
+records are stored unencrypted in `chrome.storage.local`, protected by the OS
+user account and the Chrome profile — the same model as most authenticator
+extensions. With it on:
+
+| Property            | Value                                                          |
+|---------------------|----------------------------------------------------------------|
+| Cipher              | AES-256-GCM (random 96-bit IV per record)                      |
+| Key derivation      | PBKDF2-HMAC-SHA256, 600,000 iterations, 128-bit random salt    |
+| Master key          | 256-bit random, generated once; the password only wraps it     |
+| Fingerprints        | HMAC-SHA256 under an HKDF subkey of the master key             |
+| Unlocked key store  | `chrome.storage.session` (memory only, cleared on browser exit) |
+| Auto-lock           | Every open / 5 / 15 / 60 min idle / until browser closes       |
+
+Design notes:
+
+- **Two-level keys.** Data is never encrypted with a password-derived key
+  directly. A random master key encrypts the records; PBKDF2 output only wraps
+  that master key. Changing the password rewrites 32 bytes rather than
+  re-encrypting every record — the bulk rewrite is where data gets lost.
+- **Recovery code.** A 160-bit code independently wraps the same master key, so
+  a forgotten password is recoverable. It is shown once, must be typed back to
+  confirm, and is rotated after each use.
+- **What is encrypted.** The entire account record except its `id` and
+  fingerprint — including the service name, so a stolen profile leaks no
+  metadata about which services the user has accounts with.
+- **Backups too.** IndexedDB snapshots store the already-encrypted records.
+  Enabling the vault wipes every pre-existing cleartext copy (local, sync and
+  all snapshots) after a decrypt-and-compare round trip verifies the encrypted
+  data reads back identically. Verification happens before anything is deleted.
+- **Export files** carry their own salt and a password chosen at export time,
+  independent of the vault, so a backup stays openable on a machine that has no
+  vault configured.
+
+**Threat model.** This protects data at rest: a stolen profile directory, an
+infostealer that exfiltrates browser data, or account records reaching Google's
+servers through Chrome sync. It does **not** protect against malware running as
+the user while the vault is unlocked, or a keylogger capturing the password.
+
+Crypto lives in [`src/utils/crypto.ts`](src/utils/crypto.ts) and
+[`src/utils/vault.ts`](src/utils/vault.ts); no cryptographic primitive is
+hand-rolled — all of it is WebCrypto.
 
 ## Building from Source
 
@@ -65,7 +114,7 @@ To verify that the version published on the Chrome Web Store was built from this
 
 1. Download the `.crx` for the published version from the Chrome Web Store
 2. Unzip it to a directory
-3. Check out this repository at the matching git tag (e.g. `v1.7.0`)
+3. Check out this repository at the matching git tag (e.g. `v1.10.0`)
 4. Run `npm ci && npm run build` using **Node 20 LTS**
 5. Compare the `dist/` directory contents with the unzipped `.crx`
 
@@ -87,10 +136,15 @@ src/
 ├── components/              # React components
 ├── hooks/
 │   ├── useAccounts.ts       # Account state + auto-backup
+│   ├── useVault.ts          # Lock/unlock state
 │   └── useTOTP.ts           # TOTP refresh loop
 ├── utils/
-│   ├── storage.ts           # Dual storage (sync + local fallback) with retry
+│   ├── crypto.ts            # WebCrypto primitives (PBKDF2, AES-GCM, HKDF)
+│   ├── vault.ts             # Vault lifecycle: unlock, auto-lock, recovery
+│   ├── storage.ts           # Local-primary storage, encryption layer, retry
+│   ├── backup-file.ts       # Plain and password-protected export formats
 │   ├── auto-backup.ts       # IndexedDB backup rotation (7 latest)
+│   ├── vault-prompt.ts      # When to offer password protection
 │   ├── time-sync.ts         # Optional clock-drift check
 │   ├── totp.ts              # TOTP via OTPAuth
 │   ├── qr-parser.ts         # QR decoding
@@ -103,12 +157,17 @@ src/
 
 The extension makes **no automatic network requests** during normal use. The only outbound HTTPS calls are:
 
-| URL                                          | When                                | Purpose                             |
-|----------------------------------------------|-------------------------------------|-------------------------------------|
-| `https://authenticator.sh/<lang>/welcome`    | First install                       | Opens welcome page in a new tab     |
-| `https://authenticator.sh/<lang>/uninstall`  | After uninstall (Chrome API)        | Opens feedback page                 |
-| `https://authenticator.sh/rate`              | User clicks "Leave Feedback"        | Opens feedback form                 |
-| `https://worldtimeapi.org/api/timezone/...`  | User opens popup (optional)         | Clock drift detection for TOTP      |
+| URL                                         | When                          | Purpose                        |
+|---------------------------------------------|-------------------------------|--------------------------------|
+| `https://authenticator.sh/welcome`          | First install                 | Opens welcome page in a new tab |
+| `https://authenticator.sh/uninstall`        | After uninstall (Chrome API)  | Opens feedback page            |
+| `https://authenticator.sh/rate`             | User rates the extension      | Opens the review page          |
+| `https://worldtimeapi.org/api/timezone/...` | Popup open (optional, cached) | Clock drift detection for TOTP |
+| `https://timeapi.io/api/time/current/zone`  | Fallback if the above fails   | Clock drift detection for TOTP |
+
+The clock-drift requests are unauthenticated GETs that carry no user data, are
+cached, and fail silently. No fonts, scripts, or styles are loaded from remote
+hosts — everything needed to render the popup is bundled.
 
 All TOTP secrets, account data, and backups stay on the device.
 
@@ -127,7 +186,7 @@ Bug reports and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIB
 - React 18, TypeScript, Tailwind CSS
 - Vite (build)
 - [OTPAuth](https://github.com/hectorm/otpauth) (TOTP/HOTP)
-- [html5-qrcode](https://github.com/mebjas/html5-qrcode) (QR scanning)
+- [jsQR](https://github.com/cozmo/jsQR) (QR decoding, lazy-loaded)
 - Lucide React (icons)
 
 ## License

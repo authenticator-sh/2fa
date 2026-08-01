@@ -3,6 +3,7 @@ import { Copy, Check, Trash2, GripVertical, Pencil } from 'lucide-react';
 import type { Account } from '@/types';
 import { useTOTP } from '@/hooks/useTOTP';
 import { createT, type Language } from '@/utils/i18n';
+import { recordAccountUsage } from '@/utils/suggestions';
 import { ProgressRing } from './ProgressRing';
 
 export type ViewMode = 'normal' | 'compact' | 'hidden';
@@ -18,6 +19,8 @@ interface AccountCardProps {
   onDragOver?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent, id: string) => void;
   isDragOver?: boolean;
+  currentDomain?: string | null;
+  isSuggested?: boolean;
 }
 
 export function AccountCard({
@@ -31,6 +34,8 @@ export function AccountCard({
   onDragOver,
   onDrop,
   isDragOver,
+  currentDomain,
+  isSuggested,
 }: AccountCardProps) {
   const t = createT(language);
   const totp = useTOTP(account);
@@ -40,7 +45,16 @@ export function AccountCard({
     await navigator.clipboard.writeText(totp.code);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+    if (currentDomain) {
+      recordAccountUsage(currentDomain, account.id).catch(() => {});
+    }
   };
+
+  const suggestedBadge = isSuggested ? (
+    <span className="flex-shrink-0 text-[10px] font-medium leading-none text-[#4285F4] bg-blue-50/70 dark:bg-blue-900/25 border border-blue-200/70 dark:border-blue-800/60 px-1.5 py-[3px] rounded-full">
+      {t('accounts.suggested')}
+    </span>
+  ) : null;
 
   const formattedCode = totp.code.match(/.{1,3}/g)?.join(' ') || totp.code;
   const isExpiringSoon = totp.remaining <= 5;
@@ -74,6 +88,7 @@ export function AccountCard({
             <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
               {account.issuer}{account.issuer && account.name ? ': ' : ''}{account.name}
             </span>
+            {suggestedBadge}
             <span className={`flex-shrink-0 transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
               {copied ? (
                 <Check size={14} className="text-green-600 dark:text-green-400" />
@@ -125,9 +140,12 @@ export function AccountCard({
           )}
 
           <div className="flex-1 min-w-0">
-            <h3 className="text-gray-500 dark:text-gray-400 text-xs truncate leading-tight">
-              {account.issuer}{account.issuer && account.name ? ': ' : ''}{account.name}
-            </h3>
+            <div className="flex items-center gap-1.5">
+              <h3 className="text-gray-500 dark:text-gray-400 text-xs truncate leading-tight">
+                {account.issuer}{account.issuer && account.name ? ': ' : ''}{account.name}
+              </h3>
+              {suggestedBadge}
+            </div>
             <button
               onClick={handleCopy}
               className="flex items-center gap-1.5 group/copy"
@@ -182,6 +200,7 @@ export function AccountCard({
           <h3 className="text-gray-900 dark:text-gray-100 font-medium text-sm truncate">
             {account.issuer}: {account.name}
           </h3>
+          {suggestedBadge}
           {draggable && (
             <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-gray-500 flex-shrink-0">
               <GripVertical size={14} />

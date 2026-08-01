@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, Upload, Monitor, Loader2 } from 'lucide-react';
-import { Html5Qrcode } from 'html5-qrcode';
 import type { Account } from '@/types';
 import { validateSecret, cleanSecret } from '@/utils/totp';
 import { parseQRCode, generateRandomColor } from '@/utils/qr-parser';
 import { captureCurrentTab } from '@/utils/screen-capture';
+import { decodeQrFromImage } from '@/utils/qr-decode';
 import { createT, type Language } from '@/utils/i18n';
 
 interface AddAccountModalProps {
@@ -76,10 +76,12 @@ export function AddAccountModal({ onClose, onAdd, language }: AddAccountModalPro
   const processQRFile = async (file: File) => {
     try {
       setError('');
-      const html5QrCode = new Html5Qrcode('qr-reader');
-      const result = await html5QrCode.scanFile(file, false);
+      const result = await decodeQrFromImage(file);
 
-      console.log('QR code scanned successfully:', result);
+      if (!result) {
+        setError(t('addAccount.errorNoQr'));
+        return;
+      }
 
       const parsed = parseQRCode(result);
       if (parsed) {
@@ -174,16 +176,18 @@ export function AddAccountModal({ onClose, onAdd, language }: AddAccountModalPro
       setScanning(true);
       const dataUrl = await captureCurrentTab();
 
-      // Convert data URL to File for Html5Qrcode
+      // Convert the captured data URL into a File for the QR decoder.
       const response = await fetch(dataUrl);
       const blob = await response.blob();
       const file = new File([blob], 'screenshot.png', { type: 'image/png' });
 
       await processQRFile(file);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
       console.error('Screen scan failed:', err);
-      setError(t('addAccount.errorScreenCapture', errorMessage));
+      // captureVisibleTab throws on restricted pages (chrome://, Web Store,
+      // PDFs, other extensions). Show an actionable hint instead of the raw
+      // system error, which reads as "it just broke".
+      setError(t('addAccount.errorScreenHint'));
     } finally {
       setScanning(false);
     }
@@ -361,8 +365,6 @@ export function AddAccountModal({ onClose, onAdd, language }: AddAccountModalPro
             </form>
           ) : (
             <div className="space-y-3">
-              {/* Hidden div for QR code scanning */}
-              <div id="qr-reader" className="hidden"></div>
 
               {/* Drag and Drop Upload Area */}
               <div

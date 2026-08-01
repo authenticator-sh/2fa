@@ -1,15 +1,27 @@
 // Background service worker for Authenticator extension
 // Manifest V3 requires a service worker instead of background scripts
 
-chrome.runtime.onInstalled.addListener((details) => {
-  const supportedLanguages = ['en', 'zh', 'es', 'hi', 'ar', 'pt', 'ru', 'ja', 'de', 'fr', 'ko', 'it', 'tr', 'vi', 'pl', 'nl', 'id', 'th', 'uk', 'sv'];
-  const browserLang = chrome.i18n.getUILanguage().split('-')[0];
-  const lang = supportedLanguages.includes(browserLang) ? browserLang : 'en';
+// Hosted rather than bundled so the copy can be updated without shipping a new
+// extension version, and so the uninstall feedback survives the extension being
+// gone by the time the page opens.
+const WELCOME_URL = 'https://authenticator.sh/welcome';
+const UNINSTALL_FEEDBACK_URL = 'https://authenticator.sh/uninstall';
 
-  chrome.runtime.setUninstallURL(`https://authenticator.sh/${lang}/uninstall`);
+chrome.runtime.onInstalled.addListener((details) => {
+  chrome.runtime.setUninstallURL(UNINSTALL_FEEDBACK_URL);
 
   if (details.reason === 'install') {
-    chrome.tabs.create({ url: `https://authenticator.sh/${lang}/welcome` });
+    chrome.tabs.create({ url: WELCOME_URL });
+  } else if (details.reason === 'update') {
+    // Unpacked extensions fire onInstalled('update') on every dev reload, even
+    // without a version bump — only (re)arm the modal if this version hasn't
+    // been acknowledged yet.
+    const currentVersion = chrome.runtime.getManifest().version;
+    chrome.storage.local.get('lastSeenWhatsNewVersion', (result) => {
+      if (result.lastSeenWhatsNewVersion !== currentVersion) {
+        chrome.storage.local.set({ pendingWhatsNew: currentVersion });
+      }
+    });
   }
 });
 

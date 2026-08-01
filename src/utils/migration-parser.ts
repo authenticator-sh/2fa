@@ -15,28 +15,57 @@ export interface MigrationAccount {
 
 // Protobuf wire types
 const WIRE_TYPE_VARINT = 0;
+const WIRE_TYPE_FIXED64 = 1;
 const WIRE_TYPE_LENGTH_DELIMITED = 2;
+const WIRE_TYPE_FIXED32 = 5;
 
 /**
- * Decodes a varint from protobuf data
+ * Decodes a varint from protobuf data. Uses safe arithmetic to handle values
+ * beyond 32 bits (e.g., large HOTP counters).
  */
 function decodeVarint(buffer: Uint8Array, offset: number): { value: number; offset: number } {
   let value = 0;
-  let shift = 0;
+  let multiplier = 1;
   let currentOffset = offset;
+  let bytesRead = 0;
 
   while (currentOffset < buffer.length) {
     const byte = buffer[currentOffset++];
-    value |= (byte & 0x7f) << shift;
+    value += (byte & 0x7f) * multiplier;
+    bytesRead++;
 
     if ((byte & 0x80) === 0) {
       return { value, offset: currentOffset };
     }
 
-    shift += 7;
+    multiplier *= 128;
+    if (bytesRead >= 10) {
+      throw new Error('Varint too long (max 10 bytes)');
+    }
   }
 
   throw new Error('Invalid varint encoding');
+}
+
+/**
+ * Skips a field of unknown type so parsing can continue past forward-compatible
+ * additions in the protobuf schema.
+ */
+function skipField(buffer: Uint8Array, offset: number, wireType: number): number {
+  switch (wireType) {
+    case WIRE_TYPE_VARINT:
+      return decodeVarint(buffer, offset).offset;
+    case WIRE_TYPE_FIXED64:
+      return offset + 8;
+    case WIRE_TYPE_LENGTH_DELIMITED: {
+      const { value: length, offset: newOffset } = decodeVarint(buffer, offset);
+      return newOffset + length;
+    }
+    case WIRE_TYPE_FIXED32:
+      return offset + 4;
+    default:
+      throw new Error(`Unsupported wire type: ${wireType}`);
+  }
 }
 
 /**
@@ -144,8 +173,8 @@ function parseOtpParameters(buffer: Uint8Array): MigrationAccount {
           break;
       }
     } else {
-      // Skip unknown field types
-      throw new Error(`Unsupported wire type: ${wireType}`);
+      // Forward-compatible: skip unknown wire types instead of aborting the whole batch
+      offset = skipField(buffer, offset, wireType);
     }
   }
 
@@ -207,19 +236,19 @@ export function parseMigrationURL(url: string): MigrationAccount[] | null {
       offset = tagOffset;
 
       if (fieldNumber === 1 && wireType === WIRE_TYPE_LENGTH_DELIMITED) {
-        // This is an otp_parameters field
+        // otp_parameters field — one OtpParameters message per repeat
         const { data, offset: newOffset } = readLengthDelimited(bytes, offset);
         offset = newOffset;
 
-        const account = parseOtpParameters(data);
-        accounts.push(account);
-      } else if (wireType === WIRE_TYPE_VARINT) {
-        // Skip metadata fields (version, batch_size, etc.)
-        const { offset: newOffset } = decodeVarint(bytes, offset);
-        offset = newOffset;
+        try {
+          accounts.push(parseOtpParameters(data));
+        } catch (err) {
+          // One malformed entry must not drop the rest of the batch
+          console.warn('Skipping malformed OtpParameters:', err);
+        }
       } else {
-        // Skip unknown fields
-        break;
+        // Forward-compatible: skip metadata or unknown fields instead of aborting
+        offset = skipField(bytes, offset, wireType);
       }
     }
 

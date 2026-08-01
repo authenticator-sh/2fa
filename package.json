@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "framer-motion": "^12.31.1",
-    "html5-qrcode": "^2.3.8",
+    "jsqr": "^1.4.0",
     "lucide-react": "^0.300.0",
     "otpauth": "^9.2.3",
     "react": "^18.2.0",

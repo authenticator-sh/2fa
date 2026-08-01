@@ -3,6 +3,7 @@ import { type Language } from './i18n';
 export interface FAQItem {
   question: string;
   answer: string;
+  id?: string;
 }
 
 const faqData: Partial<Record<Language, FAQItem[]>> = {
@@ -17,39 +18,45 @@ const faqData: Partial<Record<Language, FAQItem[]>> = {
     },
     {
       question: 'Why are my codes not working?',
-      answer: 'If codes are rejected, the most common reason is time synchronization:\n\n\u2022 Your computer clock must be accurate (within 30 seconds)\n\u2022 TOTP codes are time-based and expire every 30 seconds\n\u2022 Check if you see a time warning at the top of the app\n\u2022 Fix: Update your system time or enable automatic time sync',
+      answer: 'If codes are rejected, the most common reason is time synchronization:\n\n• Your computer clock must be accurate (within 30 seconds)\n• TOTP codes are time-based and expire every 30 seconds\n• Check if you see a time warning at the top of the app\n• Fix: Update your system time or enable automatic time sync',
     },
     {
       question: 'How do I backup my accounts?',
-      answer: 'To backup your accounts:\n\n1. Click the Settings icon (gear)\n2. Click "Export" button\n3. Save the JSON file to a secure location\n\nIMPORTANT: Keep this file secure - it contains your secret keys. Anyone with this file can generate your 2FA codes.',
+      answer: 'To backup your accounts:\n\n1. Click the Settings icon (gear)\n2. Click "Export"\n3. Choose how to save the file:\n\n• Protected with a password (recommended) — the file is useless to anyone who does not know the password. Remember it: the file cannot be opened without it.\n• Plain file — readable by anyone who opens it. Only for a location you fully control.\n\nA plain export contains your secret keys in the clear. Anyone holding that file can generate your 2FA codes.'
     },
     {
       question: 'How do I restore from backup?',
-      answer: 'To restore accounts from a backup:\n\n1. Click "import from backup" on the main screen\n2. Select your backup JSON file\n3. All accounts will be imported\n\nNote: This will add to your existing accounts, not replace them.',
+      answer: 'To restore accounts from a backup:\n\n1. Click "import from backup" on the main screen\n2. Select your backup JSON file\n3. If the file is password protected, enter its password when asked\n4. All accounts will be imported\n\nNote: This will add to your existing accounts, not replace them.',
     },
     {
       question: 'Can I use this on multiple devices?',
-      answer: 'Yes! If you enable Chrome Sync:\n\n\u2022 Your accounts will sync across all your Chrome browsers\n\u2022 You can also manually export and import on different devices\n\u2022 Note: Local storage is also used as a backup',
+      answer: 'Yes! If you enable Chrome Sync:\n\n• Your accounts will sync across all your Chrome browsers\n• You can also manually export and import on different devices\n• Note: Local storage is also used as a backup',
     },
     {
       question: 'What if I delete an account by mistake?',
       answer: 'If you accidentally delete an account:\n\n1. Check your automatic backups (stored for 7 days)\n2. Or restore from your manual backup file\n3. If no backup exists, you\'ll need to disable and re-enable 2FA on that service\n\nTip: Always export a backup before making major changes!',
     },
     {
-      question: 'Why do I see a time sync warning?',
-      answer: 'TOTP codes depend on accurate time. If your system clock is off by more than 30 seconds:\n\n\u2022 Codes may be rejected by services\n\u2022 You\'ll see a yellow warning at the top\n\u2022 Fix: Go to your system settings and enable automatic time sync',
+      id: 'time-sync',
+      question: 'Why do I see a time sync warning? How do I fix it?',
+      answer: 'TOTP codes are generated from your device clock, so if it drifts more than ~30 seconds from real time, services will reject your codes.\n\nHow to fix it:\n\n• macOS: System Settings → General → Date & Time → turn on "Set time and date automatically"\n• Windows: Settings → Time & language → Date & time → turn on "Set time automatically", then click "Sync now"\n• Linux: enable NTP / automatic date & time in your settings\n\nAfter syncing, reopen the extension — the warning disappears and your codes will be accepted again. Only your device clock needs fixing; the codes themselves are still generated offline.',
     },
     {
       question: 'What\'s the difference between Algorithm/Digits/Period?',
-      answer: 'These are advanced settings (usually defaults work):\n\n\u2022 Algorithm: Encryption method (SHA1 is standard)\n\u2022 Digits: Code length (6 is most common, some use 8)\n\u2022 Period: How long codes are valid (30 seconds standard)\n\nMost services use: SHA1, 6 digits, 30 seconds.',
+      answer: 'These are advanced settings (usually defaults work):\n\n• Algorithm: Hash function used to derive the code (SHA1 is standard)\n• Digits: Code length (6 is most common, some use 8)\n• Period: How long codes are valid (30 seconds standard)\n\nMost services use: SHA1, 6 digits, 30 seconds.',
     },
     {
       question: 'Is my data secure?',
-      answer: 'Yes! Your data is secured in multiple ways:\n\n\u2022 All data is stored locally in Chrome storage\n\u2022 Secret keys never leave your device\n\u2022 Automatic encrypted backups in IndexedDB\n\u2022 Dual storage system (sync + local) for redundancy\n\nWe never send your data to any external servers.',
+      answer: 'Your accounts live only on your device. We have no servers and never receive your data.\n\n• Secret keys never leave your device\n• Automatic local backups (last 7) in case something goes wrong\n• Stored in Chrome storage, with sync as an optional second copy\n\nBy default your codes are stored unencrypted and are protected by your computer login and Chrome profile — the same as most authenticator extensions. For stronger protection, turn on password protection in Settings: your codes are then encrypted on your device, including the backups, and cannot be read without your password.',
+    },
+    {
+      id: 'password-protection',
+      question: 'How do I protect my codes with a password?',
+      answer: 'Open Settings and turn on "Password protection". Your codes are then scrambled on this device, so nobody can read them without your password — not someone using your computer, not a virus that steals browser data, and not through your Google account sync.\n\nYou will also get a recovery code. Save it somewhere outside this browser: it is the only way back in if you forget your password. We cannot reset it for you.\n\nYou choose how often the password is asked for: every time, after a few minutes idle, or once until the browser closes. You can turn the protection off again at any time with your password.',
     },
     {
       question: 'Can I import from Google Authenticator?',
-      answer: 'Yes! Google Authenticator has an export feature:\n\n1. Open Google Authenticator app\n2. Tap "Transfer accounts" \u2192 "Export accounts"\n3. Select accounts to export\n4. Take a screenshot of the QR code\n5. In this app: Add Account \u2192 QR Code \u2192 upload the screenshot',
+      answer: 'Yes! Google Authenticator has an export feature:\n\n1. Open Google Authenticator app\n2. Tap "Transfer accounts" → "Export accounts"\n3. Select accounts to export\n4. Take a screenshot of the QR code\n5. In this app: Add Account → QR Code → upload the screenshot',
     },
     {
       question: 'What happens if I lose my backup?',
@@ -58,202 +65,226 @@ const faqData: Partial<Record<Language, FAQItem[]>> = {
   ],
   zh: [
     {
-      question: '\u5982\u4f55\u6dfb\u52a0\u65b0\u8d26\u6237\uff1f',
-      answer: '\u60a8\u53ef\u4ee5\u901a\u8fc7\u4e24\u79cd\u65b9\u5f0f\u6dfb\u52a0\u8d26\u6237\uff1a\n\n1. \u624b\u52a8\u8f93\u5165\uff1a\u70b9\u51fb\u201c\u6dfb\u52a0\u8d26\u6237\u201d\uff0c\u8f93\u5165\u8d26\u6237\u540d\u79f0\u548c\u60a8\u670d\u52a1\u7684 2FA \u8bbe\u7f6e\u9875\u9762\u4e0a\u7684\u5bc6\u94a5\u3002\n\n2. QR Code\uff1a\u70b9\u51fb\u201c\u6dfb\u52a0\u8d26\u6237\u201d\uff0c\u5207\u6362\u5230\u201cQR Code\u201d\u6807\u7b7e\u9875\uff0c\u7136\u540e\u4e0a\u4f20 2FA \u8bbe\u7f6e\u671f\u95f4\u663e\u793a\u7684 QR Code \u7684\u622a\u56fe\u6216\u7167\u7247\u3002',
+      question: '如何添加新账户？',
+      answer: '您可以通过两种方式添加账户：\n\n1. 手动输入：点击“添加账户”，输入账户名称和您服务的 2FA 设置页面上的密钥。\n\n2. QR Code：点击“添加账户”，切换到“QR Code”标签页，然后上传 2FA 设置期间显示的 QR Code 的截图或照片。',
     },
     {
-      question: '\u5728\u54ea\u91cc\u53ef\u4ee5\u627e\u5230\u5bc6\u94a5\uff1f',
-      answer: '\u5728\u4efb\u4f55\u670d\u52a1\uff08Gmail\u3001GitHub \u7b49\uff09\u4e0a\u8bbe\u7f6e 2FA \u65f6\uff1a\n\n1. \u67e5\u627e\u201c\u65e0\u6cd5\u626b\u63cf QR Code\uff1f\u201d\u6216\u201c\u624b\u52a8\u8f93\u5165\u201d\u94fe\u63a5\n2. \u70b9\u51fb\u5b83\u4ee5\u663e\u793a\u5bc6\u94a5\n3. \u5bc6\u94a5\u901a\u5e38\u4e3a 16-32 \u4e2a\u5b57\u7b26\uff08\u5b57\u6bcd A-Z \u548c\u6570\u5b57 2-7\uff09\n4. \u793a\u4f8b\uff1aJBSWY3DPEHPK3PXP',
+      question: '在哪里可以找到密钥？',
+      answer: '在任何服务（Gmail、GitHub 等）上设置 2FA 时：\n\n1. 查找“无法扫描 QR Code？”或“手动输入”链接\n2. 点击它以显示密钥\n3. 密钥通常为 16-32 个字符（字母 A-Z 和数字 2-7）\n4. 示例：JBSWY3DPEHPK3PXP',
     },
     {
-      question: '\u4e3a\u4ec0\u4e48\u6211\u7684\u9a8c\u8bc1\u7801\u4e0d\u80fd\u7528\uff1f',
-      answer: '\u5982\u679c\u9a8c\u8bc1\u7801\u88ab\u62d2\u7edd\uff0c\u6700\u5e38\u89c1\u7684\u539f\u56e0\u662f\u65f6\u95f4\u540c\u6b65\u95ee\u9898\uff1a\n\n\u2022 \u60a8\u7684\u8ba1\u7b97\u673a\u65f6\u949f\u5fc5\u987b\u51c6\u786e\uff08\u8bef\u5dee\u4e0d\u8d85\u8fc7 30 \u79d2\uff09\n\u2022 TOTP \u9a8c\u8bc1\u7801\u662f\u57fa\u4e8e\u65f6\u95f4\u7684\uff0c\u6bcf 30 \u79d2\u8fc7\u671f\n\u2022 \u68c0\u67e5\u5e94\u7528\u9876\u90e8\u662f\u5426\u663e\u793a\u65f6\u95f4\u8b66\u544a\n\u2022 \u89e3\u51b3\u65b9\u6cd5\uff1a\u66f4\u65b0\u7cfb\u7edf\u65f6\u95f4\u6216\u542f\u7528\u81ea\u52a8\u65f6\u95f4\u540c\u6b65',
+      question: '为什么我的验证码不能用？',
+      answer: '如果验证码被拒绝，最常见的原因是时间同步问题：\n\n• 您的计算机时钟必须准确（误差不超过 30 秒）\n• TOTP 验证码是基于时间的，每 30 秒过期\n• 检查应用顶部是否显示时间警告\n• 解决方法：更新系统时间或启用自动时间同步',
     },
     {
-      question: '\u5982\u4f55\u5907\u4efd\u6211\u7684\u8d26\u6237\uff1f',
-      answer: '\u5907\u4efd\u60a8\u7684\u8d26\u6237\uff1a\n\n1. \u70b9\u51fb\u8bbe\u7f6e\u56fe\u6807\uff08\u9f7f\u8f6e\uff09\n2. \u70b9\u51fb\u201c\u5bfc\u51fa\u201d\u6309\u94ae\n3. \u5c06 JSON \u6587\u4ef6\u4fdd\u5b58\u5230\u5b89\u5168\u7684\u4f4d\u7f6e\n\n\u91cd\u8981\u63d0\u793a\uff1a\u8bf7\u59a5\u5584\u4fdd\u7ba1\u6b64\u6587\u4ef6 - \u5b83\u5305\u542b\u60a8\u7684\u5bc6\u94a5\u3002\u4efb\u4f55\u62e5\u6709\u6b64\u6587\u4ef6\u7684\u4eba\u90fd\u53ef\u4ee5\u751f\u6210\u60a8\u7684 2FA \u9a8c\u8bc1\u7801\u3002',
+      question: '如何备份我的账户？',
+      answer: '备份您的账户：\n\n1. 点击设置图标（齿轮）\n2. 点击“导出”\n3. 选择保存方式：\n\n• 用密码保护（推荐）——不知道密码的人拿到文件也没有用。请记住密码：没有它就打不开该文件。\n• 普通文件——任何打开它的人都能读取。仅适合放在你完全掌控的位置。\n\n普通导出会以明文包含你的密钥。任何拿到该文件的人都能生成你的 2FA 验证码。',
     },
     {
-      question: '\u5982\u4f55\u4ece\u5907\u4efd\u6062\u590d\uff1f',
-      answer: '\u4ece\u5907\u4efd\u6062\u590d\u8d26\u6237\uff1a\n\n1. \u5728\u4e3b\u5c4f\u5e55\u4e0a\u70b9\u51fb\u201c\u4ece\u5907\u4efd\u5bfc\u5165\u201d\n2. \u9009\u62e9\u60a8\u7684\u5907\u4efd JSON \u6587\u4ef6\n3. \u6240\u6709\u8d26\u6237\u5c06\u88ab\u5bfc\u5165\n\n\u6ce8\u610f\uff1a\u8fd9\u5c06\u6dfb\u52a0\u5230\u60a8\u73b0\u6709\u7684\u8d26\u6237\u4e2d\uff0c\u800c\u4e0d\u662f\u66ff\u6362\u5b83\u4eec\u3002',
+      question: '如何从备份恢复？',
+      answer: '从备份恢复账户：\n\n1. 在主屏幕上点击“从备份导入”\n2. 选择您的备份 JSON 文件\n3. 如果文件有密码保护，按提示输入密码\n4. 所有账户将被导入\n\n注意：这将添加到您现有的账户中，而不是替换它们。',
     },
     {
-      question: '\u53ef\u4ee5\u5728\u591a\u4e2a\u8bbe\u5907\u4e0a\u4f7f\u7528\u5417\uff1f',
-      answer: '\u53ef\u4ee5\uff01\u5982\u679c\u60a8\u542f\u7528 Chrome Sync\uff1a\n\n\u2022 \u60a8\u7684\u8d26\u6237\u5c06\u5728\u6240\u6709 Chrome \u6d4f\u89c8\u5668\u4e4b\u95f4\u540c\u6b65\n\u2022 \u60a8\u4e5f\u53ef\u4ee5\u5728\u4e0d\u540c\u8bbe\u5907\u4e0a\u624b\u52a8\u5bfc\u51fa\u548c\u5bfc\u5165\n\u2022 \u6ce8\u610f\uff1a\u672c\u5730\u5b58\u50a8\u4e5f\u7528\u4f5c\u5907\u4efd',
+      question: '可以在多个设备上使用吗？',
+      answer: '可以！如果您启用 Chrome Sync：\n\n• 您的账户将在所有 Chrome 浏览器之间同步\n• 您也可以在不同设备上手动导出和导入\n• 注意：本地存储也用作备份',
     },
     {
-      question: '\u5982\u679c\u6211\u8bef\u5220\u4e86\u4e00\u4e2a\u8d26\u6237\u600e\u4e48\u529e\uff1f',
-      answer: '\u5982\u679c\u60a8\u4e0d\u5c0f\u5fc3\u5220\u9664\u4e86\u4e00\u4e2a\u8d26\u6237\uff1a\n\n1. \u68c0\u67e5\u81ea\u52a8\u5907\u4efd\uff08\u4fdd\u5b58 7 \u5929\uff09\n2. \u6216\u4ece\u624b\u52a8\u5907\u4efd\u6587\u4ef6\u6062\u590d\n3. \u5982\u679c\u6ca1\u6709\u5907\u4efd\uff0c\u60a8\u9700\u8981\u5728\u8be5\u670d\u52a1\u4e0a\u7981\u7528\u5e76\u91cd\u65b0\u542f\u7528 2FA\n\n\u63d0\u793a\uff1a\u5728\u8fdb\u884c\u91cd\u5927\u66f4\u6539\u4e4b\u524d\uff0c\u8bf7\u59cb\u7ec8\u5bfc\u51fa\u5907\u4efd\uff01',
+      question: '如果我误删了一个账户怎么办？',
+      answer: '如果您不小心删除了一个账户：\n\n1. 检查自动备份（保存 7 天）\n2. 或从手动备份文件恢复\n3. 如果没有备份，您需要在该服务上禁用并重新启用 2FA\n\n提示：在进行重大更改之前，请始终导出备份！',
     },
     {
-      question: '\u4e3a\u4ec0\u4e48\u6211\u770b\u5230\u65f6\u95f4\u540c\u6b65\u8b66\u544a\uff1f',
-      answer: 'TOTP \u9a8c\u8bc1\u7801\u4f9d\u8d56\u4e8e\u51c6\u786e\u7684\u65f6\u95f4\u3002\u5982\u679c\u60a8\u7684\u7cfb\u7edf\u65f6\u949f\u504f\u5dee\u8d85\u8fc7 30 \u79d2\uff1a\n\n\u2022 \u9a8c\u8bc1\u7801\u53ef\u80fd\u88ab\u670d\u52a1\u62d2\u7edd\n\u2022 \u60a8\u4f1a\u5728\u9876\u90e8\u770b\u5230\u9ec4\u8272\u8b66\u544a\n\u2022 \u89e3\u51b3\u65b9\u6cd5\uff1a\u8fdb\u5165\u7cfb\u7edf\u8bbe\u7f6e\u5e76\u542f\u7528\u81ea\u52a8\u65f6\u95f4\u540c\u6b65',
+      id: 'time-sync',
+      question: '为什么我看到时间同步警告？如何修复？',
+      answer: 'TOTP 验证码根据您设备的时钟生成，因此如果时钟与真实时间相差超过约 30 秒，服务将拒绝您的验证码。\n\n如何修复：\n\n• macOS：系统设置 → 通用 → 日期与时间 → 打开"自动设置日期与时间"\n• Windows：设置 → 时间和语言 → 日期和时间 → 打开"自动设置时间"，然后点击"立即同步"\n• Linux：在设置中启用 NTP / 自动日期与时间\n\n同步后重新打开扩展——警告消失，您的验证码将再次被接受。只需修正设备时钟；验证码本身仍然离线生成。',
     },
     {
-      question: '\u7b97\u6cd5/\u4f4d\u6570/\u5468\u671f\u4e4b\u95f4\u6709\u4ec0\u4e48\u533a\u522b\uff1f',
-      answer: '\u8fd9\u4e9b\u662f\u9ad8\u7ea7\u8bbe\u7f6e\uff08\u901a\u5e38\u9ed8\u8ba4\u503c\u5373\u53ef\uff09\uff1a\n\n\u2022 \u7b97\u6cd5\uff1a\u52a0\u5bc6\u65b9\u6cd5\uff08SHA1 \u662f\u6807\u51c6\uff09\n\u2022 \u4f4d\u6570\uff1a\u9a8c\u8bc1\u7801\u957f\u5ea6\uff086 \u4f4d\u6700\u5e38\u89c1\uff0c\u90e8\u5206\u4f7f\u7528 8 \u4f4d\uff09\n\u2022 \u5468\u671f\uff1a\u9a8c\u8bc1\u7801\u6709\u6548\u65f6\u957f\uff0830 \u79d2\u4e3a\u6807\u51c6\uff09\n\n\u5927\u591a\u6570\u670d\u52a1\u4f7f\u7528\uff1aSHA1\u30016 \u4f4d\u30010 \u79d2\u3002',
+      question: '算法/位数/周期之间有什么区别？',
+      answer: '这些是高级设置（通常默认值即可）：\n\n• 算法：用于生成验证码的哈希函数（SHA1 是标准）\n• 位数：验证码长度（6 位最常见，部分使用 8 位）\n• 周期：验证码有效时长（30 秒为标准）\n\n大多数服务使用：SHA1、6 位、30 秒。',
     },
     {
-      question: '\u6211\u7684\u6570\u636e\u5b89\u5168\u5417\uff1f',
-      answer: '\u5b89\u5168\uff01\u60a8\u7684\u6570\u636e\u901a\u8fc7\u591a\u79cd\u65b9\u5f0f\u4fdd\u62a4\uff1a\n\n\u2022 \u6240\u6709\u6570\u636e\u672c\u5730\u5b58\u50a8\u5728 Chrome \u5b58\u50a8\u4e2d\n\u2022 \u5bc6\u94a5\u6c38\u8fdc\u4e0d\u4f1a\u79bb\u5f00\u60a8\u7684\u8bbe\u5907\n\u2022 \u5728 IndexedDB \u4e2d\u81ea\u52a8\u52a0\u5bc6\u5907\u4efd\n\u2022 \u53cc\u5b58\u50a8\u7cfb\u7edf\uff08\u540c\u6b65 + \u672c\u5730\uff09\u63d0\u4f9b\u5197\u4f59\n\n\u6211\u4eec\u4ece\u4e0d\u5c06\u60a8\u7684\u6570\u636e\u53d1\u9001\u5230\u4efb\u4f55\u5916\u90e8\u670d\u52a1\u5668\u3002',
+      question: '我的数据安全吗？',
+      answer: '您的账户只保存在您的设备上。我们没有服务器，也从不接收您的数据。\n\n• 密钥永远不会离开您的设备\n• 自动本地备份（保留最近 7 份），以防出现意外\n• 保存在 Chrome 存储中，同步作为可选的第二份副本\n\n默认情况下，您的验证码以未加密的形式保存，依靠您的电脑登录和 Chrome 配置文件来保护——与大多数验证器扩展相同。若需更强的保护，请在设置中开启密码保护：此后您的验证码（包括备份）会在设备上加密，没有密码便无法读取。',
     },
     {
-      question: '\u53ef\u4ee5\u4ece Google Authenticator \u5bfc\u5165\u5417\uff1f',
-      answer: '\u53ef\u4ee5\uff01Google Authenticator \u6709\u5bfc\u51fa\u529f\u80fd\uff1a\n\n1. \u6253\u5f00 Google Authenticator \u5e94\u7528\n2. \u70b9\u51fb\u201c\u8f6c\u79fb\u8d26\u6237\u201d \u2192 \u201c\u5bfc\u51fa\u8d26\u6237\u201d\n3. \u9009\u62e9\u8981\u5bfc\u51fa\u7684\u8d26\u6237\n4. \u5bf9 QR Code \u8fdb\u884c\u622a\u56fe\n5. \u5728\u672c\u5e94\u7528\u4e2d\uff1a\u6dfb\u52a0\u8d26\u6237 \u2192 QR Code \u2192 \u4e0a\u4f20\u622a\u56fe',
+      id: 'password-protection',
+      question: '如何用密码保护我的验证码？',
+      answer: '打开设置并开启“密码保护”。此后你的验证码会在本设备上加密，没有密码谁也读不了——无论是使用你电脑的人、窃取浏览器数据的病毒，还是通过你的 Google 账号同步。\n\n你还会得到一个恢复码。请把它保存在这个浏览器之外的地方：如果忘记密码，它是唯一的找回方式。我们无法为你重置。\n\n你可以选择多久要求输入一次密码：每次、闲置几分钟后，或直到关闭浏览器。随时可以用密码再次关闭该保护。',
     },
     {
-      question: '\u5982\u679c\u6211\u4e22\u5931\u4e86\u5907\u4efd\u600e\u4e48\u529e\uff1f',
-      answer: '\u5982\u679c\u60a8\u65e0\u6cd5\u8bbf\u95ee\u6b64\u6269\u5c55\u7a0b\u5e8f\u4e14\u6ca1\u6709\u5907\u4efd\uff1a\n\n1. \u60a8\u9700\u8981\u5728\u6bcf\u4e2a\u53d7\u5f71\u54cd\u7684\u670d\u52a1\u4e0a\u7981\u7528 2FA\n2. \u7136\u540e\u91cd\u65b0\u542f\u7528 2FA \u5e76\u518d\u6b21\u6dfb\u52a0\u8d26\u6237\n3. \u5c06\u670d\u52a1\u7684\u6062\u590d\u4ee3\u7801\u4fdd\u5b58\u5728\u5b89\u5168\u7684\u5730\u65b9\n\n\u9884\u9632\u63aa\u65bd\uff1a\u5b9a\u671f\u5bfc\u51fa\u5907\u4efd\u5e76\u5b89\u5168\u5b58\u50a8\uff01',
+      question: '可以从 Google Authenticator 导入吗？',
+      answer: '可以！Google Authenticator 有导出功能：\n\n1. 打开 Google Authenticator 应用\n2. 点击“转移账户” → “导出账户”\n3. 选择要导出的账户\n4. 对 QR Code 进行截图\n5. 在本应用中：添加账户 → QR Code → 上传截图',
+    },
+    {
+      question: '如果我丢失了备份怎么办？',
+      answer: '如果您无法访问此扩展程序且没有备份：\n\n1. 您需要在每个受影响的服务上禁用 2FA\n2. 然后重新启用 2FA 并再次添加账户\n3. 将服务的恢复代码保存在安全的地方\n\n预防措施：定期导出备份并安全存储！',
     },
   ],
   es: [
     {
-      question: '\u00bfC\u00f3mo a\u00f1ado una nueva cuenta?',
-      answer: 'Puede a\u00f1adir una cuenta de dos maneras:\n\n1. Entrada manual: Haga clic en "A\u00f1adir cuenta", ingrese el nombre de la cuenta y la clave secreta de la p\u00e1gina de configuraci\u00f3n de 2FA de su servicio.\n\n2. QR Code: Haga clic en "A\u00f1adir cuenta", cambie a la pesta\u00f1a "QR Code" y suba una captura de pantalla o foto del QR Code mostrado durante la configuraci\u00f3n de 2FA.',
+      question: '¿Cómo añado una nueva cuenta?',
+      answer: 'Puede añadir una cuenta de dos maneras:\n\n1. Entrada manual: Haga clic en "Añadir cuenta", ingrese el nombre de la cuenta y la clave secreta de la página de configuración de 2FA de su servicio.\n\n2. QR Code: Haga clic en "Añadir cuenta", cambie a la pestaña "QR Code" y suba una captura de pantalla o foto del QR Code mostrado durante la configuración de 2FA.',
     },
     {
-      question: '\u00bfD\u00f3nde encuentro la clave secreta?',
-      answer: 'Al configurar 2FA en cualquier servicio (Gmail, GitHub, etc.):\n\n1. Busque el enlace "\u00bfNo puede escanear el QR Code?" o "Ingresar manualmente"\n2. Haga clic para revelar la clave secreta\n3. La clave generalmente tiene 16-32 caracteres (letras A-Z y n\u00fameros 2-7)\n4. Ejemplo: JBSWY3DPEHPK3PXP',
+      question: '¿Dónde encuentro la clave secreta?',
+      answer: 'Al configurar 2FA en cualquier servicio (Gmail, GitHub, etc.):\n\n1. Busque el enlace "¿No puede escanear el QR Code?" o "Ingresar manualmente"\n2. Haga clic para revelar la clave secreta\n3. La clave generalmente tiene 16-32 caracteres (letras A-Z y números 2-7)\n4. Ejemplo: JBSWY3DPEHPK3PXP',
     },
     {
-      question: '\u00bfPor qu\u00e9 mis c\u00f3digos no funcionan?',
-      answer: 'Si los c\u00f3digos son rechazados, la raz\u00f3n m\u00e1s com\u00fan es la sincronizaci\u00f3n de tiempo:\n\n\u2022 El reloj de su computadora debe ser preciso (dentro de 30 segundos)\n\u2022 Los c\u00f3digos TOTP est\u00e1n basados en el tiempo y expiran cada 30 segundos\n\u2022 Verifique si ve una advertencia de tiempo en la parte superior de la aplicaci\u00f3n\n\u2022 Soluci\u00f3n: Actualice la hora del sistema o habilite la sincronizaci\u00f3n autom\u00e1tica de tiempo',
+      question: '¿Por qué mis códigos no funcionan?',
+      answer: 'Si los códigos son rechazados, la razón más común es la sincronización de tiempo:\n\n• El reloj de su computadora debe ser preciso (dentro de 30 segundos)\n• Los códigos TOTP están basados en el tiempo y expiran cada 30 segundos\n• Verifique si ve una advertencia de tiempo en la parte superior de la aplicación\n• Solución: Actualice la hora del sistema o habilite la sincronización automática de tiempo',
     },
     {
-      question: '\u00bfC\u00f3mo hago una copia de seguridad de mis cuentas?',
-      answer: 'Para hacer una copia de seguridad de sus cuentas:\n\n1. Haga clic en el icono de Configuraci\u00f3n (engranaje)\n2. Haga clic en el bot\u00f3n "Exportar"\n3. Guarde el archivo JSON en una ubicaci\u00f3n segura\n\nIMPORTANTE: Mantenga este archivo seguro - contiene sus claves secretas. Cualquier persona con este archivo puede generar sus c\u00f3digos 2FA.',
+      question: '¿Cómo hago una copia de seguridad de mis cuentas?',
+      answer: 'Para hacer una copia de seguridad de sus cuentas:\n\n1. Haga clic en el icono de Configuración (engranaje)\n2. Haga clic en el botón "Exportar"\n3. Elija cómo guardar el archivo:\n\n• Protegido con contraseña (recomendado): el archivo no sirve de nada a quien no la sepa. Recuérdela: sin ella el archivo no se puede abrir.\n• Archivo normal: legible por cualquiera que lo abra. Solo para un lugar que usted controle.\n\nUna exportación normal contiene sus claves secretas en texto claro. Cualquiera con ese archivo puede generar sus códigos 2FA.',
     },
     {
-      question: '\u00bfC\u00f3mo restauro desde una copia de seguridad?',
-      answer: 'Para restaurar cuentas desde una copia de seguridad:\n\n1. Haga clic en "importar desde copia de seguridad" en la pantalla principal\n2. Seleccione su archivo JSON de respaldo\n3. Todas las cuentas ser\u00e1n importadas\n\nNota: Esto se a\u00f1adir\u00e1 a sus cuentas existentes, no las reemplazar\u00e1.',
+      question: '¿Cómo restauro desde una copia de seguridad?',
+      answer: 'Para restaurar cuentas desde una copia de seguridad:\n\n1. Haga clic en "importar desde copia de seguridad" en la pantalla principal\n2. Seleccione su archivo JSON de respaldo\n3. Todas las cuentas serán importadas\n\nNota: Esto se añadirá a sus cuentas existentes, no las reemplazará.',
     },
     {
-      question: '\u00bfPuedo usar esto en m\u00faltiples dispositivos?',
-      answer: '\u00a1S\u00ed! Si habilita Chrome Sync:\n\n\u2022 Sus cuentas se sincronizar\u00e1n en todos sus navegadores Chrome\n\u2022 Tambi\u00e9n puede exportar e importar manualmente en diferentes dispositivos\n\u2022 Nota: El almacenamiento local tambi\u00e9n se usa como respaldo',
+      question: '¿Puedo usar esto en múltiples dispositivos?',
+      answer: '¡Sí! Si habilita Chrome Sync:\n\n• Sus cuentas se sincronizarán en todos sus navegadores Chrome\n• También puede exportar e importar manualmente en diferentes dispositivos\n• Nota: El almacenamiento local también se usa como respaldo',
     },
     {
-      question: '\u00bfQu\u00e9 pasa si elimino una cuenta por error?',
-      answer: 'Si elimina accidentalmente una cuenta:\n\n1. Verifique sus copias de seguridad autom\u00e1ticas (almacenadas por 7 d\u00edas)\n2. O restaure desde su archivo de respaldo manual\n3. Si no existe respaldo, deber\u00e1 desactivar y volver a activar 2FA en ese servicio\n\nConsejo: \u00a1Siempre exporte una copia de seguridad antes de hacer cambios importantes!',
+      question: '¿Qué pasa si elimino una cuenta por error?',
+      answer: 'Si elimina accidentalmente una cuenta:\n\n1. Verifique sus copias de seguridad automáticas (almacenadas por 7 días)\n2. O restaure desde su archivo de respaldo manual\n3. Si no existe respaldo, deberá desactivar y volver a activar 2FA en ese servicio\n\nConsejo: ¡Siempre exporte una copia de seguridad antes de hacer cambios importantes!',
     },
     {
-      question: '\u00bfPor qu\u00e9 veo una advertencia de sincronizaci\u00f3n de tiempo?',
-      answer: 'Los c\u00f3digos TOTP dependen de un tiempo preciso. Si el reloj de su sistema tiene un desfase de m\u00e1s de 30 segundos:\n\n\u2022 Los c\u00f3digos pueden ser rechazados por los servicios\n\u2022 Ver\u00e1 una advertencia amarilla en la parte superior\n\u2022 Soluci\u00f3n: Vaya a la configuraci\u00f3n del sistema y habilite la sincronizaci\u00f3n autom\u00e1tica de tiempo',
+      id: 'time-sync',
+      question: '¿Por qué veo una advertencia de sincronización de tiempo? ¿Cómo la soluciono?',
+      answer: 'Los códigos TOTP se generan a partir del reloj de tu dispositivo, así que si se desvía más de ~30 segundos de la hora real, los servicios rechazarán tus códigos.\n\nCómo solucionarlo:\n\n• macOS: Configuración del Sistema → General → Fecha y hora → activa "Establecer fecha y hora automáticamente"\n• Windows: Configuración → Hora e idioma → Fecha y hora → activa "Establecer la hora automáticamente" y pulsa "Sincronizar ahora"\n• Linux: activa NTP / fecha y hora automática en los ajustes\n\nTras sincronizar, vuelve a abrir la extensión: la advertencia desaparece y tus códigos se aceptarán de nuevo. Solo hay que corregir el reloj del dispositivo; los códigos se siguen generando sin conexión.',
     },
     {
-      question: '\u00bfCu\u00e1l es la diferencia entre Algoritmo/D\u00edgitos/Per\u00edodo?',
-      answer: 'Estas son configuraciones avanzadas (generalmente los valores predeterminados funcionan):\n\n\u2022 Algoritmo: M\u00e9todo de cifrado (SHA1 es el est\u00e1ndar)\n\u2022 D\u00edgitos: Longitud del c\u00f3digo (6 es lo m\u00e1s com\u00fan, algunos usan 8)\n\u2022 Per\u00edodo: Cu\u00e1nto tiempo son v\u00e1lidos los c\u00f3digos (30 segundos est\u00e1ndar)\n\nLa mayor\u00eda de servicios usan: SHA1, 6 d\u00edgitos, 30 segundos.',
+      question: '¿Cuál es la diferencia entre Algoritmo/Dígitos/Período?',
+      answer: 'Estas son configuraciones avanzadas (generalmente los valores predeterminados funcionan):\n\n• Algoritmo: Función hash usada para generar el código (SHA1 es el estándar)\n• Dígitos: Longitud del código (6 es lo más común, algunos usan 8)\n• Período: Cuánto tiempo son válidos los códigos (30 segundos estándar)\n\nLa mayoría de servicios usan: SHA1, 6 dígitos, 30 segundos.',
     },
     {
-      question: '\u00bfMis datos est\u00e1n seguros?',
-      answer: '\u00a1S\u00ed! Sus datos est\u00e1n protegidos de m\u00faltiples maneras:\n\n\u2022 Todos los datos se almacenan localmente en el almacenamiento de Chrome\n\u2022 Las claves secretas nunca salen de su dispositivo\n\u2022 Copias de seguridad cifradas autom\u00e1ticas en IndexedDB\n\u2022 Sistema de almacenamiento dual (sincronizado + local) para redundancia\n\nNunca enviamos sus datos a ning\u00fan servidor externo.',
+      question: '¿Mis datos están seguros?',
+      answer: 'Sus cuentas solo residen en su dispositivo. No tenemos servidores y nunca recibimos sus datos.\n\n• Las claves secretas nunca salen de su dispositivo\n• Copias de seguridad locales automáticas (las 7 últimas) por si algo sale mal\n• Guardadas en el almacenamiento de Chrome, con la sincronización como segunda copia opcional\n\nDe forma predeterminada, sus códigos se guardan sin cifrar y están protegidos por el inicio de sesión de su ordenador y su perfil de Chrome, igual que en la mayoría de extensiones de autenticación. Para una protección más fuerte, active la protección con contraseña en Ajustes: sus códigos, incluidas las copias de seguridad, se cifran en su dispositivo y no se pueden leer sin su contraseña.',
     },
     {
-      question: '\u00bfPuedo importar desde Google Authenticator?',
-      answer: '\u00a1S\u00ed! Google Authenticator tiene una funci\u00f3n de exportaci\u00f3n:\n\n1. Abra la aplicaci\u00f3n Google Authenticator\n2. Toque "Transferir cuentas" \u2192 "Exportar cuentas"\n3. Seleccione las cuentas a exportar\n4. Tome una captura de pantalla del QR Code\n5. En esta aplicaci\u00f3n: A\u00f1adir cuenta \u2192 QR Code \u2192 suba la captura de pantalla',
+      id: 'password-protection',
+      question: '¿Cómo protejo mis códigos con una contraseña?',
+      answer: 'Abra Ajustes y active "Protección con contraseña". Sus códigos quedan cifrados en este dispositivo, así que nadie puede leerlos sin su contraseña: ni quien use su ordenador, ni un virus que robe los datos del navegador, ni a través de la sincronización de su cuenta de Google.\n\nTambién recibirá un código de recuperación. Guárdelo fuera de este navegador: es la única forma de volver a entrar si olvida la contraseña. No podemos restablecerla por usted.\n\nUsted elige con qué frecuencia se pide la contraseña: siempre, tras unos minutos de inactividad, o una vez hasta cerrar el navegador. Puede desactivar la protección cuando quiera con su contraseña.',
     },
     {
-      question: '\u00bfQu\u00e9 pasa si pierdo mi copia de seguridad?',
-      answer: 'Si pierde el acceso a esta extensi\u00f3n y no tiene respaldo:\n\n1. Deber\u00e1 desactivar 2FA en cada servicio afectado\n2. Luego volver a activar 2FA y a\u00f1adir las cuentas de nuevo\n3. Guarde los c\u00f3digos de recuperaci\u00f3n de los servicios en un lugar seguro\n\n\u00a1Prevenci\u00f3n: Exporte copias de seguridad regularmente y almac\u00e9nelas de forma segura!',
+      question: '¿Puedo importar desde Google Authenticator?',
+      answer: '¡Sí! Google Authenticator tiene una función de exportación:\n\n1. Abra la aplicación Google Authenticator\n2. Toque "Transferir cuentas" → "Exportar cuentas"\n3. Seleccione las cuentas a exportar\n4. Tome una captura de pantalla del QR Code\n5. En esta aplicación: Añadir cuenta → QR Code → suba la captura de pantalla',
+    },
+    {
+      question: '¿Qué pasa si pierdo mi copia de seguridad?',
+      answer: 'Si pierde el acceso a esta extensión y no tiene respaldo:\n\n1. Deberá desactivar 2FA en cada servicio afectado\n2. Luego volver a activar 2FA y añadir las cuentas de nuevo\n3. Guarde los códigos de recuperación de los servicios en un lugar seguro\n\n¡Prevención: Exporte copias de seguridad regularmente y almacénelas de forma segura!',
     },
   ],
   hi: [
     {
-      question: '\u092e\u0948\u0902 \u0928\u092f\u093e \u0916\u093e\u0924\u093e \u0915\u0948\u0938\u0947 \u091c\u094b\u0921\u093c\u0942\u0901?',
-      answer: '\u0906\u092a \u0926\u094b \u0924\u0930\u0940\u0915\u094b\u0902 \u0938\u0947 \u0916\u093e\u0924\u093e \u091c\u094b\u0921\u093c \u0938\u0915\u0924\u0947 \u0939\u0948\u0902:\n\n1. \u092e\u0948\u0928\u0941\u0905\u0932 \u090f\u0902\u091f\u094d\u0930\u0940: "\u0916\u093e\u0924\u093e \u091c\u094b\u0921\u093c\u0947\u0902" \u092a\u0930 \u0915\u094d\u0932\u093f\u0915 \u0915\u0930\u0947\u0902, \u0916\u093e\u0924\u0947 \u0915\u093e \u0928\u093e\u092e \u0914\u0930 \u0905\u092a\u0928\u0940 \u0938\u0947\u0935\u093e \u0915\u0947 2FA \u0938\u0947\u091f\u0905\u092a \u092a\u0947\u091c \u0938\u0947 \u0917\u0941\u092a\u094d\u0924 \u0915\u0941\u0902\u091c\u0940 \u0926\u0930\u094d\u091c \u0915\u0930\u0947\u0902\u0964\n\n2. QR Code: "\u0916\u093e\u0924\u093e \u091c\u094b\u0921\u093c\u0947\u0902" \u092a\u0930 \u0915\u094d\u0932\u093f\u0915 \u0915\u0930\u0947\u0902, "QR Code" \u091f\u0948\u092c \u092a\u0930 \u0938\u094d\u0935\u093f\u091a \u0915\u0930\u0947\u0902, \u0914\u0930 2FA \u0938\u0947\u091f\u0905\u092a \u0915\u0947 \u0926\u094c\u0930\u093e\u0928 \u0926\u093f\u0916\u093e\u090f \u0917\u090f QR Code \u0915\u093e \u0938\u094d\u0915\u094d\u0930\u0940\u0928\u0936\u0949\u091f \u092f\u093e \u092b\u094b\u091f\u094b \u0905\u092a\u0932\u094b\u0921 \u0915\u0930\u0947\u0902\u0964',
+      question: 'मैं नया खाता कैसे जोड़ूँ?',
+      answer: 'आप दो तरीकों से खाता जोड़ सकते हैं:\n\n1. मैनुअल एंट्री: "खाता जोड़ें" पर क्लिक करें, खाते का नाम और अपनी सेवा के 2FA सेटअप पेज से गुप्त कुंजी दर्ज करें।\n\n2. QR Code: "खाता जोड़ें" पर क्लिक करें, "QR Code" टैब पर स्विच करें, और 2FA सेटअप के दौरान दिखाए गए QR Code का स्क्रीनशॉट या फोटो अपलोड करें।',
     },
     {
-      question: '\u0917\u0941\u092a\u094d\u0924 \u0915\u0941\u0902\u091c\u0940 \u0915\u0939\u093e\u0901 \u092e\u093f\u0932\u0947\u0917\u0940?',
-      answer: '\u0915\u093f\u0938\u0940 \u092d\u0940 \u0938\u0947\u0935\u093e (Gmail, GitHub, \u0906\u0926\u093f) \u092a\u0930 2FA \u0938\u0947\u091f\u0905\u092a \u0915\u0930\u0924\u0947 \u0938\u092e\u092f:\n\n1. "QR Code \u0938\u094d\u0915\u0948\u0928 \u0928\u0939\u0940\u0902 \u0915\u0930 \u0938\u0915\u0924\u0947?" \u092f\u093e "\u092e\u0948\u0928\u0941\u0905\u0932 \u0930\u0942\u092a \u0938\u0947 \u0926\u0930\u094d\u091c \u0915\u0930\u0947\u0902" \u0932\u093f\u0902\u0915 \u0916\u094b\u091c\u0947\u0902\n2. \u0917\u0941\u092a\u094d\u0924 \u0915\u0941\u0902\u091c\u0940 \u0926\u093f\u0916\u093e\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u0909\u0938 \u092a\u0930 \u0915\u094d\u0932\u093f\u0915 \u0915\u0930\u0947\u0902\n3. \u0915\u0941\u0902\u091c\u0940 \u0906\u092e\u0924\u094c\u0930 \u092a\u0930 16-32 \u0905\u0915\u094d\u0937\u0930\u094b\u0902 \u0915\u0940 \u0939\u094b\u0924\u0940 \u0939\u0948 (\u0905\u0915\u094d\u0937\u0930 A-Z \u0914\u0930 \u0938\u0902\u0916\u094d\u092f\u093e\u090f\u0901 2-7)\n4. \u0909\u0926\u093e\u0939\u0930\u0923: JBSWY3DPEHPK3PXP',
+      question: 'गुप्त कुंजी कहाँ मिलेगी?',
+      answer: 'किसी भी सेवा (Gmail, GitHub, आदि) पर 2FA सेटअप करते समय:\n\n1. "QR Code स्कैन नहीं कर सकते?" या "मैनुअल रूप से दर्ज करें" लिंक खोजें\n2. गुप्त कुंजी दिखाने के लिए उस पर क्लिक करें\n3. कुंजी आमतौर पर 16-32 अक्षरों की होती है (अक्षर A-Z और संख्याएँ 2-7)\n4. उदाहरण: JBSWY3DPEHPK3PXP',
     },
     {
-      question: '\u092e\u0947\u0930\u0947 \u0915\u094b\u0921 \u0915\u093e\u092e \u0915\u094d\u092f\u094b\u0902 \u0928\u0939\u0940\u0902 \u0915\u0930 \u0930\u0939\u0947?',
-      answer: '\u092f\u0926\u093f \u0915\u094b\u0921 \u0905\u0938\u094d\u0935\u0940\u0915\u093e\u0930 \u0939\u094b \u0930\u0939\u0947 \u0939\u0948\u0902, \u0924\u094b \u0938\u092c\u0938\u0947 \u0906\u092e \u0915\u093e\u0930\u0923 \u0938\u092e\u092f \u0938\u093f\u0902\u0915\u094d\u0930\u0928\u093e\u0907\u091c\u093c\u0947\u0936\u0928 \u0939\u0948:\n\n\u2022 \u0906\u092a\u0915\u0947 \u0915\u0902\u092a\u094d\u092f\u0942\u091f\u0930 \u0915\u0940 \u0918\u0921\u093c\u0940 \u0938\u091f\u0940\u0915 \u0939\u094b\u0928\u0940 \u091a\u093e\u0939\u093f\u090f (30 \u0938\u0947\u0915\u0902\u0921 \u0915\u0947 \u0905\u0902\u0926\u0930)\n\u2022 TOTP \u0915\u094b\u0921 \u0938\u092e\u092f-\u0906\u0927\u093e\u0930\u093f\u0924 \u0939\u094b\u0924\u0947 \u0939\u0948\u0902 \u0914\u0930 \u0939\u0930 30 \u0938\u0947\u0915\u0902\u0921 \u092e\u0947\u0902 \u0938\u092e\u093e\u092a\u094d\u0924 \u0939\u094b \u091c\u093e\u0924\u0947 \u0939\u0948\u0902\n\u2022 \u091c\u093e\u0901\u091a\u0947\u0902 \u0915\u093f \u0910\u092a \u0915\u0947 \u0936\u0940\u0930\u094d\u0937 \u092a\u0930 \u0938\u092e\u092f \u091a\u0947\u0924\u093e\u0935\u0928\u0940 \u0926\u093f\u0916 \u0930\u0939\u0940 \u0939\u0948\n\u2022 \u0938\u092e\u093e\u0927\u093e\u0928: \u0938\u093f\u0938\u094d\u091f\u092e \u0938\u092e\u092f \u0905\u092a\u0921\u0947\u091f \u0915\u0930\u0947\u0902 \u092f\u093e \u0938\u094d\u0935\u091a\u093e\u0932\u093f\u0924 \u0938\u092e\u092f \u0938\u093f\u0902\u0915 \u0938\u0915\u094d\u0937\u092e \u0915\u0930\u0947\u0902',
+      question: 'मेरे कोड काम क्यों नहीं कर रहे?',
+      answer: 'यदि कोड अस्वीकार हो रहे हैं, तो सबसे आम कारण समय सिंक्रनाइज़ेशन है:\n\n• आपके कंप्यूटर की घड़ी सटीक होनी चाहिए (30 सेकंड के अंदर)\n• TOTP कोड समय-आधारित होते हैं और हर 30 सेकंड में समाप्त हो जाते हैं\n• जाँचें कि ऐप के शीर्ष पर समय चेतावनी दिख रही है\n• समाधान: सिस्टम समय अपडेट करें या स्वचालित समय सिंक सक्षम करें',
     },
     {
-      question: '\u092e\u0948\u0902 \u0905\u092a\u0928\u0947 \u0916\u093e\u0924\u094b\u0902 \u0915\u093e \u092c\u0948\u0915\u0905\u092a \u0915\u0948\u0938\u0947 \u0932\u0942\u0901?',
-      answer: '\u0905\u092a\u0928\u0947 \u0916\u093e\u0924\u094b\u0902 \u0915\u093e \u092c\u0948\u0915\u0905\u092a \u0932\u0947\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f:\n\n1. \u0938\u0947\u091f\u093f\u0902\u0917\u094d\u0938 \u0906\u0907\u0915\u0928 (\u0917\u093f\u092f\u0930) \u092a\u0930 \u0915\u094d\u0932\u093f\u0915 \u0915\u0930\u0947\u0902\n2. "\u090f\u0915\u094d\u0938\u092a\u094b\u0930\u094d\u091f" \u092c\u091f\u0928 \u092a\u0930 \u0915\u094d\u0932\u093f\u0915 \u0915\u0930\u0947\u0902\n3. JSON \u092b\u093e\u0907\u0932 \u0915\u094b \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0938\u094d\u0925\u093e\u0928 \u092a\u0930 \u0938\u0939\u0947\u091c\u0947\u0902\n\n\u092e\u0939\u0924\u094d\u0935\u092a\u0942\u0930\u094d\u0923: \u0907\u0938 \u092b\u093e\u0907\u0932 \u0915\u094b \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0930\u0916\u0947\u0902 - \u0907\u0938\u092e\u0947\u0902 \u0906\u092a\u0915\u0940 \u0917\u0941\u092a\u094d\u0924 \u0915\u0941\u0902\u091c\u093f\u092f\u093e\u0901 \u0939\u0948\u0902\u0964 \u0907\u0938 \u092b\u093e\u0907\u0932 \u0935\u093e\u0932\u093e \u0915\u094b\u0908 \u092d\u0940 \u0906\u092a\u0915\u0947 2FA \u0915\u094b\u0921 \u091c\u0947\u0928\u0930\u0947\u091f \u0915\u0930 \u0938\u0915\u0924\u093e \u0939\u0948\u0964',
+      question: 'मैं अपने खातों का बैकअप कैसे लूँ?',
+      answer: 'अपने खातों का बैकअप लेने के लिए:\n\n1. सेटिंग्स आइकन (गियर) पर क्लिक करें\n2. "एक्सपोर्ट" बटन पर क्लिक करें\n3. चुनें कि फ़ाइल कैसे सहेजनी है:\n\n• पासवर्ड से सुरक्षित (अनुशंसित) — पासवर्ड न जानने वाले के लिए फ़ाइल बेकार है। पासवर्ड याद रखें: उसके बिना फ़ाइल नहीं खुलेगी।\n• सामान्य फ़ाइल — जो भी खोलेगा पढ़ सकेगा। केवल उस जगह के लिए जो पूरी तरह आपके नियंत्रण में हो।\n\nसामान्य एक्सपोर्ट में आपकी गुप्त कुंजियाँ खुले रूप में होती हैं। वह फ़ाइल जिसके पास हो, वह आपके 2FA कोड बना सकता है।',
     },
     {
-      question: '\u092c\u0948\u0915\u0905\u092a \u0938\u0947 \u0930\u093f\u0938\u094d\u091f\u094b\u0930 \u0915\u0948\u0938\u0947 \u0915\u0930\u0947\u0902?',
-      answer: '\u092c\u0948\u0915\u0905\u092a \u0938\u0947 \u0916\u093e\u0924\u0947 \u0930\u093f\u0938\u094d\u091f\u094b\u0930 \u0915\u0930\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f:\n\n1. \u092e\u0941\u0916\u094d\u092f \u0938\u094d\u0915\u094d\u0930\u0940\u0928 \u092a\u0930 "\u092c\u0948\u0915\u0905\u092a \u0938\u0947 \u0906\u092f\u093e\u0924 \u0915\u0930\u0947\u0902" \u092a\u0930 \u0915\u094d\u0932\u093f\u0915 \u0915\u0930\u0947\u0902\n2. \u0905\u092a\u0928\u0940 \u092c\u0948\u0915\u0905\u092a JSON \u092b\u093e\u0907\u0932 \u091a\u0941\u0928\u0947\u0902\n3. \u0938\u092d\u0940 \u0916\u093e\u0924\u0947 \u0906\u092f\u093e\u0924 \u0939\u094b \u091c\u093e\u090f\u0902\u0917\u0947\n\n\u0928\u094b\u091f: \u092f\u0939 \u0906\u092a\u0915\u0947 \u092e\u094c\u091c\u0942\u0926\u093e \u0916\u093e\u0924\u094b\u0902 \u092e\u0947\u0902 \u091c\u094b\u0921\u093c\u093e \u091c\u093e\u090f\u0917\u093e, \u0909\u0928\u094d\u0939\u0947\u0902 \u092c\u0926\u0932\u0947\u0917\u093e \u0928\u0939\u0940\u0902\u0964',
+      question: 'बैकअप से रिस्टोर कैसे करें?',
+      answer: 'बैकअप से खाते रिस्टोर करने के लिए:\n\n1. मुख्य स्क्रीन पर "बैकअप से आयात करें" पर क्लिक करें\n2. अपनी बैकअप JSON फाइल चुनें\n3. सभी खाते आयात हो जाएंगे\n\nनोट: यह आपके मौजूदा खातों में जोड़ा जाएगा, उन्हें बदलेगा नहीं।',
     },
     {
-      question: '\u0915\u094d\u092f\u093e \u092e\u0948\u0902 \u0907\u0938\u0947 \u0915\u0908 \u0921\u093f\u0935\u093e\u0907\u0938\u094b\u0902 \u092a\u0930 \u0909\u092a\u092f\u094b\u0917 \u0915\u0930 \u0938\u0915\u0924\u093e/\u0938\u0915\u0924\u0940 \u0939\u0942\u0901?',
-      answer: '\u0939\u093e\u0901! \u092f\u0926\u093f \u0906\u092a Chrome Sync \u0938\u0915\u094d\u0937\u092e \u0915\u0930\u0924\u0947 \u0939\u0948\u0902:\n\n\u2022 \u0906\u092a\u0915\u0947 \u0916\u093e\u0924\u0947 \u0906\u092a\u0915\u0947 \u0938\u092d\u0940 Chrome \u092c\u094d\u0930\u093e\u0909\u091c\u093c\u0930\u094b\u0902 \u092e\u0947\u0902 \u0938\u093f\u0902\u0915 \u0939\u094b\u0902\u0917\u0947\n\u2022 \u0906\u092a \u0935\u093f\u092d\u093f\u0928\u094d\u0928 \u0921\u093f\u0935\u093e\u0907\u0938\u094b\u0902 \u092a\u0930 \u092e\u0948\u0928\u0941\u0905\u0932 \u0930\u0942\u092a \u0938\u0947 \u090f\u0915\u094d\u0938\u092a\u094b\u0930\u094d\u091f \u0914\u0930 \u0906\u092f\u093e\u0924 \u092d\u0940 \u0915\u0930 \u0938\u0915\u0924\u0947 \u0939\u0948\u0902\n\u2022 \u0928\u094b\u091f: \u0932\u094b\u0915\u0932 \u0938\u094d\u091f\u094b\u0930\u0947\u091c \u0915\u093e \u0909\u092a\u092f\u094b\u0917 \u092c\u0948\u0915\u0905\u092a \u0915\u0947 \u0930\u0942\u092a \u092e\u0947\u0902 \u092d\u0940 \u0915\u093f\u092f\u093e \u091c\u093e\u0924\u093e \u0939\u0948',
+      question: 'क्या मैं इसे कई डिवाइसों पर उपयोग कर सकता/सकती हूँ?',
+      answer: 'हाँ! यदि आप Chrome Sync सक्षम करते हैं:\n\n• आपके खाते आपके सभी Chrome ब्राउज़रों में सिंक होंगे\n• आप विभिन्न डिवाइसों पर मैनुअल रूप से एक्सपोर्ट और आयात भी कर सकते हैं\n• नोट: लोकल स्टोरेज का उपयोग बैकअप के रूप में भी किया जाता है',
     },
     {
-      question: '\u092f\u0926\u093f \u092e\u0948\u0902 \u0917\u0932\u0924\u0940 \u0938\u0947 \u0915\u094b\u0908 \u0916\u093e\u0924\u093e \u0939\u091f\u093e \u0926\u0942\u0901 \u0924\u094b?',
-      answer: '\u092f\u0926\u093f \u0906\u092a \u0917\u0932\u0924\u0940 \u0938\u0947 \u0915\u094b\u0908 \u0916\u093e\u0924\u093e \u0939\u091f\u093e \u0926\u0947\u0924\u0947 \u0939\u0948\u0902:\n\n1. \u0905\u092a\u0928\u0947 \u0938\u094d\u0935\u091a\u093e\u0932\u093f\u0924 \u092c\u0948\u0915\u0905\u092a \u091c\u093e\u0901\u091a\u0947\u0902 (7 \u0926\u093f\u0928\u094b\u0902 \u0924\u0915 \u0938\u0902\u0917\u094d\u0930\u0939\u0940\u0924)\n2. \u092f\u093e \u0905\u092a\u0928\u0940 \u092e\u0948\u0928\u0941\u0905\u0932 \u092c\u0948\u0915\u0905\u092a \u092b\u093e\u0907\u0932 \u0938\u0947 \u0930\u093f\u0938\u094d\u091f\u094b\u0930 \u0915\u0930\u0947\u0902\n3. \u092f\u0926\u093f \u0915\u094b\u0908 \u092c\u0948\u0915\u0905\u092a \u0928\u0939\u0940\u0902 \u0939\u0948, \u0924\u094b \u0906\u092a\u0915\u094b \u0909\u0938 \u0938\u0947\u0935\u093e \u092a\u0930 2FA \u0905\u0915\u094d\u0937\u092e \u0915\u0930\u0915\u0947 \u092a\u0941\u0928\u0903 \u0938\u0915\u094d\u0937\u092e \u0915\u0930\u0928\u093e \u0939\u094b\u0917\u093e\n\n\u0938\u0941\u091d\u093e\u0935: \u092c\u0921\u093c\u0947 \u092c\u0926\u0932\u093e\u0935 \u0915\u0930\u0928\u0947 \u0938\u0947 \u092a\u0939\u0932\u0947 \u0939\u092e\u0947\u0936\u093e \u092c\u0948\u0915\u0905\u092a \u090f\u0915\u094d\u0938\u092a\u094b\u0930\u094d\u091f \u0915\u0930\u0947\u0902!',
+      question: 'यदि मैं गलती से कोई खाता हटा दूँ तो?',
+      answer: 'यदि आप गलती से कोई खाता हटा देते हैं:\n\n1. अपने स्वचालित बैकअप जाँचें (7 दिनों तक संग्रहीत)\n2. या अपनी मैनुअल बैकअप फाइल से रिस्टोर करें\n3. यदि कोई बैकअप नहीं है, तो आपको उस सेवा पर 2FA अक्षम करके पुनः सक्षम करना होगा\n\nसुझाव: बड़े बदलाव करने से पहले हमेशा बैकअप एक्सपोर्ट करें!',
     },
     {
-      question: '\u092e\u0941\u091d\u0947 \u0938\u092e\u092f \u0938\u093f\u0902\u0915 \u091a\u0947\u0924\u093e\u0935\u0928\u0940 \u0915\u094d\u092f\u094b\u0902 \u0926\u093f\u0916 \u0930\u0939\u0940 \u0939\u0948?',
-      answer: 'TOTP \u0915\u094b\u0921 \u0938\u091f\u0940\u0915 \u0938\u092e\u092f \u092a\u0930 \u0928\u093f\u0930\u094d\u092d\u0930 \u0915\u0930\u0924\u0947 \u0939\u0948\u0902\u0964 \u092f\u0926\u093f \u0906\u092a\u0915\u0940 \u0938\u093f\u0938\u094d\u091f\u092e \u0918\u0921\u093c\u0940 30 \u0938\u0947\u0915\u0902\u0921 \u0938\u0947 \u0905\u0927\u093f\u0915 \u0917\u0932\u0924 \u0939\u0948:\n\n\u2022 \u0938\u0947\u0935\u093e\u0913\u0902 \u0926\u094d\u0935\u093e\u0930\u093e \u0915\u094b\u0921 \u0905\u0938\u094d\u0935\u0940\u0915\u093e\u0930 \u0939\u094b \u0938\u0915\u0924\u0947 \u0939\u0948\u0902\n\u2022 \u0906\u092a\u0915\u094b \u0936\u0940\u0930\u094d\u0937 \u092a\u0930 \u092a\u0940\u0932\u0940 \u091a\u0947\u0924\u093e\u0935\u0928\u0940 \u0926\u093f\u0916\u093e\u0908 \u0926\u0947\u0917\u0940\n\u2022 \u0938\u092e\u093e\u0927\u093e\u0928: \u0938\u093f\u0938\u094d\u091f\u092e \u0938\u0947\u091f\u093f\u0902\u0917\u094d\u0938 \u092e\u0947\u0902 \u091c\u093e\u090f\u0902 \u0914\u0930 \u0938\u094d\u0935\u091a\u093e\u0932\u093f\u0924 \u0938\u092e\u092f \u0938\u093f\u0902\u0915 \u0938\u0915\u094d\u0937\u092e \u0915\u0930\u0947\u0902',
+      id: 'time-sync',
+      question: 'मुझे समय सिंक चेतावनी क्यों दिख रही है? इसे कैसे ठीक करें?',
+      answer: 'TOTP कोड आपके डिवाइस की घड़ी से बनते हैं, इसलिए यदि यह वास्तविक समय से ~30 सेकंड से अधिक भटक जाए, तो सेवाएं आपके कोड अस्वीकार कर देंगी।\n\nइसे कैसे ठीक करें:\n\n• macOS: सिस्टम सेटिंग्स → General → Date & Time → "Set time and date automatically" चालू करें\n• Windows: Settings → Time & language → Date & time → "Set time automatically" चालू करें, फिर "Sync now" पर क्लिक करें\n• Linux: सेटिंग्स में NTP / स्वचालित दिनांक और समय सक्षम करें\n\nसिंक करने के बाद एक्सटेंशन फिर से खोलें — चेतावनी गायब हो जाएगी और आपके कोड फिर से स्वीकार होंगे। केवल आपकी डिवाइस घड़ी ठीक करने की ज़रूरत है; कोड स्वयं ऑफ़लाइन ही बनते हैं।',
     },
     {
-      question: '\u090f\u0932\u094d\u0917\u094b\u0930\u093f\u0926\u092e/\u0905\u0902\u0915/\u0905\u0935\u0927\u093f \u092e\u0947\u0902 \u0915\u094d\u092f\u093e \u0905\u0902\u0924\u0930 \u0939\u0948?',
-      answer: '\u092f\u0947 \u0909\u0928\u094d\u0928\u0924 \u0938\u0947\u091f\u093f\u0902\u0917\u094d\u0938 \u0939\u0948\u0902 (\u0906\u092e\u0924\u094c\u0930 \u092a\u0930 \u0921\u093f\u092b\u0949\u0932\u094d\u091f \u0915\u093e\u092e \u0915\u0930\u0924\u0947 \u0939\u0948\u0902):\n\n\u2022 \u090f\u0932\u094d\u0917\u094b\u0930\u093f\u0926\u092e: \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u0936\u0928 \u0935\u093f\u0927\u093f (SHA1 \u092e\u093e\u0928\u0915 \u0939\u0948)\n\u2022 \u0905\u0902\u0915: \u0915\u094b\u0921 \u0915\u0940 \u0932\u0902\u092c\u093e\u0908 (6 \u0938\u092c\u0938\u0947 \u0906\u092e \u0939\u0948, \u0915\u0941\u091b 8 \u0915\u093e \u0909\u092a\u092f\u094b\u0917 \u0915\u0930\u0924\u0947 \u0939\u0948\u0902)\n\u2022 \u0905\u0935\u0927\u093f: \u0915\u094b\u0921 \u0915\u093f\u0924\u0928\u0947 \u0938\u092e\u092f \u0924\u0915 \u0935\u0948\u0927 \u0939\u0948\u0902 (30 \u0938\u0947\u0915\u0902\u0921 \u092e\u093e\u0928\u0915)\n\n\u0905\u0927\u093f\u0915\u093e\u0902\u0936 \u0938\u0947\u0935\u093e\u090f\u0901 \u0909\u092a\u092f\u094b\u0917 \u0915\u0930\u0924\u0940 \u0939\u0948\u0902: SHA1, 6 \u0905\u0902\u0915, 30 \u0938\u0947\u0915\u0902\u0921\u0964',
+      question: 'एल्गोरिदम/अंक/अवधि में क्या अंतर है?',
+      answer: 'ये उन्नत सेटिंग्स हैं (आमतौर पर डिफॉल्ट काम करते हैं):\n\n• एल्गोरिदम: कोड बनाने में उपयोग होने वाला हैश फ़ंक्शन (SHA1 मानक है)\n• अंक: कोड की लंबाई (6 सबसे आम है, कुछ 8 का उपयोग करते हैं)\n• अवधि: कोड कितने समय तक वैध हैं (30 सेकंड मानक)\n\nअधिकांश सेवाएँ उपयोग करती हैं: SHA1, 6 अंक, 30 सेकंड।',
     },
     {
-      question: '\u0915\u094d\u092f\u093e \u092e\u0947\u0930\u093e \u0921\u0947\u091f\u093e \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0939\u0948?',
-      answer: '\u0939\u093e\u0901! \u0906\u092a\u0915\u093e \u0921\u0947\u091f\u093e \u0915\u0908 \u0924\u0930\u0940\u0915\u094b\u0902 \u0938\u0947 \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0939\u0948:\n\n\u2022 \u0938\u092d\u0940 \u0921\u0947\u091f\u093e Chrome \u0938\u094d\u091f\u094b\u0930\u0947\u091c \u092e\u0947\u0902 \u0938\u094d\u0925\u093e\u0928\u0940\u092f \u0930\u0942\u092a \u0938\u0947 \u0938\u0902\u0917\u094d\u0930\u0939\u0940\u0924 \u0939\u0948\n\u2022 \u0917\u0941\u092a\u094d\u0924 \u0915\u0941\u0902\u091c\u093f\u092f\u093e\u0901 \u0915\u092d\u0940 \u0906\u092a\u0915\u0947 \u0921\u093f\u0935\u093e\u0907\u0938 \u0938\u0947 \u092c\u093e\u0939\u0930 \u0928\u0939\u0940\u0902 \u091c\u093e\u0924\u0940\u0902\n\u2022 IndexedDB \u092e\u0947\u0902 \u0938\u094d\u0935\u091a\u093e\u0932\u093f\u0924 \u090f\u0928\u094d\u0915\u094d\u0930\u093f\u092a\u094d\u091f\u0947\u0921 \u092c\u0948\u0915\u0905\u092a\n\u2022 \u0930\u093f\u0921\u0902\u0921\u0947\u0902\u0938\u0940 \u0915\u0947 \u0932\u093f\u090f \u0926\u094b\u0939\u0930\u0940 \u0938\u094d\u091f\u094b\u0930\u0947\u091c \u092a\u094d\u0930\u0923\u093e\u0932\u0940 (\u0938\u093f\u0902\u0915 + \u0932\u094b\u0915\u0932)\n\n\u0939\u092e \u0915\u092d\u0940 \u0906\u092a\u0915\u093e \u0921\u0947\u091f\u093e \u0915\u093f\u0938\u0940 \u092c\u093e\u0939\u0930\u0940 \u0938\u0930\u094d\u0935\u0930 \u0915\u094b \u0928\u0939\u0940\u0902 \u092d\u0947\u091c\u0924\u0947\u0964',
+      question: 'क्या मेरा डेटा सुरक्षित है?',
+      answer: 'आपके खाते केवल आपके डिवाइस पर रहते हैं। हमारे पास कोई सर्वर नहीं है और हमें आपका डेटा कभी नहीं मिलता।\n\n• गुप्त कुंजियाँ कभी आपके डिवाइस से बाहर नहीं जातीं\n• कुछ गड़बड़ होने की स्थिति के लिए स्वचालित स्थानीय बैकअप (अंतिम 7)\n• Chrome स्टोरेज में सहेजा जाता है, सिंक वैकल्पिक दूसरी प्रति के रूप में\n\nडिफ़ॉल्ट रूप से आपके कोड बिना एन्क्रिप्शन के सहेजे जाते हैं और आपके कंप्यूटर लॉगिन तथा Chrome प्रोफ़ाइल से सुरक्षित रहते हैं — जैसा अधिकांश ऑथेंटिकेटर एक्सटेंशन में होता है। अधिक मज़बूत सुरक्षा के लिए सेटिंग्स में पासवर्ड सुरक्षा चालू करें: तब आपके कोड, बैकअप सहित, आपके डिवाइस पर एन्क्रिप्ट हो जाते हैं और आपके पासवर्ड के बिना पढ़े नहीं जा सकते।',
     },
     {
-      question: '\u0915\u094d\u092f\u093e \u092e\u0948\u0902 Google Authenticator \u0938\u0947 \u0906\u092f\u093e\u0924 \u0915\u0930 \u0938\u0915\u0924\u093e/\u0938\u0915\u0924\u0940 \u0939\u0942\u0901?',
-      answer: '\u0939\u093e\u0901! Google Authenticator \u092e\u0947\u0902 \u090f\u0915\u094d\u0938\u092a\u094b\u0930\u094d\u091f \u0938\u0941\u0935\u093f\u0927\u093e \u0939\u0948:\n\n1. Google Authenticator \u0910\u092a \u0916\u094b\u0932\u0947\u0902\n2. "\u0916\u093e\u0924\u0947 \u0938\u094d\u0925\u093e\u0928\u093e\u0902\u0924\u0930\u093f\u0924 \u0915\u0930\u0947\u0902" \u2192 "\u0916\u093e\u0924\u0947 \u090f\u0915\u094d\u0938\u092a\u094b\u0930\u094d\u091f \u0915\u0930\u0947\u0902" \u092a\u0930 \u091f\u0948\u092a \u0915\u0930\u0947\u0902\n3. \u090f\u0915\u094d\u0938\u092a\u094b\u0930\u094d\u091f \u0915\u0930\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u0916\u093e\u0924\u0947 \u091a\u0941\u0928\u0947\u0902\n4. QR Code \u0915\u093e \u0938\u094d\u0915\u094d\u0930\u0940\u0928\u0936\u0949\u091f \u0932\u0947\u0902\n5. \u0907\u0938 \u0910\u092a \u092e\u0947\u0902: \u0916\u093e\u0924\u093e \u091c\u094b\u0921\u093c\u0947\u0902 \u2192 QR Code \u2192 \u0938\u094d\u0915\u094d\u0930\u0940\u0928\u0936\u0949\u091f \u0905\u092a\u0932\u094b\u0921 \u0915\u0930\u0947\u0902',
+      id: 'password-protection',
+      question: 'मैं अपने कोड को पासवर्ड से कैसे सुरक्षित करूँ?',
+      answer: 'सेटिंग्स खोलें और "पासवर्ड सुरक्षा" चालू करें। इसके बाद आपके कोड इस डिवाइस पर एन्क्रिप्ट हो जाते हैं, और पासवर्ड के बिना उन्हें कोई नहीं पढ़ सकता — न आपका कंप्यूटर इस्तेमाल करने वाला कोई व्यक्ति, न ब्राउज़र डेटा चुराने वाला वायरस, और न ही आपके Google खाते के सिंक के ज़रिए।\n\nआपको एक रिकवरी कोड भी मिलेगा। उसे इस ब्राउज़र से बाहर कहीं सहेजें: पासवर्ड भूल जाने पर वापस आने का यही एकमात्र रास्ता है। हम उसे आपके लिए रीसेट नहीं कर सकते।\n\nआप तय करते हैं कि पासवर्ड कितनी बार पूछा जाए: हर बार, कुछ मिनट निष्क्रिय रहने के बाद, या ब्राउज़र बंद होने तक एक बार। आप अपने पासवर्ड से यह सुरक्षा कभी भी बंद कर सकते हैं।',
     },
     {
-      question: '\u092f\u0926\u093f \u092e\u0948\u0902 \u0905\u092a\u0928\u093e \u092c\u0948\u0915\u0905\u092a \u0916\u094b \u0926\u0942\u0901 \u0924\u094b \u0915\u094d\u092f\u093e \u0939\u094b\u0917\u093e?',
-      answer: '\u092f\u0926\u093f \u0906\u092a \u0907\u0938 \u090f\u0915\u094d\u0938\u091f\u0947\u0902\u0936\u0928 \u0924\u0915 \u092a\u0939\u0941\u0901\u091a \u0916\u094b \u0926\u0947\u0924\u0947 \u0939\u0948\u0902 \u0914\u0930 \u0915\u094b\u0908 \u092c\u0948\u0915\u0905\u092a \u0928\u0939\u0940\u0902 \u0939\u0948:\n\n1. \u0906\u092a\u0915\u094b \u092a\u094d\u0930\u0924\u094d\u092f\u0947\u0915 \u092a\u094d\u0930\u092d\u093e\u0935\u093f\u0924 \u0938\u0947\u0935\u093e \u092a\u0930 2FA \u0905\u0915\u094d\u0937\u092e \u0915\u0930\u0928\u093e \u0939\u094b\u0917\u093e\n2. \u092b\u093f\u0930 2FA \u092a\u0941\u0928\u0903 \u0938\u0915\u094d\u0937\u092e \u0915\u0930\u0947\u0902 \u0914\u0930 \u0916\u093e\u0924\u0947 \u0926\u094b\u092c\u093e\u0930\u093e \u091c\u094b\u0921\u093c\u0947\u0902\n3. \u0938\u0947\u0935\u093e\u0913\u0902 \u0915\u0947 \u0930\u093f\u0915\u0935\u0930\u0940 \u0915\u094b\u0921 \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0938\u094d\u0925\u093e\u0928 \u092a\u0930 \u0930\u0916\u0947\u0902\n\n\u0930\u094b\u0915\u0925\u093e\u092e: \u0928\u093f\u092f\u092e\u093f\u0924 \u0930\u0942\u092a \u0938\u0947 \u092c\u0948\u0915\u0905\u092a \u090f\u0915\u094d\u0938\u092a\u094b\u0930\u094d\u091f \u0915\u0930\u0947\u0902 \u0914\u0930 \u0909\u0928\u094d\u0939\u0947\u0902 \u0938\u0941\u0930\u0915\u094d\u0937\u093f\u0924 \u0930\u0942\u092a \u0938\u0947 \u0938\u0902\u0917\u094d\u0930\u0939\u0940\u0924 \u0915\u0930\u0947\u0902!',
+      question: 'क्या मैं Google Authenticator से आयात कर सकता/सकती हूँ?',
+      answer: 'हाँ! Google Authenticator में एक्सपोर्ट सुविधा है:\n\n1. Google Authenticator ऐप खोलें\n2. "खाते स्थानांतरित करें" → "खाते एक्सपोर्ट करें" पर टैप करें\n3. एक्सपोर्ट करने के लिए खाते चुनें\n4. QR Code का स्क्रीनशॉट लें\n5. इस ऐप में: खाता जोड़ें → QR Code → स्क्रीनशॉट अपलोड करें',
+    },
+    {
+      question: 'यदि मैं अपना बैकअप खो दूँ तो क्या होगा?',
+      answer: 'यदि आप इस एक्सटेंशन तक पहुँच खो देते हैं और कोई बैकअप नहीं है:\n\n1. आपको प्रत्येक प्रभावित सेवा पर 2FA अक्षम करना होगा\n2. फिर 2FA पुनः सक्षम करें और खाते दोबारा जोड़ें\n3. सेवाओं के रिकवरी कोड सुरक्षित स्थान पर रखें\n\nरोकथाम: नियमित रूप से बैकअप एक्सपोर्ट करें और उन्हें सुरक्षित रूप से संग्रहीत करें!',
     },
   ],
   ar: [
     {
-      question: '\u0643\u064a\u0641 \u0623\u0636\u064a\u0641 \u062d\u0633\u0627\u0628\u064b\u0627 \u062c\u062f\u064a\u062f\u064b\u0627\u061f',
-      answer: '\u064a\u0645\u0643\u0646\u0643 \u0625\u0636\u0627\u0641\u0629 \u062d\u0633\u0627\u0628 \u0628\u0637\u0631\u064a\u0642\u062a\u064a\u0646:\n\n1. \u0627\u0644\u0625\u062f\u062e\u0627\u0644 \u0627\u0644\u064a\u062f\u0648\u064a: \u0627\u0646\u0642\u0631 \u0639\u0644\u0649 "\u0625\u0636\u0627\u0641\u0629 \u062d\u0633\u0627\u0628"\u060c \u0623\u062f\u062e\u0644 \u0627\u0633\u0645 \u0627\u0644\u062d\u0633\u0627\u0628 \u0648\u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0633\u0631\u064a \u0645\u0646 \u0635\u0641\u062d\u0629 \u0625\u0639\u062f\u0627\u062f 2FA \u0644\u062e\u062f\u0645\u062a\u0643.\n\n2. QR Code: \u0627\u0646\u0642\u0631 \u0639\u0644\u0649 "\u0625\u0636\u0627\u0641\u0629 \u062d\u0633\u0627\u0628"\u060c \u0627\u0646\u062a\u0642\u0644 \u0625\u0644\u0649 \u0639\u0644\u0627\u0645\u0629 \u062a\u0628\u0648\u064a\u0628 "QR Code"\u060c \u0648\u0627\u0631\u0641\u0639 \u0644\u0642\u0637\u0629 \u0634\u0627\u0634\u0629 \u0623\u0648 \u0635\u0648\u0631\u0629 \u0644\u0640 QR Code \u0627\u0644\u0645\u0639\u0631\u0648\u0636 \u0623\u062b\u0646\u0627\u0621 \u0625\u0639\u062f\u0627\u062f 2FA.',
+      question: 'كيف أضيف حسابًا جديدًا؟',
+      answer: 'يمكنك إضافة حساب بطريقتين:\n\n1. الإدخال اليدوي: انقر على "إضافة حساب"، أدخل اسم الحساب والمفتاح السري من صفحة إعداد 2FA لخدمتك.\n\n2. QR Code: انقر على "إضافة حساب"، انتقل إلى علامة تبويب "QR Code"، وارفع لقطة شاشة أو صورة لـ QR Code المعروض أثناء إعداد 2FA.',
     },
     {
-      question: '\u0623\u064a\u0646 \u0623\u062c\u062f \u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0633\u0631\u064a\u061f',
-      answer: '\u0639\u0646\u062f \u0625\u0639\u062f\u0627\u062f 2FA \u0639\u0644\u0649 \u0623\u064a \u062e\u062f\u0645\u0629 (Gmail\u060c GitHub\u060c \u0625\u0644\u062e):\n\n1. \u0627\u0628\u062d\u062b \u0639\u0646 \u0631\u0627\u0628\u0637 "\u0644\u0627 \u064a\u0645\u0643\u0646\u0643 \u0645\u0633\u062d QR Code\u061f" \u0623\u0648 "\u0627\u0644\u0625\u062f\u062e\u0627\u0644 \u064a\u062f\u0648\u064a\u064b\u0627"\n2. \u0627\u0646\u0642\u0631 \u0639\u0644\u064a\u0647 \u0644\u0625\u0638\u0647\u0627\u0631 \u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0627\u0644\u0633\u0631\u064a\n3. \u0627\u0644\u0645\u0641\u062a\u0627\u062d \u0639\u0627\u062f\u0629\u064b 16-32 \u062d\u0631\u0641\u064b\u0627 (\u0627\u0644\u0623\u062d\u0631\u0641 A-Z \u0648\u0627\u0644\u0623\u0631\u0642\u0627\u0645 2-7)\n4. \u0645\u062b\u0627\u0644: JBSWY3DPEHPK3PXP',
+      question: 'أين أجد المفتاح السري؟',
+      answer: 'عند إعداد 2FA على أي خدمة (Gmail، GitHub، إلخ):\n\n1. ابحث عن رابط "لا يمكنك مسح QR Code؟" أو "الإدخال يدويًا"\n2. انقر عليه لإظهار المفتاح السري\n3. المفتاح عادةً 16-32 حرفًا (الأحرف A-Z والأرقام 2-7)\n4. مثال: JBSWY3DPEHPK3PXP',
     },
     {
-      question: '\u0644\u0645\u0627\u0630\u0627 \u0644\u0627 \u062a\u0639\u0645\u0644 \u0631\u0645\u0648\u0632\u064a\u061f',
-      answer: '\u0625\u0630\u0627 \u062a\u0645 \u0631\u0641\u0636 \u0627\u0644\u0631\u0645\u0648\u0632\u060c \u0641\u0625\u0646 \u0627\u0644\u0633\u0628\u0628 \u0627\u0644\u0623\u0643\u062b\u0631 \u0634\u064a\u0648\u0639\u064b\u0627 \u0647\u0648 \u0645\u0632\u0627\u0645\u0646\u0629 \u0627\u0644\u0648\u0642\u062a:\n\n\u2022 \u064a\u062c\u0628 \u0623\u0646 \u062a\u0643\u0648\u0646 \u0633\u0627\u0639\u0629 \u062c\u0647\u0627\u0632 \u0627\u0644\u0643\u0645\u0628\u064a\u0648\u062a\u0631 \u062f\u0642\u064a\u0642\u0629 (\u0641\u064a \u062d\u062f\u0648\u062f 30 \u062b\u0627\u0646\u064a\u0629)\n\u2022 \u0631\u0645\u0648\u0632 TOTP \u062a\u0639\u062a\u0645\u062f \u0639\u0644\u0649 \u0627\u0644\u0648\u0642\u062a \u0648\u062a\u0646\u062a\u0647\u064a \u0635\u0644\u0627\u062d\u064a\u062a\u0647\u0627 \u0643\u0644 30 \u062b\u0627\u0646\u064a\u0629\n\u2022 \u062a\u062d\u0642\u0642 \u0645\u0645\u0627 \u0625\u0630\u0627 \u0643\u0646\u062a \u062a\u0631\u0649 \u062a\u062d\u0630\u064a\u0631 \u0627\u0644\u0648\u0642\u062a \u0641\u064a \u0623\u0639\u0644\u0649 \u0627\u0644\u062a\u0637\u0628\u064a\u0642\n\u2022 \u0627\u0644\u062d\u0644: \u062d\u062f\u0651\u062b \u0648\u0642\u062a \u0627\u0644\u0646\u0638\u0627\u0645 \u0623\u0648 \u0641\u0639\u0651\u0644 \u0627\u0644\u0645\u0632\u0627\u0645\u0646\u0629 \u0627\u0644\u062a\u0644\u0642\u0627\u0626\u064a\u0629 \u0644\u0644\u0648\u0642\u062a',
+      question: 'لماذا لا تعمل رموزي؟',
+      answer: 'إذا تم رفض الرموز، فإن السبب الأكثر شيوعًا هو مزامنة الوقت:\n\n• يجب أن تكون ساعة جهاز الكمبيوتر دقيقة (في حدود 30 ثانية)\n• رموز TOTP تعتمد على الوقت وتنتهي صلاحيتها كل 30 ثانية\n• تحقق مما إذا كنت ترى تحذير الوقت في أعلى التطبيق\n• الحل: حدّث وقت النظام أو فعّل المزامنة التلقائية للوقت',
     },
     {
-      question: '\u0643\u064a\u0641 \u0623\u0646\u0634\u0626 \u0646\u0633\u062e\u0629 \u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629 \u0644\u062d\u0633\u0627\u0628\u0627\u062a\u064a\u061f',
-      answer: '\u0644\u0625\u0646\u0634\u0627\u0621 \u0646\u0633\u062e\u0629 \u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629 \u0644\u062d\u0633\u0627\u0628\u0627\u062a\u0643:\n\n1. \u0627\u0646\u0642\u0631 \u0639\u0644\u0649 \u0623\u064a\u0642\u0648\u0646\u0629 \u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a (\u0627\u0644\u062a\u0631\u0633)\n2. \u0627\u0646\u0642\u0631 \u0639\u0644\u0649 \u0632\u0631 "\u062a\u0635\u062f\u064a\u0631"\n3. \u0627\u062d\u0641\u0638 \u0645\u0644\u0641 JSON \u0641\u064a \u0645\u0643\u0627\u0646 \u0622\u0645\u0646\n\n\u0645\u0647\u0645: \u062d\u0627\u0641\u0638 \u0639\u0644\u0649 \u0647\u0630\u0627 \u0627\u0644\u0645\u0644\u0641 \u0622\u0645\u0646\u064b\u0627 - \u0641\u0647\u0648 \u064a\u062d\u062a\u0648\u064a \u0639\u0644\u0649 \u0645\u0641\u0627\u062a\u064a\u062d\u0643 \u0627\u0644\u0633\u0631\u064a\u0629. \u0623\u064a \u0634\u062e\u0635 \u0644\u062f\u064a\u0647 \u0647\u0630\u0627 \u0627\u0644\u0645\u0644\u0641 \u064a\u0645\u0643\u0646\u0647 \u062a\u0648\u0644\u064a\u062f \u0631\u0645\u0648\u0632 2FA \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0643.',
+      question: 'كيف أنشئ نسخة احتياطية لحساباتي؟',
+      answer: 'لإنشاء نسخة احتياطية لحساباتك:\n\n1. انقر على أيقونة الإعدادات (الترس)\n2. انقر على زر "تصدير"\n3. اختر طريقة حفظ الملف:\n\n• محمي بكلمة مرور (موصى به) — الملف عديم الفائدة لمن لا يعرف كلمة المرور. تذكّرها: لا يمكن فتح الملف بدونها.\n• ملف عادي — يقرؤه أي شخص يفتحه. فقط لمكان تتحكم فيه بالكامل.\n\nالتصدير العادي يحتوي على مفاتيحك السرية بنص واضح. أي شخص لديه هذا الملف يمكنه توليد رموز 2FA الخاصة بك.',
     },
     {
-      question: '\u0643\u064a\u0641 \u0623\u0633\u062a\u0639\u064a\u062f \u0645\u0646 \u0646\u0633\u062e\u0629 \u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629\u061f',
-      answer: '\u0644\u0627\u0633\u062a\u0639\u0627\u062f\u0629 \u0627\u0644\u062d\u0633\u0627\u0628\u0627\u062a \u0645\u0646 \u0646\u0633\u062e\u0629 \u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629:\n\n1. \u0627\u0646\u0642\u0631 \u0639\u0644\u0649 "\u0627\u0633\u062a\u064a\u0631\u0627\u062f \u0645\u0646 \u0646\u0633\u062e\u0629 \u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629" \u0639\u0644\u0649 \u0627\u0644\u0634\u0627\u0634\u0629 \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629\n2. \u062d\u062f\u062f \u0645\u0644\u0641 JSON \u0627\u0644\u0627\u062d\u062a\u064a\u0627\u0637\u064a \u0627\u0644\u062e\u0627\u0635 \u0628\u0643\n3. \u0633\u064a\u062a\u0645 \u0627\u0633\u062a\u064a\u0631\u0627\u062f \u062c\u0645\u064a\u0639 \u0627\u0644\u062d\u0633\u0627\u0628\u0627\u062a\n\n\u0645\u0644\u0627\u062d\u0638\u0629: \u0633\u064a\u062a\u0645 \u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u062d\u0633\u0627\u0628\u0627\u062a \u0625\u0644\u0649 \u062d\u0633\u0627\u0628\u0627\u062a\u0643 \u0627\u0644\u062d\u0627\u0644\u064a\u0629\u060c \u0648\u0644\u064a\u0633 \u0627\u0633\u062a\u0628\u062f\u0627\u0644\u0647\u0627.',
+      question: 'كيف أستعيد من نسخة احتياطية؟',
+      answer: 'لاستعادة الحسابات من نسخة احتياطية:\n\n1. انقر على "استيراد من نسخة احتياطية" على الشاشة الرئيسية\n2. حدد ملف JSON الاحتياطي الخاص بك\n3. سيتم استيراد جميع الحسابات\n\nملاحظة: سيتم إضافة الحسابات إلى حساباتك الحالية، وليس استبدالها.',
     },
     {
-      question: '\u0647\u0644 \u064a\u0645\u0643\u0646\u0646\u064a \u0627\u0633\u062a\u062e\u062f\u0627\u0645\u0647 \u0639\u0644\u0649 \u0623\u062c\u0647\u0632\u0629 \u0645\u062a\u0639\u062f\u062f\u0629\u061f',
-      answer: '\u0646\u0639\u0645! \u0625\u0630\u0627 \u0642\u0645\u062a \u0628\u062a\u0641\u0639\u064a\u0644 Chrome Sync:\n\n\u2022 \u0633\u062a\u062a\u0645 \u0645\u0632\u0627\u0645\u0646\u0629 \u062d\u0633\u0627\u0628\u0627\u062a\u0643 \u0639\u0628\u0631 \u062c\u0645\u064a\u0639 \u0645\u062a\u0635\u0641\u062d\u0627\u062a Chrome \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0643\n\u2022 \u064a\u0645\u0643\u0646\u0643 \u0623\u064a\u0636\u064b\u0627 \u0627\u0644\u062a\u0635\u062f\u064a\u0631 \u0648\u0627\u0644\u0627\u0633\u062a\u064a\u0631\u0627\u062f \u064a\u062f\u0648\u064a\u064b\u0627 \u0639\u0644\u0649 \u0623\u062c\u0647\u0632\u0629 \u0645\u062e\u062a\u0644\u0641\u0629\n\u2022 \u0645\u0644\u0627\u062d\u0638\u0629: \u064a\u064f\u0633\u062a\u062e\u062f\u0645 \u0627\u0644\u062a\u062e\u0632\u064a\u0646 \u0627\u0644\u0645\u062d\u0644\u064a \u0623\u064a\u0636\u064b\u0627 \u0643\u0646\u0633\u062e\u0629 \u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629',
+      question: 'هل يمكنني استخدامه على أجهزة متعددة؟',
+      answer: 'نعم! إذا قمت بتفعيل Chrome Sync:\n\n• ستتم مزامنة حساباتك عبر جميع متصفحات Chrome الخاصة بك\n• يمكنك أيضًا التصدير والاستيراد يدويًا على أجهزة مختلفة\n• ملاحظة: يُستخدم التخزين المحلي أيضًا كنسخة احتياطية',
     },
     {
-      question: '\u0645\u0627\u0630\u0627 \u0644\u0648 \u062d\u0630\u0641\u062a \u062d\u0633\u0627\u0628\u064b\u0627 \u0628\u0627\u0644\u062e\u0637\u0623\u061f',
-      answer: '\u0625\u0630\u0627 \u062d\u0630\u0641\u062a \u062d\u0633\u0627\u0628\u064b\u0627 \u0628\u0627\u0644\u062e\u0637\u0623:\n\n1. \u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0646\u0633\u062e \u0627\u0644\u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629 \u0627\u0644\u062a\u0644\u0642\u0627\u0626\u064a\u0629 (\u0645\u062e\u0632\u0646\u0629 \u0644\u0645\u062f\u0629 7 \u0623\u064a\u0627\u0645)\n2. \u0623\u0648 \u0627\u0633\u062a\u0639\u062f \u0645\u0646 \u0645\u0644\u0641 \u0627\u0644\u0646\u0633\u062e\u0629 \u0627\u0644\u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629 \u0627\u0644\u064a\u062f\u0648\u064a\u0629\n3. \u0625\u0630\u0627 \u0644\u0645 \u062a\u0648\u062c\u062f \u0646\u0633\u062e\u0629 \u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629\u060c \u0633\u062a\u062d\u062a\u0627\u062c \u0625\u0644\u0649 \u062a\u0639\u0637\u064a\u0644 \u0648\u0625\u0639\u0627\u062f\u0629 \u062a\u0641\u0639\u064a\u0644 2FA \u0639\u0644\u0649 \u062a\u0644\u0643 \u0627\u0644\u062e\u062f\u0645\u0629\n\n\u0646\u0635\u064a\u062d\u0629: \u0642\u0645 \u062f\u0627\u0626\u0645\u064b\u0627 \u0628\u062a\u0635\u062f\u064a\u0631 \u0646\u0633\u062e\u0629 \u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629 \u0642\u0628\u0644 \u0625\u062c\u0631\u0627\u0621 \u062a\u063a\u064a\u064a\u0631\u0627\u062a \u0643\u0628\u064a\u0631\u0629!',
+      question: 'ماذا لو حذفت حسابًا بالخطأ؟',
+      answer: 'إذا حذفت حسابًا بالخطأ:\n\n1. تحقق من النسخ الاحتياطية التلقائية (مخزنة لمدة 7 أيام)\n2. أو استعد من ملف النسخة الاحتياطية اليدوية\n3. إذا لم توجد نسخة احتياطية، ستحتاج إلى تعطيل وإعادة تفعيل 2FA على تلك الخدمة\n\nنصيحة: قم دائمًا بتصدير نسخة احتياطية قبل إجراء تغييرات كبيرة!',
     },
     {
-      question: '\u0644\u0645\u0627\u0630\u0627 \u0623\u0631\u0649 \u062a\u062d\u0630\u064a\u0631 \u0645\u0632\u0627\u0645\u0646\u0629 \u0627\u0644\u0648\u0642\u062a\u061f',
-      answer: '\u062a\u0639\u062a\u0645\u062f \u0631\u0645\u0648\u0632 TOTP \u0639\u0644\u0649 \u0627\u0644\u0648\u0642\u062a \u0627\u0644\u062f\u0642\u064a\u0642. \u0625\u0630\u0627 \u0643\u0627\u0646\u062a \u0633\u0627\u0639\u0629 \u0646\u0638\u0627\u0645\u0643 \u0645\u062a\u0623\u062e\u0631\u0629 \u0628\u0623\u0643\u062b\u0631 \u0645\u0646 30 \u062b\u0627\u0646\u064a\u0629:\n\n\u2022 \u0642\u062f \u064a\u062a\u0645 \u0631\u0641\u0636 \u0627\u0644\u0631\u0645\u0648\u0632 \u0645\u0646 \u0642\u0628\u0644 \u0627\u0644\u062e\u062f\u0645\u0627\u062a\n\u2022 \u0633\u062a\u0631\u0649 \u062a\u062d\u0630\u064a\u0631\u064b\u0627 \u0623\u0635\u0641\u0631 \u0641\u064a \u0627\u0644\u0623\u0639\u0644\u0649\n\u2022 \u0627\u0644\u062d\u0644: \u0627\u0630\u0647\u0628 \u0625\u0644\u0649 \u0625\u0639\u062f\u0627\u062f\u0627\u062a \u0627\u0644\u0646\u0638\u0627\u0645 \u0648\u0641\u0639\u0651\u0644 \u0627\u0644\u0645\u0632\u0627\u0645\u0646\u0629 \u0627\u0644\u062a\u0644\u0642\u0627\u0626\u064a\u0629 \u0644\u0644\u0648\u0642\u062a',
+      id: 'time-sync',
+      question: 'لماذا أرى تحذير مزامنة الوقت؟ وكيف أصلحه؟',
+      answer: 'يتم إنشاء رموز TOTP من ساعة جهازك، لذا إذا انحرفت أكثر من ~30 ثانية عن الوقت الحقيقي، فسترفض الخدمات رموزك.\n\nكيفية الإصلاح:\n\n• macOS: إعدادات النظام → عام → التاريخ والوقت → فعّل "ضبط الوقت والتاريخ تلقائيًا"\n• Windows: الإعدادات → الوقت واللغة → التاريخ والوقت → فعّل "ضبط الوقت تلقائيًا" ثم انقر "المزامنة الآن"\n• Linux: فعّل NTP / التاريخ والوقت التلقائي في الإعدادات\n\nبعد المزامنة، أعد فتح الإضافة — يختفي التحذير وتُقبل رموزك من جديد. ساعة جهازك فقط هي ما يحتاج للإصلاح؛ أما الرموز نفسها فتُنشأ دون اتصال.',
     },
     {
-      question: '\u0645\u0627 \u0627\u0644\u0641\u0631\u0642 \u0628\u064a\u0646 \u0627\u0644\u062e\u0648\u0627\u0631\u0632\u0645\u064a\u0629/\u0627\u0644\u0623\u0631\u0642\u0627\u0645/\u0627\u0644\u0641\u062a\u0631\u0629\u061f',
-      answer: '\u0647\u0630\u0647 \u0625\u0639\u062f\u0627\u062f\u0627\u062a \u0645\u062a\u0642\u062f\u0645\u0629 (\u0639\u0627\u062f\u0629\u064b \u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a \u0627\u0644\u0627\u0641\u062a\u0631\u0627\u0636\u064a\u0629 \u062a\u0639\u0645\u0644):\n\n\u2022 \u0627\u0644\u062e\u0648\u0627\u0631\u0632\u0645\u064a\u0629: \u0637\u0631\u064a\u0642\u0629 \u0627\u0644\u062a\u0634\u0641\u064a\u0631 (SHA1 \u0647\u0648 \u0627\u0644\u0645\u0639\u064a\u0627\u0631)\n\u2022 \u0627\u0644\u0623\u0631\u0642\u0627\u0645: \u0637\u0648\u0644 \u0627\u0644\u0631\u0645\u0632 (6 \u0647\u0648 \u0627\u0644\u0623\u0643\u062b\u0631 \u0634\u064a\u0648\u0639\u064b\u0627\u060c \u0628\u0639\u0636\u0647\u0627 \u064a\u0633\u062a\u062e\u062f\u0645 8)\n\u2022 \u0627\u0644\u0641\u062a\u0631\u0629: \u0645\u062f\u0629 \u0635\u0644\u0627\u062d\u064a\u0629 \u0627\u0644\u0631\u0645\u0648\u0632 (30 \u062b\u0627\u0646\u064a\u0629 \u0642\u064a\u0627\u0633\u064a)\n\n\u0645\u0639\u0638\u0645 \u0627\u0644\u062e\u062f\u0645\u0627\u062a \u062a\u0633\u062a\u062e\u062f\u0645: SHA1\u060c 6 \u0623\u0631\u0642\u0627\u0645\u060c 30 \u062b\u0627\u0646\u064a\u0629.',
+      question: 'ما الفرق بين الخوارزمية/الأرقام/الفترة؟',
+      answer: 'هذه إعدادات متقدمة (عادةً الإعدادات الافتراضية تعمل):\n\n• الخوارزمية: دالة التجزئة المستخدمة لتوليد الرمز (SHA1 هو المعيار)\n• الأرقام: طول الرمز (6 هو الأكثر شيوعًا، بعضها يستخدم 8)\n• الفترة: مدة صلاحية الرموز (30 ثانية قياسي)\n\nمعظم الخدمات تستخدم: SHA1، 6 أرقام، 30 ثانية.',
     },
     {
-      question: '\u0647\u0644 \u0628\u064a\u0627\u0646\u0627\u062a\u064a \u0622\u0645\u0646\u0629\u061f',
-      answer: '\u0646\u0639\u0645! \u0628\u064a\u0627\u0646\u0627\u062a\u0643 \u0645\u0624\u0645\u0651\u0646\u0629 \u0628\u0639\u062f\u0629 \u0637\u0631\u0642:\n\n\u2022 \u062c\u0645\u064a\u0639 \u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0645\u062e\u0632\u0646\u0629 \u0645\u062d\u0644\u064a\u064b\u0627 \u0641\u064a \u062a\u062e\u0632\u064a\u0646 Chrome\n\u2022 \u0627\u0644\u0645\u0641\u0627\u062a\u064a\u062d \u0627\u0644\u0633\u0631\u064a\u0629 \u0644\u0627 \u062a\u063a\u0627\u062f\u0631 \u062c\u0647\u0627\u0632\u0643 \u0623\u0628\u062f\u064b\u0627\n\u2022 \u0646\u0633\u062e \u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629 \u0645\u0634\u0641\u0631\u0629 \u062a\u0644\u0642\u0627\u0626\u064a\u064b\u0627 \u0641\u064a IndexedDB\n\u2022 \u0646\u0638\u0627\u0645 \u062a\u062e\u0632\u064a\u0646 \u0645\u0632\u062f\u0648\u062c (\u0645\u0632\u0627\u0645\u0646\u0629 + \u0645\u062d\u0644\u064a) \u0644\u0644\u062a\u0643\u0631\u0627\u0631\u064a\u0629\n\n\u0644\u0627 \u0646\u0631\u0633\u0644 \u0628\u064a\u0627\u0646\u0627\u062a\u0643 \u0623\u0628\u062f\u064b\u0627 \u0625\u0644\u0649 \u0623\u064a \u062e\u0648\u0627\u062f\u0645 \u062e\u0627\u0631\u062c\u064a\u0629.',
+      question: 'هل بياناتي آمنة؟',
+      answer: 'حساباتك موجودة على جهازك فقط. ليس لدينا خوادم ولا نتلقى بياناتك أبدًا.\n\n• المفاتيح السرية لا تغادر جهازك أبدًا\n• نسخ احتياطية محلية تلقائية (آخر 7) تحسبًا لأي خلل\n• تُحفظ في تخزين Chrome، مع المزامنة كنسخة ثانية اختيارية\n\nافتراضيًا تُحفظ رموزك دون تشفير، محميةً بتسجيل الدخول إلى حاسوبك وملف تعريف Chrome — مثل معظم إضافات المصادقة. للحصول على حماية أقوى، فعّل الحماية بكلمة مرور من الإعدادات: عندها تُشفَّر رموزك على جهازك، بما في ذلك النسخ الاحتياطية، ولا يمكن قراءتها بدون كلمة المرور.',
     },
     {
-      question: '\u0647\u0644 \u064a\u0645\u0643\u0646\u0646\u064a \u0627\u0644\u0627\u0633\u062a\u064a\u0631\u0627\u062f \u0645\u0646 Google Authenticator\u061f',
-      answer: '\u0646\u0639\u0645! Google Authenticator \u0644\u062f\u064a\u0647 \u0645\u064a\u0632\u0629 \u0627\u0644\u062a\u0635\u062f\u064a\u0631:\n\n1. \u0627\u0641\u062a\u062d \u062a\u0637\u0628\u064a\u0642 Google Authenticator\n2. \u0627\u0646\u0642\u0631 \u0639\u0644\u0649 "\u0646\u0642\u0644 \u0627\u0644\u062d\u0633\u0627\u0628\u0627\u062a" \u2192 "\u062a\u0635\u062f\u064a\u0631 \u0627\u0644\u062d\u0633\u0627\u0628\u0627\u062a"\n3. \u062d\u062f\u062f \u0627\u0644\u062d\u0633\u0627\u0628\u0627\u062a \u0644\u0644\u062a\u0635\u062f\u064a\u0631\n4. \u0627\u0644\u062a\u0642\u0637 \u0644\u0642\u0637\u0629 \u0634\u0627\u0634\u0629 \u0644\u0640 QR Code\n5. \u0641\u064a \u0647\u0630\u0627 \u0627\u0644\u062a\u0637\u0628\u064a\u0642: \u0625\u0636\u0627\u0641\u0629 \u062d\u0633\u0627\u0628 \u2192 QR Code \u2192 \u0627\u0631\u0641\u0639 \u0644\u0642\u0637\u0629 \u0627\u0644\u0634\u0627\u0634\u0629',
+      id: 'password-protection',
+      question: 'كيف أحمي رموزي بكلمة مرور؟',
+      answer: 'افتح الإعدادات وفعّل "الحماية بكلمة مرور". عندها تُشفَّر رموزك على هذا الجهاز، فلا يستطيع أحد قراءتها بدون كلمة المرور — لا من يستخدم حاسوبك، ولا فيروس يسرق بيانات المتصفح، ولا عبر مزامنة حساب Google الخاص بك.\n\nستحصل أيضًا على رمز استرداد. احفظه خارج هذا المتصفح: فهو السبيل الوحيد للعودة إذا نسيت كلمة المرور. لا يمكننا إعادة تعيينها لك.\n\nأنت تختار عدد مرات طلب كلمة المرور: في كل مرة، بعد دقائق من الخمول، أو مرة واحدة حتى إغلاق المتصفح. يمكنك إيقاف الحماية في أي وقت بكلمة المرور.',
     },
     {
-      question: '\u0645\u0627\u0630\u0627 \u064a\u062d\u062f\u062b \u0625\u0630\u0627 \u0641\u0642\u062f\u062a \u0646\u0633\u062e\u062a\u064a \u0627\u0644\u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629\u061f',
-      answer: '\u0625\u0630\u0627 \u0641\u0642\u062f\u062a \u0627\u0644\u0648\u0635\u0648\u0644 \u0625\u0644\u0649 \u0647\u0630\u0647 \u0627\u0644\u0625\u0636\u0627\u0641\u0629 \u0648\u0644\u064a\u0633 \u0644\u062f\u064a\u0643 \u0646\u0633\u062e\u0629 \u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629:\n\n1. \u0633\u062a\u062d\u062a\u0627\u062c \u0625\u0644\u0649 \u062a\u0639\u0637\u064a\u0644 2FA \u0639\u0644\u0649 \u0643\u0644 \u062e\u062f\u0645\u0629 \u0645\u062a\u0623\u062b\u0631\u0629\n2. \u062b\u0645 \u0623\u0639\u062f \u062a\u0641\u0639\u064a\u0644 2FA \u0648\u0623\u0636\u0641 \u0627\u0644\u062d\u0633\u0627\u0628\u0627\u062a \u0645\u0631\u0629 \u0623\u062e\u0631\u0649\n3. \u0627\u062d\u062a\u0641\u0638 \u0628\u0631\u0645\u0648\u0632 \u0627\u0644\u0627\u0633\u062a\u0631\u062f\u0627\u062f \u0645\u0646 \u0627\u0644\u062e\u062f\u0645\u0627\u062a \u0641\u064a \u0645\u0643\u0627\u0646 \u0622\u0645\u0646\n\n\u0627\u0644\u0648\u0642\u0627\u064a\u0629: \u0635\u062f\u0651\u0631 \u0627\u0644\u0646\u0633\u062e \u0627\u0644\u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629 \u0628\u0627\u0646\u062a\u0638\u0627\u0645 \u0648\u062e\u0632\u0651\u0646\u0647\u0627 \u0628\u0634\u0643\u0644 \u0622\u0645\u0646!',
+      question: 'هل يمكنني الاستيراد من Google Authenticator؟',
+      answer: 'نعم! Google Authenticator لديه ميزة التصدير:\n\n1. افتح تطبيق Google Authenticator\n2. انقر على "نقل الحسابات" → "تصدير الحسابات"\n3. حدد الحسابات للتصدير\n4. التقط لقطة شاشة لـ QR Code\n5. في هذا التطبيق: إضافة حساب → QR Code → ارفع لقطة الشاشة',
+    },
+    {
+      question: 'ماذا يحدث إذا فقدت نسختي الاحتياطية؟',
+      answer: 'إذا فقدت الوصول إلى هذه الإضافة وليس لديك نسخة احتياطية:\n\n1. ستحتاج إلى تعطيل 2FA على كل خدمة متأثرة\n2. ثم أعد تفعيل 2FA وأضف الحسابات مرة أخرى\n3. احتفظ برموز الاسترداد من الخدمات في مكان آمن\n\nالوقاية: صدّر النسخ الاحتياطية بانتظام وخزّنها بشكل آمن!',
     },
   ],
 

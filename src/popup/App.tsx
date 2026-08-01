@@ -1,39 +1,61 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
-import { Plus, Settings, AlertTriangle, HelpCircle, Moon, Sun } from 'lucide-react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Plus, Settings, AlertTriangle, HelpCircle, Moon, Sun, Sparkles } from 'lucide-react';
 import { useAccounts } from '@/hooks/useAccounts';
+import { useVault } from '@/hooks/useVault';
 import { AccountCard, type ViewMode } from '@/components/AccountCard';
 import { SearchBar } from '@/components/SearchBar';
 import { AddAccountModal } from '@/components/AddAccountModal';
-import { ExportImport } from '@/components/ExportImport';
+import { ExportImport, importBackupText } from '@/components/ExportImport';
 import { FAQ } from '@/components/FAQ';
-import { ReviewPrompt } from '@/components/ReviewPrompt';
 import { EditAccountModal } from '@/components/EditAccountModal';
 import { BackupReminder } from '@/components/BackupReminder';
+import { UpdateModal } from '@/components/UpdateModal';
+import { PromoBanner } from '@/components/PromoBanner';
 import { Logo } from '@/components/Logo';
 import { LanguageSelector } from '@/components/LanguageSelector';
-import { getTimeSyncMessage } from '@/utils/time-sync';
-import { createT, type Language } from '@/utils/i18n';
-import { importAccounts, addMultipleAccounts, exportAccounts, getAccounts } from '@/utils/storage';
+import { LockScreen } from '@/components/LockScreen';
+import { VaultPrompt } from '@/components/VaultPrompt';
+import { VaultSettings } from '@/components/VaultSettings';
+import { VaultSetupModal } from '@/components/VaultSetupModal';
+import { getTimeSyncNotice, dismissTimeNotice } from '@/utils/time-sync';
+import { createT, loadLanguage, type Language } from '@/utils/i18n';
+import { addMultipleAccounts, getAccounts } from '@/utils/storage';
 import { shouldShowBackupReminder, markBackupDone } from '@/utils/backup-reminder';
+import { shouldShowVaultPrompt, markVaultPromptShown } from '@/utils/vault-prompt';
+import { shouldShowPromoBanner, recordFirstOpen } from '@/utils/promo-banner';
 import { parseQRCode, generateRandomColor } from '@/utils/qr-parser';
-import { cleanSecret } from '@/utils/totp';
+import { decodeQrFromImage } from '@/utils/qr-decode';
+import { cleanSecret, loadTimeOffset } from '@/utils/totp';
+import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
+import { WHATS_NEW } from '@/utils/update-notes';
 import type { Account } from '@/types';
 
+const REVIEW_URL = 'https://authenticator.sh/rate';
+
 function App() {
-  const { accounts, loading, error, addAccount, deleteAccount, updateAccount, reorderAccounts, reload } = useAccounts();
+  const vault = useVault();
+  const { accounts, loading, error, addAccount, deleteAccount, updateAccount, reorderAccounts, reload } =
+    useAccounts(vault.enabled === true && vault.locked);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showFAQ, setShowFAQ] = useState(false);
-  const [showReviewPrompt, setShowReviewPrompt] = useState(false);
-  const [timeWarning, setTimeWarning] = useState<string | null>(null);
+  const [faqOpenId, setFaqOpenId] = useState<string | null>(null);
+  const [timeOffsetSec, setTimeOffsetSec] = useState<number | null>(null);
   const [language, setLanguage] = useState<Language>('en');
   const [darkMode, setDarkMode] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [showBackupReminder, setShowBackupReminder] = useState(false);
+  const [showVaultPrompt, setShowVaultPrompt] = useState(false);
+  const [showVaultSetup, setShowVaultSetup] = useState(false);
+  const [suggestionsOn, setSuggestionsOn] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
+  const [currentDomain, setCurrentDomain] = useState<string | null>(null);
+  const [suggestedAccountId, setSuggestedAccountId] = useState<string | null>(null);
+  const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
+  const [showPromoBanner, setShowPromoBanner] = useState(false);
+  const [reviewDismissed, setReviewDismissed] = useState(false);
   const draggedIdRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -42,7 +64,9 @@ function App() {
   useEffect(() => {
     chrome.storage.local.get(['language', 'darkMode', 'viewMode'], (result) => {
       if (result.language) {
-        setLanguage(result.language);
+        // Switch only once the chunk is in memory, otherwise the first paint
+        // would be English and then visibly flip.
+        loadLanguage(result.language).then(() => setLanguage(result.language));
       }
       if (result.darkMode) {
         setDarkMode(true);
@@ -53,7 +77,37 @@ function App() {
     });
   }, []);
 
-  const handleLanguageChange = (lang: Language) => {
+  useEffect(() => {
+    areSuggestionsEnabled().then(setSuggestionsOn);
+  }, []);
+
+  const handleSuggestionsToggle = async () => {
+    const next = !suggestionsOn;
+    setSuggestionsOn(next);
+    await setSuggestionsEnabled(next);
+    if (!next) setSuggestedAccountId(null);
+  };
+
+  // Show the "What's New" modal once after an update, if we have copy for it
+  useEffect(() => {
+    chrome.storage.local.get('pendingWhatsNew', (result) => {
+      const version = result.pendingWhatsNew;
+      if (version && WHATS_NEW[version]) {
+        setWhatsNewVersion(version);
+      }
+    });
+  }, []);
+
+  const handleCloseWhatsNew = () => {
+    if (whatsNewVersion) {
+      chrome.storage.local.set({ lastSeenWhatsNewVersion: whatsNewVersion });
+    }
+    chrome.storage.local.remove('pendingWhatsNew');
+    setWhatsNewVersion(null);
+  };
+
+  const handleLanguageChange = async (lang: Language) => {
+    await loadLanguage(lang);
     setLanguage(lang);
     chrome.storage.local.set({ language: lang });
   };
@@ -75,6 +129,12 @@ function App() {
         acc.issuer.toLowerCase().includes(query)
     );
   }, [accounts, searchQuery]);
+
+  // Pinning a duplicate on top only pays off when the list is long enough to
+  // scroll; with few accounts the badge highlight in the list is enough.
+  const suggestedAccount = !searchQuery && suggestedAccountId && accounts.length >= 5
+    ? accounts.find(acc => acc.id === suggestedAccountId) || null
+    : null;
 
   const handleAddAccount = async (account: Account | Account[]) => {
     if (Array.isArray(account)) {
@@ -132,17 +192,24 @@ function App() {
       if (file.type.startsWith('image/')) {
         await handleQRImport(file);
       } else {
-        const text = await file.text();
-        await importAccounts(text);
-        const currentAccounts = await getAccounts();
-        await markBackupDone(currentAccounts.length);
-        setShowBackupReminder(false);
-        reload();
-        alert(t('import.success'));
+        const imported = await importBackupText(await file.text(), () =>
+          prompt(`${t('import.passwordTitle')}\n\n${t('import.passwordText')}`)
+        );
+        if (imported) {
+          const currentAccounts = await getAccounts();
+          await markBackupDone(currentAccounts.length);
+          setShowBackupReminder(false);
+          reload();
+          alert(t('import.success'));
+        }
       }
     } catch (error) {
       console.error('Import failed:', error);
-      alert(t('import.failed'));
+      alert(
+        error instanceof Error && error.name === 'WrongExportPasswordError'
+          ? t('import.wrongPassword')
+          : t('import.failed')
+      );
     }
 
     e.target.value = '';
@@ -150,8 +217,10 @@ function App() {
 
   const handleQRImport = async (file: File) => {
     try {
-      const html5QrCode = new Html5Qrcode('qr-reader-import-app');
-      const result = await html5QrCode.scanFile(file, false);
+      const result = await decodeQrFromImage(file);
+      if (!result) {
+        throw new Error(t('addAccount.errorNoQr'));
+      }
 
       const parsed = parseQRCode(result);
       if (parsed) {
@@ -198,14 +267,20 @@ function App() {
 
   useEffect(() => {
     chrome.storage.local.get(['openCount', 'reviewDismissed'], (result) => {
+      setReviewDismissed(!!result.reviewDismissed);
       if (result.reviewDismissed) return;
       const count = (result.openCount || 0) + 1;
       chrome.storage.local.set({ openCount: count });
-      if (count === 5) {
-        setShowReviewPrompt(true);
-      }
     });
   }, []);
+
+  const handleRate = (stars: number) => {
+    chrome.storage.local.set({ reviewDismissed: true });
+    setReviewDismissed(true);
+    if (stars >= 4) {
+      chrome.tabs.create({ url: REVIEW_URL });
+    }
+  };
 
   // Check if backup reminder should be shown
   useEffect(() => {
@@ -214,46 +289,93 @@ function App() {
     }
   }, [loading, accounts.length]);
 
-  const handleBackupFromReminder = async () => {
-    try {
-      const data = await exportAccounts();
-      const accountsData = JSON.parse(data);
-      const currentAccounts = await getAccounts();
+  // Offer the password vault once there are enough accounts to be worth
+  // protecting — see vault-prompt.ts for the reasoning behind the timing.
+  useEffect(() => {
+    if (loading || vault.enabled === null) return;
+    shouldShowVaultPrompt(accounts.length, vault.enabled).then(show => {
+      setShowVaultPrompt(show);
+      if (show) markVaultPromptShown();
+    });
+  }, [loading, accounts.length, vault.enabled]);
 
-      const exportData = {
-        version: '2.0',
-        exportDate: new Date().toISOString(),
-        accountCount: accountsData.length,
-        accounts: accountsData
-      };
+  // Cross-promo banner — only for users active for at least a week
+  useEffect(() => {
+    recordFirstOpen().then(() => shouldShowPromoBanner().then(setShowPromoBanner));
+  }, []);
 
-      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `authenticator-backup-${Date.now()}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      await markBackupDone(currentAccounts.length);
-      setShowBackupReminder(false);
-    } catch (err) {
-      console.error('Backup from reminder failed:', err);
-    }
+  // Opens the settings panel rather than exporting straight away: since 1.10.0
+  // the user has to choose between a password-protected and a plain file, and
+  // silently writing the plain one would undo the vault for anyone who enabled it.
+  const handleBackupFromReminder = () => {
+    setShowSettings(true);
+    setShowFAQ(false);
+    setShowBackupReminder(false);
   };
 
   useEffect(() => {
-    getTimeSyncMessage().then(message => {
-      if (message) {
-        setTimeWarning(message);
+    // Restore any persisted clock correction first so codes are already adjusted,
+    // then run the network re-check which refines/clears it and decides the notice.
+    loadTimeOffset().then(() => {
+      getTimeSyncNotice().then(setTimeOffsetSec);
+    });
+  }, []);
+
+  // Read the active tab's site (activeTab permission — granted for this popup invocation)
+  useEffect(() => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const url = tabs[0]?.url;
+      if (!url) return;
+      try {
+        setCurrentDomain(new URL(url).hostname);
+      } catch {
+        // Non-http(s) tab (e.g. chrome://, file://) — no domain to suggest against.
       }
     });
   }, []);
 
+  useEffect(() => {
+    if (!currentDomain || accounts.length === 0) {
+      setSuggestedAccountId(null);
+      return;
+    }
+    getSuggestedAccountId(currentDomain, accounts).then(setSuggestedAccountId);
+  }, [currentDomain, accounts, suggestionsOn]);
+
+  // A locked vault replaces the whole UI: no account list, no search, no
+  // add button. useAccounts has already dropped the decrypted accounts from
+  // state, so there is nothing here to leak.
+  if (vault.enabled === true && vault.locked) {
+    return (
+      <div className={`w-[400px] min-h-[500px] max-h-[600px] overflow-hidden flex flex-col ${darkMode ? 'dark' : ''}`}>
+        <div className="flex-1 flex flex-col bg-white dark:bg-dark-900 overflow-hidden">
+          <div className="bg-white dark:bg-dark-900 border-b border-gray-200 dark:border-dark-700 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Logo size={24} />
+                <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t('app.title')}</h1>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleThemeToggle}
+                  className="p-1.5 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
+                  title={t('theme.toggle')}
+                >
+                  {darkMode ? <Sun className="text-yellow-400" size={18} /> : <Moon className="text-gray-600" size={18} />}
+                </button>
+                <LanguageSelector language={language} onLanguageChange={handleLanguageChange} />
+              </div>
+            </div>
+          </div>
+          <LockScreen language={language} onUnlock={vault.unlock} onRecovered={vault.refresh} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`w-[400px] min-h-[500px] max-h-[600px] overflow-hidden flex flex-col ${darkMode ? 'dark' : ''}`}>
       <div className="flex-1 flex flex-col bg-white dark:bg-dark-900 overflow-hidden">
-      <div id="qr-reader-import-app" className="hidden"></div>
 
       {/* Header */}
       <div className="bg-white dark:bg-dark-900 border-b border-gray-200 dark:border-dark-700 p-4">
@@ -282,6 +404,7 @@ function App() {
               onClick={() => {
                 setShowFAQ(!showFAQ);
                 setShowSettings(false);
+                setFaqOpenId(null);
               }}
               className={`p-1.5 rounded-lg transition-colors ${
                 showFAQ ? 'bg-gray-200 dark:bg-dark-600' : 'hover:bg-gray-100 dark:hover:bg-dark-700'
@@ -318,21 +441,54 @@ function App() {
         </div>
       )}
 
-      {timeWarning && !error && (
+      {timeOffsetSec !== null && !error && (
         <div className="bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 p-3 flex items-start gap-2">
           <AlertTriangle className="text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" size={16} />
           <div className="text-xs text-yellow-800 dark:text-yellow-300 flex-1">
-            {timeWarning}
+            <div>{t('warning.clockOff', Math.max(1, Math.round(timeOffsetSec / 60)))}</div>
+            <div className="flex items-center gap-3 mt-1.5">
+              <button
+                onClick={() => {
+                  setShowSettings(false);
+                  setShowFAQ(true);
+                  setFaqOpenId('time-sync');
+                }}
+                className="font-medium text-yellow-900 dark:text-yellow-200 underline underline-offset-2 hover:text-yellow-950 dark:hover:text-yellow-100"
+              >
+                {t('warning.howToFix')}
+              </button>
+              <button
+                onClick={() => {
+                  dismissTimeNotice(timeOffsetSec);
+                  setTimeOffsetSec(null);
+                }}
+                className="text-yellow-700 dark:text-yellow-400 hover:text-yellow-900 dark:hover:text-yellow-200"
+              >
+                {t('warning.dismiss')}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Backup Reminder */}
-      {showBackupReminder && !error && !timeWarning && (
+      {showBackupReminder && !error && timeOffsetSec === null && (
         <BackupReminder
           language={language}
           onExport={handleBackupFromReminder}
           onDismiss={() => setShowBackupReminder(false)}
+        />
+      )}
+
+      {/* Offer password protection — never at the same time as another notice */}
+      {showVaultPrompt && !showBackupReminder && !error && timeOffsetSec === null && !showSettings && !showFAQ && (
+        <VaultPrompt
+          language={language}
+          onEnable={() => {
+            setShowVaultPrompt(false);
+            setShowVaultSetup(true);
+          }}
+          onDismiss={() => setShowVaultPrompt(false)}
         />
       )}
 
@@ -341,6 +497,27 @@ function App() {
         <div className="p-4 bg-gray-50 dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600">
           <h3 className="text-gray-900 dark:text-gray-100 font-medium mb-3 text-sm">{t('settings.backupRestore')}</h3>
           <ExportImport onImportComplete={reload} onExportComplete={() => setShowBackupReminder(false)} language={language} />
+
+          <div className="mt-4 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <span className="text-sm text-gray-700 dark:text-gray-300">{t('settings.suggested')}</span>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{t('settings.suggestedHint')}</p>
+            </div>
+            <button
+              role="switch"
+              aria-checked={suggestionsOn}
+              onClick={handleSuggestionsToggle}
+              className={`relative w-9 h-5 rounded-full flex-shrink-0 mt-0.5 transition-colors ${
+                suggestionsOn ? 'bg-[#4285F4]' : 'bg-gray-300 dark:bg-dark-500'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                  suggestionsOn ? 'translate-x-[18px]' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
 
           <div className="mt-4 flex items-center justify-between">
             <span className="text-sm text-gray-700 dark:text-gray-300">{t('settings.viewMode')}</span>
@@ -358,11 +535,24 @@ function App() {
               ))}
             </div>
           </div>
+
+          <VaultSettings
+            language={language}
+            enabled={vault.enabled === true}
+            autoLockMinutes={vault.autoLockMinutes}
+            onEnableClick={() => setShowVaultSetup(true)}
+            onChanged={() => {
+              vault.refresh();
+              reload();
+            }}
+            onLock={() => vault.lock()}
+            onAutoLockChange={vault.setAutoLockMinutes}
+          />
         </div>
       )}
 
       {/* FAQ Panel */}
-      {showFAQ && <FAQ language={language} />}
+      {showFAQ && <FAQ language={language} openId={faqOpenId} />}
 
       {/* Accounts List */}
       <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-dark-900">
@@ -413,6 +603,34 @@ function App() {
           </div>
         ) : (
           <div className="bg-white dark:bg-dark-800 pb-20">
+            {suggestedAccount && (
+              <>
+                {/* AccountCard must stay the last child so its own `last:after:hidden`
+                    divider rule kicks in — the section strip below handles separation. */}
+                <div>
+                  <div className="px-4 pt-2.5 pb-1 flex items-center gap-1.5 text-[11px] font-medium text-[#4285F4]">
+                    <Sparkles size={12} />
+                    <span>{t('accounts.suggested')}</span>
+                    {currentDomain && (
+                      <span className="text-gray-400 dark:text-gray-500 font-normal truncate">
+                        · {getBaseDomain(currentDomain)}
+                      </span>
+                    )}
+                  </div>
+                  <AccountCard
+                    key={`suggested-${suggestedAccount.id}`}
+                    account={suggestedAccount}
+                    onDelete={handleDeleteAccount}
+                    onEdit={setEditingAccount}
+                    language={language}
+                    viewMode={viewMode}
+                    draggable={false}
+                    currentDomain={currentDomain}
+                  />
+                </div>
+                <div className="h-2 bg-gray-100 dark:bg-dark-900 border-y border-gray-200 dark:border-dark-700" />
+              </>
+            )}
             {filteredAccounts.map((account) => (
               <AccountCard
                 key={account.id}
@@ -426,8 +644,13 @@ function App() {
                 onDragOver={() => setDragOverId(account.id)}
                 onDrop={handleDrop}
                 isDragOver={dragOverId === account.id}
+                currentDomain={currentDomain}
+                isSuggested={!searchQuery && suggestedAccountId === account.id}
               />
             ))}
+            {showPromoBanner && !searchQuery && (
+              <PromoBanner language={language} onDismiss={() => setShowPromoBanner(false)} />
+            )}
           </div>
         )}
       </div>
@@ -462,13 +685,29 @@ function App() {
         />
       )}
 
-      {/* Review Prompt */}
-      {showReviewPrompt && (
-        <ReviewPrompt
-          onClose={() => setShowReviewPrompt(false)}
+      {/* Password Vault Setup */}
+      {showVaultSetup && (
+        <VaultSetupModal
           language={language}
+          onClose={() => setShowVaultSetup(false)}
+          onEnabled={() => {
+            vault.refresh();
+            reload();
+          }}
         />
       )}
+
+      {/* What's New Modal */}
+      {whatsNewVersion && (
+        <UpdateModal
+          version={whatsNewVersion}
+          language={language}
+          onClose={handleCloseWhatsNew}
+          reviewDismissed={reviewDismissed}
+          onRate={handleRate}
+        />
+      )}
+
 
       {/* Hidden Import Input */}
       <input

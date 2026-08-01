@@ -1,4 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
+/* No remote font import: the popup must make zero network requests just to
+   render, and a security review of this extension should find no outbound
+   host beyond the optional clock check. Falls back to the platform UI font,
+   which is what Inter approximates anyway. */
 
 @tailwind base;
 @tailwind components;
