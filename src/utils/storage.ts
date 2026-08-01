@@ -18,6 +18,16 @@ import { replaceAllBackups } from './auto-backup';
 
 const STORAGE_KEY = 'authenticator_accounts';
 const SYNC_ENABLED_KEY = 'syncEnabled';
+const SYNC_OVERFLOW_KEY = 'syncOverflow';
+
+// chrome.storage.sync caps a single key at 8 KB but allows 100 KB in total, so
+// the accounts go across several keys rather than one. Writing them as one
+// array silently stopped syncing at ~44 accounts — and at ~22 once password
+// protection roughly doubles each record. Chunking raises that to a few
+// hundred, which is past any realistic collection.
+const SYNC_CHUNK_PREFIX = 'authenticator_accounts_';
+const SYNC_CHUNK_BYTES = 7000; // headroom under the 8192-per-item limit
+const SYNC_MAX_CHUNKS = 12; // ~84 KB, leaving room for the vault metadata
 /** Owned by suggestions.ts; named here only so the vault can scrub it. */
 const USAGE_HISTORY_KEY = 'accountUsageByDomain';
 
@@ -43,16 +53,89 @@ export async function setSyncEnabled(enabled: boolean): Promise<void> {
   // Purge both the accounts and the vault metadata: leaving the wrapped master
   // key behind would keep an offline brute-force target on Google's servers
   // after the user asked us to stop using them.
-  await chrome.storage.sync.remove([STORAGE_KEY, 'vault_meta']).catch(() => {});
+  await chrome.storage.sync.remove([...(await syncKeysInUse()), 'vault_meta']).catch(() => {});
+}
+
+/** Split records so that each chunk serialises below the per-key limit. */
+function chunkForSync(records: StoredAccount[]): StoredAccount[][] {
+  const chunks: StoredAccount[][] = [];
+  let current: StoredAccount[] = [];
+  let size = 2; // the enclosing []
+
+  for (const record of records) {
+    const cost = JSON.stringify(record).length + 1;
+    if (current.length > 0 && size + cost > SYNC_CHUNK_BYTES) {
+      chunks.push(current);
+      current = [];
+      size = 2;
+    }
+    current.push(record);
+    size += cost;
+  }
+
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+async function syncKeysInUse(): Promise<string[]> {
+  const all = await chrome.storage.sync.get(null);
+  return Object.keys(all).filter(key => key.startsWith(SYNC_CHUNK_PREFIX) || key === STORAGE_KEY);
+}
+
+/** Reads the accounts back out of however many keys they were spread across. */
+async function readSyncRecords(): Promise<StoredAccount[]> {
+  const all = await chrome.storage.sync.get(null);
+
+  const chunkKeys = Object.keys(all)
+    .filter(key => key.startsWith(SYNC_CHUNK_PREFIX))
+    .sort((a, b) => Number(a.slice(SYNC_CHUNK_PREFIX.length)) - Number(b.slice(SYNC_CHUNK_PREFIX.length)));
+
+  const records: StoredAccount[] = [];
+  for (const key of chunkKeys) {
+    if (Array.isArray(all[key])) records.push(...all[key]);
+  }
+
+  // Devices still running an older build write a single un-chunked key.
+  if (Array.isArray(all[STORAGE_KEY])) records.push(...all[STORAGE_KEY]);
+
+  return records;
+}
+
+/** True when the accounts are too large for sync even after chunking. */
+export async function hasSyncOverflowed(): Promise<boolean> {
+  const result = await chrome.storage.local.get(SYNC_OVERFLOW_KEY);
+  return result[SYNC_OVERFLOW_KEY] === true;
 }
 
 /** Throws if the write is rejected, so callers can react to quota failures. */
 async function pushToSync(records: StoredAccount[]): Promise<void> {
+  const stale = await syncKeysInUse();
+
   if (!(await isSyncEnabled())) {
-    await chrome.storage.sync.remove(STORAGE_KEY).catch(() => {});
+    if (stale.length) await chrome.storage.sync.remove(stale).catch(() => {});
     return;
   }
-  await chrome.storage.sync.set({ [STORAGE_KEY]: records });
+
+  const chunks = chunkForSync(records);
+
+  if (chunks.length > SYNC_MAX_CHUNKS) {
+    // Record it so the UI can say so; failing silently is what made the old
+    // 8 KB ceiling invisible to everyone it affected.
+    await chrome.storage.local.set({ [SYNC_OVERFLOW_KEY]: true });
+    throw new Error(`Too many accounts to sync (${records.length})`);
+  }
+
+  const payload: Record<string, StoredAccount[]> = {};
+  chunks.forEach((chunk, index) => {
+    payload[`${SYNC_CHUNK_PREFIX}${index}`] = chunk;
+  });
+
+  await chrome.storage.sync.set(payload);
+  await chrome.storage.local.set({ [SYNC_OVERFLOW_KEY]: false });
+
+  // Drop the legacy single key and any chunk left over from a longer list.
+  const obsolete = stale.filter(key => !(key in payload));
+  if (obsolete.length) await chrome.storage.sync.remove(obsolete).catch(() => {});
 }
 
 /**
@@ -97,6 +180,17 @@ let quarantined: StoredAccount[] = [];
 
 export function quarantinedCount(): number {
   return quarantined.length;
+}
+
+/**
+ * Drop the held records.
+ *
+ * The list is refreshed by every read, and every mutation path reads before it
+ * writes, so in the extension it is always current. Tests reuse one module
+ * instance across scenarios, where that invariant does not hold.
+ */
+export function resetQuarantine(): void {
+  quarantined = [];
 }
 
 async function requireKeys() {
@@ -257,8 +351,7 @@ export async function getStoredAccounts(): Promise<StoredAccount[]> {
 
     let syncAccounts: StoredAccount[] = [];
     try {
-      const syncResult = await chrome.storage.sync.get(STORAGE_KEY);
-      syncAccounts = syncResult[STORAGE_KEY] || [];
+      syncAccounts = await readSyncRecords();
     } catch (syncError) {
       console.warn('Sync storage unavailable:', syncError);
     }
@@ -516,7 +609,7 @@ export async function prepareVault(password: string): Promise<PreparedVault> {
       try {
         await pushToSync(encrypted);
       } catch {
-        await chrome.storage.sync.remove(STORAGE_KEY).catch(() => {});
+        await chrome.storage.sync.remove(await syncKeysInUse()).catch(() => {});
       }
 
       // Snapshots are replaced inside a single IndexedDB transaction so there
@@ -579,7 +672,7 @@ export async function disableVault(password: string): Promise<void> {
   try {
     await pushToSync(unique);
   } catch {
-    await chrome.storage.sync.remove(STORAGE_KEY).catch(() => {});
+    await chrome.storage.sync.remove(await syncKeysInUse()).catch(() => {});
   }
 
   // Existing snapshots are ciphertext that nothing will be able to open once

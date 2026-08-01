@@ -2,7 +2,7 @@
 // permanent loss of somebody's 2FA seeds, so they are deliberately end-to-end:
 // real WebCrypto, real storage module, mocked browser only.
 
-import { areas, backupRows, check, resetState, scenario, setBackupRows, throwsNamed } from './harness';
+import { areas, backupRows, check, flush, resetState, scenario, setBackupRows, throwsNamed } from './harness';
 
 const PASSWORD = 'correct horse battery staple';
 
@@ -32,6 +32,7 @@ export async function run(): Promise<void> {
   check('nothing is written before the recovery code is confirmed',
     !('vault_meta' in areas.local) && typeof (areas.local.authenticator_accounts as any[])[0].secret === 'string');
   await prepared.commit();
+  await flush();
   const localJson = JSON.stringify(areas.local.authenticator_accounts);
 
   check('issues a recovery code', /^[A-Z2-9]{5}(-[A-Z2-9]{5})+$/.test(recoveryCode), recoveryCode);
@@ -60,21 +61,27 @@ export async function run(): Promise<void> {
   // --- mutation ----------------------------------------------------------
   scenario('Editing while encrypted');
   await storage.deleteAccount('a2');
+  await flush();
   check('delete by id works through encryption', (await storage.getAccounts()).every(a => a.id !== 'a2'));
   await storage.reorderAccounts(['a3', 'a1']);
+  await flush();
   check('reorder by id works', (await storage.getAccounts()).map(a => a.id).join() === 'a3,a1');
   await storage.updateAccount('a1', { issuer: 'GitHub Inc' });
+  await flush();
   check('edits round-trip', (await storage.getAccounts()).find(a => a.id === 'a1')?.issuer === 'GitHub Inc');
 
   // --- sync from an older device ----------------------------------------
+  // An older build writes the accounts to one un-chunked key; we must still
+  // read it, and still collapse the duplicate it introduces.
   scenario('Cleartext arriving from an older device');
-  areas.sync.authenticator_accounts = [...(areas.sync.authenticator_accounts as any[]), ACCOUNTS[0]];
+  areas.sync.authenticator_accounts = [ACCOUNTS[0]];
   const merged = await storage.getAccounts();
   check('the duplicate is collapsed, not shown twice', merged.filter(a => a.secret === ACCOUNTS[0].secret).length === 1, `got ${merged.length}`);
 
   // --- password management ----------------------------------------------
   scenario('Changing the password');
   await vault.changePassword(PASSWORD, 'a completely different password');
+  await flush();
   check('accounts survive a password change', (await storage.getAccounts()).length === 2);
   await vault.lock();
   check('the old password stops working', await throwsNamed('WrongPasswordError', () => vault.unlockWithPassword(PASSWORD)));
@@ -107,6 +114,7 @@ export async function run(): Promise<void> {
   scenario('Disabling the vault');
   check('a wrong password cannot disable it', await throwsNamed('WrongPasswordError', () => storage.disableVault('nope')));
   await storage.disableVault('third password');
+  await flush();
   check('the vault metadata is gone', !(await vault.isVaultEnabled()));
   check('accounts are readable again', (await storage.getAccounts()).length === 2);
   check('local holds cleartext once more', typeof areas.local.authenticator_accounts[0].secret === 'string');

@@ -22,7 +22,13 @@ function makeArea(store: Store) {
   };
 
   return {
-    get(keys: string | string[], callback?: (items: Store) => void) {
+    get(keys: string | string[] | null | undefined, callback?: (items: Store) => void) {
+      // null/undefined means "everything", which is how the source enumerates
+      // the sync chunks. Treating it as a key name made every chunked read and
+      // every cleanup silently return nothing.
+      if (keys === null || keys === undefined) {
+        return settle({ ...store }, callback);
+      }
       const wanted = Array.isArray(keys) ? keys : [keys];
       const items: Store = {};
       for (const key of wanted) {
@@ -108,7 +114,16 @@ export function installMocks(): void {
  * the local save — so assertions about sync need to yield first.
  */
 export async function flush(): Promise<void> {
-  await new Promise(resolve => setTimeout(resolve, 0));
+  // A sync push is several awaits deep (enabled check, chunk write, stale-key
+  // cleanup), so one turn of the loop is not enough to see it land.
+  for (let i = 0; i < 10; i++) {
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+}
+
+/** Every sync key currently holding accounts, chunked or legacy. */
+export function syncAccountKeys(): string[] {
+  return Object.keys(areas.sync).filter(key => key.startsWith('authenticator_accounts'));
 }
 
 /** Wipe all persisted state between scenarios so they cannot leak into each other. */
@@ -119,6 +134,8 @@ export async function resetState(): Promise<void> {
   backupRows = [];
   const { clearKeyCache } = await import('@/utils/vault');
   clearKeyCache();
+  const { resetQuarantine } = await import('@/utils/storage');
+  resetQuarantine();
 }
 
 export function setBackupRows(rows: any[]): void {
