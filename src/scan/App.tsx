@@ -16,8 +16,9 @@ import type jsQRType from 'jsqr';
 import { Logo } from '@/components/Logo';
 import { FeedbackHost } from '@/components/FeedbackHost';
 import { SupportFooter } from '@/components/SupportFooter';
-import { createT, loadLanguage, type Language } from '@/utils/i18n';
+import { applyDocumentLanguage, createT, loadLanguage, type Language } from '@/utils/i18n';
 import { addMultipleAccounts } from '@/utils/storage';
+import { readActiveGroup } from '@/utils/active-group';
 import { VaultLockedError } from '@/utils/vault';
 import { generateRandomColor, parseQRCode } from '@/utils/qr-parser';
 import { cleanSecret } from '@/utils/totp';
@@ -27,7 +28,9 @@ import { describeImport, type ImportOutcome } from '@/utils/import-message';
 type Status =
   | { kind: 'starting' }
   | { kind: 'scanning' }
-  | { kind: 'added'; outcome: ImportOutcome }
+  // `group` is the filter the popup had on when it opened the scanner, if any —
+  // named in the result so the accounts are not simply missing later.
+  | { kind: 'added'; outcome: ImportOutcome; group?: string }
   | { kind: 'locked' }
   | { kind: 'denied' }
   | { kind: 'noCamera' }
@@ -56,6 +59,11 @@ export default function App() {
     });
   }, []);
 
+  // The scanner is its own page, so it needs the same treatment as the popup.
+  useEffect(() => {
+    applyDocumentLanguage(language);
+  }, [language]);
+
   const stopCamera = useCallback(() => {
     if (frameRef.current) cancelAnimationFrame(frameRef.current);
     streamRef.current?.getTracks().forEach(track => track.stop());
@@ -73,6 +81,14 @@ export default function App() {
 
       stopCamera();
 
+      // The scanner runs in its own tab, but the popup that launched it may have
+      // had a group filter on — and it restores that filter when it reopens. An
+      // account added without the group would land outside the filter and simply
+      // not be there, which on a 2FA app reads as a scan that silently failed.
+      // The in-popup QR paths already inherit the filter; this one is the same
+      // promise kept from a different window.
+      const filteredGroup = (await readActiveGroup())?.trim() || undefined;
+
       const accounts: Account[] = parsed.accounts.map((data, index) => ({
         id: Date.now().toString() + index + Math.random().toString(36).substring(7),
         name: data.name,
@@ -83,11 +99,12 @@ export default function App() {
         period: data.period,
         createdAt: Date.now() + index,
         color: generateRandomColor(),
+        ...(filteredGroup ? { group: filteredGroup } : {}),
       }));
 
       try {
         const result = await addMultipleAccounts(accounts);
-        setStatus({ kind: 'added', outcome: result });
+        setStatus({ kind: 'added', outcome: result, group: filteredGroup });
       } catch (error) {
         if (error instanceof VaultLockedError) {
           setStatus({ kind: 'locked' });
@@ -209,7 +226,7 @@ export default function App() {
                 />
               </div>
               <h2 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-1">
-                {describeImport(status.outcome, language)}
+                {describeImport(status.outcome, language, status.group)}
               </h2>
               {status.outcome.added > 0 && (
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{t('scan.addedBody')}</p>

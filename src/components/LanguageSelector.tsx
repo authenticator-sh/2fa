@@ -36,7 +36,7 @@ export function LanguageSelector({ language, onLanguageChange }: LanguageSelecto
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 bg-white dark:bg-dark-800 rounded-lg shadow-lg border border-gray-200 dark:border-dark-600 py-1 z-50 min-w-[140px] max-h-[300px] overflow-y-auto">
+        <div className="absolute end-0 top-full mt-1 bg-white dark:bg-dark-800 rounded-lg shadow-lg border border-gray-200 dark:border-dark-600 py-1 z-50 min-w-[140px] max-h-[300px] overflow-y-auto">
           {languages.map((lang) => (
             <button
               key={lang.code}
@@ -44,7 +44,7 @@ export function LanguageSelector({ language, onLanguageChange }: LanguageSelecto
                 onLanguageChange(lang.code);
                 setIsOpen(false);
               }}
-              className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors ${
+              className={`w-full px-3 py-2 text-start text-sm flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors ${
                 language === lang.code ? 'bg-gray-50 dark:bg-dark-700 font-medium' : ''
               }`}
             >

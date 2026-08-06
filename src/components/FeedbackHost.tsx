@@ -19,7 +19,7 @@ function ToastRow({ toast }: { toast: Toast }) {
       onClick={() => dismissToast(toast.id)}
       role="status"
       title=""
-      className="pointer-events-auto mx-auto flex max-w-[92%] items-center gap-2 rounded-full bg-gray-900/95 py-2 pl-3 pr-3.5 text-left shadow-lg ring-1 ring-white/10 backdrop-blur-sm transition hover:bg-gray-900 dark:bg-dark-600/95 dark:hover:bg-dark-600 motion-safe:animate-[toastIn_180ms_ease-out]"
+      className="pointer-events-auto mx-auto flex max-w-[92%] items-center gap-2 rounded-full bg-gray-900/95 py-2 ps-3 pe-3.5 text-start shadow-lg ring-1 ring-white/10 backdrop-blur-sm transition hover:bg-gray-900 dark:bg-dark-600/95 dark:hover:bg-dark-600 motion-safe:animate-[toastIn_180ms_ease-out]"
     >
       <tone.icon size={15} className={`flex-shrink-0 ${tone.iconClass}`} />
       <span className="text-xs font-medium leading-snug text-white">{toast.message}</span>

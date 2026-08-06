@@ -5,12 +5,12 @@ import { useVault } from '@/hooks/useVault';
 import { AccountCard, type ViewMode } from '@/components/AccountCard';
 import { SearchBar } from '@/components/SearchBar';
 import { AddAccountModal } from '@/components/AddAccountModal';
-import { ExportImport, importBackupText } from '@/components/ExportImport';
-import { FAQ } from '@/components/FAQ';
+import { ExportImport, importBackupText, importResultMessage } from '@/components/ExportImport';
 import { EditAccountModal } from '@/components/EditAccountModal';
 import { BackupReminder } from '@/components/BackupReminder';
 import { UpdateModal } from '@/components/UpdateModal';
 import { PromoBanner } from '@/components/PromoBanner';
+import { ReviewPrompt } from '@/components/ReviewPrompt';
 import { Logo } from '@/components/Logo';
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { SettingToggle } from '@/components/SettingToggle';
@@ -19,9 +19,10 @@ import { VaultPrompt } from '@/components/VaultPrompt';
 import { VaultSettings } from '@/components/VaultSettings';
 import { VaultSetupModal } from '@/components/VaultSetupModal';
 import { EmptyStateGuide } from '@/components/EmptyStateGuide';
+import { GroupFilter } from '@/components/GroupFilter';
 import { SupportFooter } from '@/components/SupportFooter';
 import { getTimeSyncNotice, dismissTimeNotice } from '@/utils/time-sync';
-import { createT, loadLanguage, type Language } from '@/utils/i18n';
+import { applyDocumentLanguage, createT, loadLanguage, type Language } from '@/utils/i18n';
 import { addMultipleAccounts, getAccounts } from '@/utils/storage';
 import { shouldShowBackupReminder, markBackupDone } from '@/utils/backup-reminder';
 import { shouldShowVaultPrompt, markVaultPromptShown } from '@/utils/vault-prompt';
@@ -29,19 +30,28 @@ import { describeImport } from '@/utils/import-message';
 import { confirmDialog, promptDialog, toast } from '@/utils/ui-feedback';
 import { FeedbackHost } from '@/components/FeedbackHost';
 import { shouldShowPromoBanner, recordFirstOpen } from '@/utils/promo-banner';
+import { recordOpen, shouldShowReviewPrompt, snoozeReviewPrompt } from '@/utils/review-prompt';
+import { readActiveGroup, rememberActiveGroup, forgetActiveGroup } from '@/utils/active-group';
+import { helpUrl } from '@/utils/links';
 import { parseQRCode, generateRandomColor } from '@/utils/qr-parser';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, loadTimeOffset } from '@/utils/totp';
 import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
 import { isSyncEnabled, setSyncEnabled, hasSyncOverflowed } from '@/utils/storage';
 import { WHATS_NEW } from '@/utils/update-notes';
+import {
+  cachedPopupSize,
+  popupSizeStyle,
+  readPopupSize,
+  rememberPopupSize,
+  type PopupSize,
+} from '@/utils/popup-size';
 import type { Account } from '@/types';
 
 // Straight to the Web Store review form: authenticator.sh/rate is a landing
-// page, and every extra hop between "tapped 4 stars" and the review box costs
+// page, and every extra hop between the prompt and the review box costs
 // reviews.
 const REVIEW_URL = 'https://chromewebstore.google.com/detail/2fa/ebhcbenbgjmaebpgbldimndmfomjmphd/reviews';
-const FEEDBACK_URL = 'https://authenticator.sh/rate';
 
 function App() {
   const vault = useVault();
@@ -52,10 +62,10 @@ function App() {
     // painting live codes over a locked vault.
     useAccounts(vault.enabled === null || (vault.enabled && vault.locked));
   const [searchQuery, setSearchQuery] = useState('');
+  // null — every account; '' — the ungrouped chip; otherwise a group name.
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showFAQ, setShowFAQ] = useState(false);
-  const [faqOpenId, setFaqOpenId] = useState<string | null>(null);
   const [timeOffsetSec, setTimeOffsetSec] = useState<number | null>(null);
   const [language, setLanguage] = useState<Language>('en');
   const [darkMode, setDarkMode] = useState(false);
@@ -68,18 +78,23 @@ function App() {
   const [syncOn, setSyncOn] = useState(true);
   const [syncOverflow, setSyncOverflow] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
+  // Seeded from the synchronous mirror so the window opens at the chosen size
+  // instead of resizing once chrome.storage answers.
+  const [popupSize, setPopupSize] = useState<PopupSize>(cachedPopupSize);
   const [currentDomain, setCurrentDomain] = useState<string | null>(null);
   const [suggestedAccountId, setSuggestedAccountId] = useState<string | null>(null);
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
   const [showPromoBanner, setShowPromoBanner] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
+  const [openCount, setOpenCount] = useState<number | null>(null);
+  const [showReviewPrompt, setShowReviewPrompt] = useState(false);
   const draggedIdRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   // Load saved preferences
   useEffect(() => {
-    chrome.storage.local.get(['language', 'darkMode', 'viewMode'], (result) => {
+    chrome.storage.local.get(['language', 'darkMode', 'viewMode', 'popupSize'], (result) => {
       if (result.language) {
         // Switch only once the chunk is in memory, otherwise the first paint
         // would be English and then visibly flip.
@@ -91,6 +106,28 @@ function App() {
       if (result.viewMode) {
         setViewMode(result.viewMode);
       }
+      // chrome.storage is the source of truth; refresh the mirror from it in
+      // case another device synced a different choice.
+      const storedSize = readPopupSize(result.popupSize);
+      if (storedSize) {
+        setPopupSize(storedSize);
+        rememberPopupSize(storedSize);
+      }
+    });
+  }, []);
+
+  // Mirrors the layout for right-to-left languages and names the language for
+  // the font stack and screen readers. Runs on every change, including the
+  // first paint's default of English.
+  useEffect(() => {
+    applyDocumentLanguage(language);
+  }, [language]);
+
+  // Separate from the preferences read above: where this one lives depends on
+  // whether a vault is configured, so it goes through its own module.
+  useEffect(() => {
+    readActiveGroup().then(group => {
+      if (group !== null) setActiveGroup(group);
     });
   }, []);
 
@@ -138,6 +175,12 @@ function App() {
     chrome.storage.local.set({ language: lang });
   };
 
+  const handlePopupSizeChange = (size: PopupSize) => {
+    setPopupSize(size);
+    rememberPopupSize(size);
+    chrome.storage.local.set({ popupSize: size });
+  };
+
   const handleThemeToggle = () => {
     const newDarkMode = !darkMode;
     setDarkMode(newDarkMode);
@@ -146,30 +189,123 @@ function App() {
 
   const t = createT(language);
 
+  // Groups are derived from the accounts rather than stored alongside them:
+  // nothing to migrate, nothing to keep in sync, and a group disappears by
+  // itself once its last account is gone.
+  const groups = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const account of accounts) {
+      const name = account.group?.trim();
+      if (name) counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, count]) => ({ name, count }));
+  }, [accounts]);
+
+  const ungroupedCount = useMemo(
+    () => accounts.filter(account => !account.group?.trim()).length,
+    [accounts]
+  );
+
   const filteredAccounts = useMemo(() => {
-    if (!searchQuery) return accounts;
-    const query = searchQuery.toLowerCase();
-    return accounts.filter(
-      (acc) =>
-        acc.name.toLowerCase().includes(query) ||
-        acc.issuer.toLowerCase().includes(query)
-    );
-  }, [accounts, searchQuery]);
+    let list = accounts;
+
+    if (activeGroup !== null) {
+      list = list.filter(acc => (acc.group?.trim() ?? '') === activeGroup);
+    }
+
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      list = list.filter(
+        (acc) =>
+          acc.name.toLowerCase().includes(query) ||
+          acc.issuer.toLowerCase().includes(query)
+      );
+    }
+
+    return list;
+  }, [accounts, searchQuery, activeGroup]);
+
+  // A filter is a claim about the whole list, so the pinned suggestion — which
+  // ignores it — is dropped while one is active, the same as during a search.
+  const isFiltered = Boolean(searchQuery) || activeGroup !== null;
 
   // Pinning a duplicate on top only pays off when the list is long enough to
   // scroll; with few accounts the badge highlight in the list is enough.
-  const suggestedAccount = !searchQuery && suggestedAccountId && accounts.length >= 5
+  const suggestedAccount = !isFiltered && suggestedAccountId && accounts.length >= 5
     ? accounts.find(acc => acc.id === suggestedAccountId) || null
     : null;
+
+  // The strip carries its own bottom border, so the header drops its own while
+  // the strip is up — two hairlines a chip's height apart read as clutter.
+  //
+  // Kept up while a filter is active even after its last group is gone: the
+  // strip is the only control that can clear one, so hiding it on
+  // `groups.length === 0` is how a user ends up staring at an empty list with
+  // nothing on screen that explains it.
+  const showGroupFilter =
+    !showSettings && !loading && (groups.length > 0 || activeGroup !== null);
+
+  const handleGroupChange = (group: string | null) => {
+    setActiveGroup(group);
+    rememberActiveGroup(group);
+  };
+
+  // useAccounts empties the list while the vault is locked or still unknown, so
+  // an empty `accounts` in that state says nothing about what the user has.
+  const vaultHidingAccounts = vault.enabled === null || (vault.enabled === true && vault.locked);
+
+  /**
+   * Drop the filter when it would hide an account the user just created.
+   *
+   * Adding while filtered normally inherits the filter, so the new account stays
+   * in view. It does not when the user clears the prefilled group, when a QR
+   * batch carries a different one, or when an edit moves an account out of the
+   * group being shown. Each of those ends with a success toast and no visible
+   * row, which on a 2FA app reads as the account having been lost.
+   */
+  const revealAccount = (account: Pick<Account, 'group'> | undefined) => {
+    if (activeGroup === null || !account) return;
+    if ((account.group?.trim() ?? '') === activeGroup) return;
+    handleGroupChange(null);
+  };
+
+  // A filter left pinned to a group that no longer exists renders an empty list,
+  // which on a 2FA app reads as lost accounts. Only ever runs once the accounts
+  // are really loaded — resetting during the load or behind a locked vault would
+  // throw away the choice on every open.
+  //
+  // The guard is the locked vault specifically, not `accounts.length === 0`:
+  // deleting the last account in a group is exactly when the stale filter has to
+  // go, and skipping that case left the popup with no chip strip (no groups), no
+  // empty-state guide (`isFiltered`) and no add button — permanently, since the
+  // filter is persisted.
+  useEffect(() => {
+    if (loading || activeGroup === null || vaultHidingAccounts) return;
+    const stillExists = activeGroup === ''
+      ? ungroupedCount > 0
+      : groups.some(group => group.name === activeGroup);
+    if (!stillExists) {
+      setActiveGroup(null);
+      forgetActiveGroup();
+    }
+  }, [loading, activeGroup, groups, ungroupedCount, vaultHidingAccounts]);
 
   const handleAddAccount = async (account: Account | Account[]) => {
     if (Array.isArray(account)) {
       const result = await addMultipleAccounts(account);
       reload();
-      toast(result.added > 0 ? 'success' : 'info', describeImport(result, language));
+      revealAccount(account[0]);
+      // One batch carries one group, so the first entry speaks for all of them.
+      // Worth naming: a scan started from inside a filtered list inherits that
+      // filter silently, and "added" alone leaves the user to work out why the
+      // accounts are nowhere to be seen once they clear the filter.
+      toast(result.added > 0 ? 'success' : 'info', describeImport(result, language, account[0]?.group));
     } else {
       await addAccount(account);
-      toast('success', t('accounts.added'));
+      revealAccount(account);
+      toast('success', account.group ? t('accounts.addedToGroup', account.group) : t('accounts.added'));
     }
   };
 
@@ -191,6 +327,9 @@ function App() {
 
   const handleEditAccount = async (id: string, updates: Partial<Account>) => {
     await updateAccount(id, updates);
+    // Only when the group was actually touched: an edit that leaves it alone
+    // cannot have moved the account out of the current filter.
+    if ('group' in updates) revealAccount(updates);
     toast('success', t('accounts.updated'));
   };
 
@@ -242,7 +381,13 @@ function App() {
           await markBackupDone(currentAccounts.length);
           setShowBackupReminder(false);
           reload();
-          toast('success', t('import.success'));
+          // Entries that could no longer be read are named rather than rounded
+          // up to "successful" — a restore that quietly dropped rows is the one
+          // case where the user needs to go looking for another copy.
+          toast(
+            imported.unreadable > 0 ? 'info' : 'success',
+            importResultMessage(imported, language)
+          );
         }
       }
     } catch (error) {
@@ -297,7 +442,7 @@ function App() {
       const target = event.target as HTMLElement;
       const isInputFocused = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
 
-      if (!isInputFocused && !showAddModal && !showSettings && !showFAQ && searchInputRef.current) {
+      if (!isInputFocused && !showAddModal && !showSettings && searchInputRef.current) {
         if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
           searchInputRef.current.focus();
         }
@@ -306,24 +451,42 @@ function App() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [showAddModal, showSettings, showFAQ]);
+  }, [showAddModal, showSettings]);
 
   useEffect(() => {
-    chrome.storage.local.get(['openCount', 'reviewDismissed'], (result) => {
-      setReviewDismissed(!!result.reviewDismissed);
-      if (result.reviewDismissed) return;
-      const count = (result.openCount || 0) + 1;
-      chrome.storage.local.set({ openCount: count });
-    });
+    chrome.storage.local.get('reviewDismissed', (result) => setReviewDismissed(!!result.reviewDismissed));
+    recordOpen().then(setOpenCount);
   }, []);
 
-  // Happy users go straight to the Web Store review box; unhappy ones go to our
-  // own feedback page instead, where the complaint reaches us rather than
-  // becoming a public one-star review.
-  const handleRate = (stars: number) => {
-    chrome.storage.local.set({ reviewDismissed: true });
+  // Held back until the accounts have loaded: an empty list during loading looks
+  // exactly like "never finished setup", which is who the prompt must skip.
+  useEffect(() => {
+    if (loading || openCount === null) return;
+    shouldShowReviewPrompt(openCount, accounts.length).then(setShowReviewPrompt);
+  }, [loading, openCount, accounts.length]);
+
+  const handleSnoozeReview = async () => {
+    setShowReviewPrompt(false);
+    if (openCount !== null) await snoozeReviewPrompt(openCount);
+  };
+
+  // Everyone who takes the prompt lands in the same place: the Web Store review
+  // box. Asking for a rating inside the popup and then routing only the happy
+  // answers to the store is review gating — the kind of thing an extension
+  // holding people's 2FA secrets cannot afford to be delisted over. Whoever
+  // wants to complain still has "Help & support" and "Request a feature" in the
+  // footer of every screen.
+  const handleRate = async () => {
     setReviewDismissed(true);
-    chrome.tabs.create({ url: stars >= 4 ? REVIEW_URL : FEEDBACK_URL });
+    setShowReviewPrompt(false);
+    // Awaited before the tab is opened: creating a tab tears this page down, and
+    // a dismissal that never reached disk means asking again someone who has
+    // already left a review.
+    await chrome.storage.local.set({ reviewDismissed: true }).catch(() => {});
+    // The rating block lives inside the "What's New" modal too, and that modal
+    // is re-armed from storage until it is explicitly closed.
+    handleCloseWhatsNew();
+    chrome.tabs.create({ url: REVIEW_URL });
   };
 
   // Check if backup reminder should be shown
@@ -353,7 +516,6 @@ function App() {
   // silently writing the plain one would undo the vault for anyone who enabled it.
   const handleBackupFromReminder = () => {
     setShowSettings(true);
-    setShowFAQ(false);
     setShowBackupReminder(false);
   };
 
@@ -391,7 +553,7 @@ function App() {
   // and on a 2FA app the latter reads as "my accounts are gone".
   if (vault.enabled === null) {
     return (
-      <div className={`w-[400px] min-h-[500px] max-h-[600px] flex items-center justify-center bg-white dark:bg-dark-900 ${darkMode ? 'dark' : ''}`}>
+      <div style={popupSizeStyle(popupSize)} className={`flex items-center justify-center bg-white dark:bg-dark-900 ${darkMode ? 'dark' : ''}`}>
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 dark:border-dark-600 border-t-gray-900 dark:border-t-gray-300" />
       </div>
     );
@@ -402,7 +564,7 @@ function App() {
   // state, so there is nothing here to leak.
   if (vault.enabled === true && vault.locked) {
     return (
-      <div className={`w-[400px] min-h-[500px] max-h-[600px] overflow-hidden flex flex-col ${darkMode ? 'dark' : ''}`}>
+      <div style={popupSizeStyle(popupSize)} className={`overflow-hidden flex flex-col ${darkMode ? 'dark' : ''}`}>
         <div className="flex-1 flex flex-col bg-white dark:bg-dark-900 overflow-hidden">
           <div className="bg-white dark:bg-dark-900 border-b border-gray-200 dark:border-dark-700 p-4">
             <div className="flex items-center justify-between">
@@ -431,11 +593,13 @@ function App() {
   }
 
   return (
-    <div className={`w-[400px] min-h-[500px] max-h-[600px] overflow-hidden flex flex-col ${darkMode ? 'dark' : ''}`}>
+    <div style={popupSizeStyle(popupSize)} className={`overflow-hidden flex flex-col ${darkMode ? 'dark' : ''}`}>
       <div className="flex-1 flex flex-col bg-white dark:bg-dark-900 overflow-hidden">
 
       {/* Header */}
-      <div className="bg-white dark:bg-dark-900 border-b border-gray-200 dark:border-dark-700 p-4">
+      {/* With the chips up, the header's own bottom padding stacks on the strip's
+          top padding — trimmed so search and chips read as one block. */}
+      <div className={`flex-shrink-0 bg-white dark:bg-dark-900 p-4 ${showGroupFilter ? 'pb-2' : 'border-b border-gray-200 dark:border-dark-700'}`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Logo size={24} />
@@ -457,24 +621,17 @@ function App() {
               language={language}
               onLanguageChange={handleLanguageChange}
             />
+            {/* Opens the help page rather than a panel: the answers live on the
+                site now, in the reader's own language and with room to be read. */}
             <button
-              onClick={() => {
-                setShowFAQ(!showFAQ);
-                setShowSettings(false);
-                setFaqOpenId(null);
-              }}
-              className={`p-1.5 rounded-lg transition-colors ${
-                showFAQ ? 'bg-gray-200 dark:bg-dark-600' : 'hover:bg-gray-100 dark:hover:bg-dark-700'
-              }`}
+              onClick={() => chrome.tabs.create({ url: helpUrl(language) })}
+              className="p-1.5 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
               title={t('header.faq')}
             >
               <HelpCircle className="text-gray-600 dark:text-gray-400" size={18} />
             </button>
             <button
-              onClick={() => {
-                setShowSettings(!showSettings);
-                setShowFAQ(false);
-              }}
+              onClick={() => setShowSettings(!showSettings)}
               className={`p-1.5 rounded-lg transition-colors ${
                 showSettings ? 'bg-gray-200 dark:bg-dark-600' : 'hover:bg-gray-100 dark:hover:bg-dark-700'
               }`}
@@ -485,7 +642,7 @@ function App() {
           </div>
         </div>
 
-        {!showSettings && !showFAQ && <SearchBar ref={searchInputRef} className="mt-3" value={searchQuery} onChange={setSearchQuery} placeholder={t('search.placeholder')} />}
+        {!showSettings && <SearchBar ref={searchInputRef} className="mt-3" value={searchQuery} onChange={setSearchQuery} placeholder={t('search.placeholder')} />}
       </div>
 
       {/* Error/Warning Messages */}
@@ -505,11 +662,7 @@ function App() {
             <div>{t('warning.clockOff', Math.max(1, Math.round(timeOffsetSec / 60)))}</div>
             <div className="flex items-center gap-3 mt-1.5">
               <button
-                onClick={() => {
-                  setShowSettings(false);
-                  setShowFAQ(true);
-                  setFaqOpenId('time-sync');
-                }}
+                onClick={() => chrome.tabs.create({ url: helpUrl(language, 'time-sync') })}
                 className="font-medium text-yellow-900 dark:text-yellow-200 underline underline-offset-2 hover:text-yellow-950 dark:hover:text-yellow-100"
               >
                 {t('warning.howToFix')}
@@ -538,7 +691,7 @@ function App() {
       )}
 
       {/* Offer password protection — never at the same time as another notice */}
-      {showVaultPrompt && !showBackupReminder && !error && timeOffsetSec === null && !showSettings && !showFAQ && (
+      {showVaultPrompt && !showBackupReminder && !error && timeOffsetSec === null && !showSettings && (
         <VaultPrompt
           language={language}
           onEnable={() => {
@@ -595,6 +748,23 @@ function App() {
             </div>
           </div>
 
+          <div className="mt-4 flex items-center justify-between">
+            <span className="text-sm text-gray-700 dark:text-gray-300">{t('settings.popupSize')}</span>
+            <div className="flex bg-gray-200 dark:bg-dark-600 rounded-lg p-0.5">
+              {([['small', 'settings.sizeSmall'], ['medium', 'settings.sizeMedium'], ['large', 'settings.sizeLarge']] as const).map(([size, key]) => (
+                <button
+                  key={size}
+                  onClick={() => handlePopupSizeChange(size)}
+                  className={`text-xs font-medium px-2.5 py-1 rounded-md transition-colors ${
+                    popupSize === size ? 'bg-white dark:bg-dark-800 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400'
+                  }`}
+                >
+                  {t(key)}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <VaultSettings
             language={language}
             enabled={vault.enabled === true}
@@ -610,8 +780,19 @@ function App() {
         </div>
       )}
 
-      {/* FAQ Panel */}
-      {showFAQ && <FAQ language={language} openId={faqOpenId} />}
+      {/* Group filter — appears only once the user has actually named a group,
+          so nothing changes for anyone who has not. Sits outside the scroll
+          area: a filter that scrolls out of view is a filter you forget is on. */}
+      {showGroupFilter && (
+        <GroupFilter
+          groups={groups}
+          ungroupedCount={ungroupedCount}
+          totalCount={accounts.length}
+          active={activeGroup}
+          onChange={handleGroupChange}
+          language={language}
+        />
+      )}
 
       {/* Accounts List */}
       {!showSettings && (
@@ -620,18 +801,32 @@ function App() {
           <div className="flex items-center justify-center h-full">
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 dark:border-dark-600 border-t-gray-900 dark:border-t-gray-300"></div>
           </div>
-        ) : showFAQ ? (
-          null
         ) : filteredAccounts.length === 0 ? (
-          searchQuery ? (
+          // `accounts.length > 0` has to win: with no accounts at all the answer
+          // is the setup guide, whatever the filter says. Otherwise someone who
+          // deletes their last account while filtered gets "no results" and no
+          // way to add anything.
+          isFiltered && accounts.length > 0 ? (
             <div className="flex flex-col items-center justify-center h-[340px] text-center p-6">
               <Logo size={48} className="mb-3 opacity-30" />
               <h2 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-1">
                 {t('accounts.noAccountsFound')}
               </h2>
               <p className="text-gray-500 dark:text-gray-400 text-xs mb-4">
-                {t('accounts.tryDifferentSearch')}
+                {searchQuery ? t('accounts.tryDifferentSearch') : t('accounts.emptyGroup')}
               </p>
+              {/* The chip strip can be scrolled away and the search box can be
+                  off-screen behind a long list; one button that undoes both is
+                  the only thing guaranteed to be where the empty result is. */}
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  handleGroupChange(null);
+                }}
+                className="text-xs font-medium text-[#4285F4] hover:underline"
+              >
+                {t('accounts.clearFilters')}
+              </button>
             </div>
           ) : (
             <EmptyStateGuide
@@ -668,6 +863,10 @@ function App() {
                     viewMode={viewMode}
                     draggable={false}
                     currentDomain={currentDomain}
+                    // Same account, same badge: pinned at the top it was the one
+                    // place the group did not show, so the row above and the row
+                    // below disagreed about it.
+                    showGroup={activeGroup === null}
                   />
                 </div>
                 <div className="h-2 bg-gray-100 dark:bg-dark-900 border-y border-gray-200 dark:border-dark-700" />
@@ -681,18 +880,37 @@ function App() {
                 onEdit={setEditingAccount}
                 language={language}
                 viewMode={viewMode}
-                draggable={!searchQuery}
+                // handleDrop rewrites the order of the full list, so dragging
+                // inside a filtered view would reorder against indices the user
+                // cannot see. Off while filtered, as it already is while searching.
+                draggable={!isFiltered}
                 onDragStart={handleDragStart}
                 onDragOver={() => setDragOverId(account.id)}
                 onDrop={handleDrop}
                 isDragOver={dragOverId === account.id}
                 currentDomain={currentDomain}
-                isSuggested={!searchQuery && suggestedAccountId === account.id}
+                // Matches the condition that decides the pinned card above, so
+                // the badge and the pin never disagree about whether a
+                // suggestion is being shown.
+                isSuggested={!isFiltered && suggestedAccountId === account.id}
+                showGroup={activeGroup === null}
               />
             ))}
-            {showPromoBanner && !searchQuery && (
-              <PromoBanner language={language} onDismiss={() => setShowPromoBanner(false)} />
-            )}
+            {/* At most one card under the list. The review ask wins while it is
+                due: it retires permanently once taken, whereas the promo has
+                every later open to itself — and stacking two asks below
+                someone's codes reads as an ad break.
+
+                Nothing while the "What's New" modal is up: it carries the same
+                pitch, so the card behind it is the identical ask twice on one
+                screen — and on the 1.11.0 rollout that modal opens for everyone
+                at once. */}
+            {!isFiltered && whatsNewVersion === null &&
+              (showReviewPrompt ? (
+                <ReviewPrompt language={language} onRate={handleRate} onSnooze={handleSnoozeReview} />
+              ) : showPromoBanner ? (
+                <PromoBanner language={language} onDismiss={() => setShowPromoBanner(false)} />
+              ) : null)}
           </div>
         )}
       </div>
@@ -700,16 +918,16 @@ function App() {
 
       {/* Not on the working screen: once there are codes to read, the bar only
           takes space from them. It belongs where someone is likely to be stuck —
-          an empty list, settings, the FAQ, and the lock screen. */}
-      {(accounts.length === 0 || showSettings || showFAQ) && (
+          an empty list, settings, and the lock screen. */}
+      {(accounts.length === 0 || showSettings) && (
         <SupportFooter language={language} />
       )}
 
       {/* Add Button (Floating Action Button) */}
-      {!showSettings && !showFAQ && accounts.length > 0 && (
+      {!showSettings && accounts.length > 0 && (
         <button
           onClick={() => setShowAddModal(true)}
-          className="fixed bottom-4 right-4 w-14 h-14 bg-[#4285F4] hover:bg-[#3367D6] text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center"
+          className="fixed bottom-4 end-4 w-14 h-14 bg-[#4285F4] hover:bg-[#3367D6] text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center"
           title={t('accounts.addAccount')}
         >
           <Plus size={24} />
@@ -722,6 +940,8 @@ function App() {
           onClose={() => setShowAddModal(false)}
           onAdd={handleAddAccount}
           language={language}
+          groups={groups.map(group => group.name)}
+          defaultGroup={activeGroup ?? ''}
         />
       )}
 
@@ -732,6 +952,7 @@ function App() {
           onClose={() => setEditingAccount(null)}
           onSave={handleEditAccount}
           language={language}
+          groups={groups.map(group => group.name)}
         />
       )}
 
@@ -755,6 +976,7 @@ function App() {
           onClose={handleCloseWhatsNew}
           reviewDismissed={reviewDismissed}
           onRate={handleRate}
+          onSnoozeReview={handleSnoozeReview}
         />
       )}
 

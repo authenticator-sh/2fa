@@ -38,9 +38,28 @@ npm run build  # production build into dist/
 
 Then load `dist/` as an unpacked extension in `chrome://extensions` with Developer mode enabled.
 
+## Releasing
+
+```bash
+npm run build
+npm run checksums            # writes SHA256SUMS-v<version>.txt from dist/
+npm run checksums -- --check # re-verify dist/ against that file
+```
+
+The sums file ships with the GitHub release. The README and the website both
+promise it for *every* release, so a release without one makes a published
+claim false — do not skip this step.
+
 ## Translations
 
-UI translations live in `public/translations/<lang>/messages.json` and `src/utils/i18n.ts`. New languages or fixes welcome — please test the popup renders correctly in your language.
+UI strings live in `src/utils/locales/<lang>.ts` — one file per language, all
+sharing the key set declared in `src/utils/i18n-keys.ts`, so `tsc` fails if a
+locale is missing a key. `src/utils/i18n.ts` is only the loader. The store
+listing name and description are separate, in
+`public/translations/<lang>/messages.json`.
+
+New languages or fixes welcome — please test the popup renders correctly in your
+language.
 
 ## License
 

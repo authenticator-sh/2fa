@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Eye, EyeOff } from 'lucide-react';
 import type { Account } from '@/types';
+import { GroupInput } from './GroupInput';
 import { createT, type Language } from '@/utils/i18n';
 
 interface EditAccountModalProps {
@@ -8,21 +9,44 @@ interface EditAccountModalProps {
   onClose: () => void;
   onSave: (id: string, updates: Partial<Account>) => Promise<void>;
   language: Language;
+  /** Existing group names, offered as suggestions — the field stays free text. */
+  groups?: string[];
 }
 
-export function EditAccountModal({ account, onClose, onSave, language }: EditAccountModalProps) {
+export function EditAccountModal({ account, onClose, onSave, language, groups = [] }: EditAccountModalProps) {
   const t = createT(language);
   const [name, setName] = useState(account.name);
   const [issuer, setIssuer] = useState(account.issuer);
+  const [group, setGroup] = useState(account.group ?? '');
   const [showSecret, setShowSecret] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // The add form has always required a name; this one did not, so the field
+    // could be emptied and saved. Beyond leaving a row with nothing to identify
+    // it, a nameless account used to make the whole backup file it ended up in
+    // unimportable — the import rejected the file on the first entry missing a
+    // name, taking every good account with it.
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError(t('edit.nameRequired'));
+      return;
+    }
+
     const updates: Partial<Account> = {};
-    if (name !== account.name) updates.name = name;
+    if (trimmedName !== account.name) updates.name = trimmedName;
     if (issuer !== account.issuer) updates.issuer = issuer;
+
+    // Blank clears the group rather than storing an empty string, so an account
+    // the user emptied out counts as ungrouped everywhere without a second case
+    // to check. updateAccount drops the key on `undefined`.
+    const nextGroup = group.trim();
+    if (nextGroup !== (account.group?.trim() ?? '')) {
+      updates.group = nextGroup || undefined;
+    }
 
     if (Object.keys(updates).length === 0) {
       onClose();
@@ -62,9 +86,20 @@ export function EditAccountModal({ account, onClose, onSave, language }: EditAcc
               <input
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500"
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (error) setError(null);
+                }}
+                aria-invalid={error ? true : undefined}
+                className={`w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500 ${
+                  error
+                    ? 'border-red-400 dark:border-red-500 focus:border-red-500'
+                    : 'border-gray-300 dark:border-dark-600 focus:border-[#4285F4]'
+                }`}
               />
+              {error && (
+                <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{error}</p>
+              )}
             </div>
 
             <div>
@@ -88,17 +123,28 @@ export function EditAccountModal({ account, onClose, onSave, language }: EditAcc
                   type="text"
                   value={showSecret ? account.secret : maskedSecret}
                   readOnly
-                  className="w-full bg-gray-50 dark:bg-dark-900/50 text-gray-900 dark:text-gray-100 text-sm font-mono rounded-lg px-3 py-2 pr-10 border border-gray-300 dark:border-dark-600 outline-none cursor-default"
+                  className="w-full bg-gray-50 dark:bg-dark-900/50 text-gray-900 dark:text-gray-100 text-sm font-mono rounded-lg px-3 py-2 pe-10 border border-gray-300 dark:border-dark-600 outline-none cursor-default"
                 />
                 <button
                   type="button"
                   onClick={() => setShowSecret(!showSecret)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors p-1"
+                  className="absolute end-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors p-1"
                 >
                   {showSecret ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
             </div>
+
+            {/* Last, because it is the only optional field here — an empty box
+                above the ones that must be filled reads as another required
+                step. */}
+            <GroupInput
+              inputId="edit-account-group"
+              value={group}
+              onChange={setGroup}
+              groups={groups}
+              language={language}
+            />
 
             <div className="flex items-center gap-3 pt-2">
               <button

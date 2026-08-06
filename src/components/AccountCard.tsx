@@ -21,6 +21,8 @@ interface AccountCardProps {
   isDragOver?: boolean;
   currentDomain?: string | null;
   isSuggested?: boolean;
+  /** Off while the list is already filtered to one group — the chip says it. */
+  showGroup?: boolean;
 }
 
 export function AccountCard({
@@ -36,6 +38,7 @@ export function AccountCard({
   isDragOver,
   currentDomain,
   isSuggested,
+  showGroup,
 }: AccountCardProps) {
   const t = createT(language);
   const totp = useTOTP(account);
@@ -56,6 +59,28 @@ export function AccountCard({
     </span>
   ) : null;
 
+  // Typed, not assumed: `group` can come from an imported file, and until the
+  // import path started coercing it a number here threw on `.trim()` and took
+  // the whole popup down with it.
+  const groupName = typeof account.group === 'string' ? account.group.trim() : '';
+
+  /**
+   * @param compact Halves the cap and lets the badge shrink.
+   *
+   * The compact row is one line where the name is the only thing that can give
+   * way, so a wide badge eats it: at the default width a 110px badge left about
+   * four characters of the account name, and at the 320px "Small" popup the row
+   * overflowed outright. Truncating the group — which the chip strip above
+   * already names — costs less than truncating the account.
+   */
+  const badgeClass = (compact: boolean) =>
+    `${compact ? 'min-w-0 max-w-[70px]' : 'flex-shrink-0 max-w-[110px]'} truncate text-[10px] font-medium leading-none text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-dark-700 border border-gray-200 dark:border-dark-600 px-1.5 py-[3px] rounded-full`;
+
+  const groupBadgeFor = (compact: boolean) =>
+    showGroup && groupName ? <span className={badgeClass(compact)}>{groupName}</span> : null;
+
+  const groupBadge = groupBadgeFor(false);
+
   const formattedCode = totp.code.match(/.{1,3}/g)?.join(' ') || totp.code;
   const isExpiringSoon = totp.remaining <= 5;
 
@@ -66,7 +91,7 @@ export function AccountCard({
     onDrop: (e: React.DragEvent) => { e.preventDefault(); onDrop?.(e, account.id); },
   };
 
-  const baseClass = `relative group bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700 transition-all duration-200 after:content-[''] after:absolute after:bottom-0 after:left-4 after:right-4 after:h-px after:bg-gray-200 dark:after:bg-dark-600 last:after:hidden ${
+  const baseClass = `relative group bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700 transition-all duration-200 after:content-[''] after:absolute after:bottom-0 after:inset-x-4 after:h-px after:bg-gray-200 dark:after:bg-dark-600 last:after:hidden ${
     isDragOver ? 'border-t-2 border-[#4285F4]' : ''
   }`;
 
@@ -83,12 +108,13 @@ export function AccountCard({
 
           <button
             onClick={handleCopy}
-            className="flex-1 min-w-0 flex items-center gap-2 text-left group/copy"
+            className="flex-1 min-w-0 flex items-center gap-2 text-start group/copy"
           >
-            <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+            <span className="min-w-0 text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
               {account.issuer}{account.issuer && account.name ? ': ' : ''}{account.name}
             </span>
             {suggestedBadge}
+            {groupBadgeFor(true)}
             <span className={`flex-shrink-0 transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
               {copied ? (
                 <Check size={14} className="text-green-600 dark:text-green-400" />
@@ -120,18 +146,27 @@ export function AccountCard({
             </button>
           </div>
 
+          {/* Same 26px ring as the compact row: at the default 40 the mode that
+              hides the codes ended up the tallest of the three. */}
           <div className="flex-shrink-0">
-            <ProgressRing remaining={totp.remaining} period={totp.period} />
+            <ProgressRing remaining={totp.remaining} period={totp.period} size={26} />
           </div>
         </div>
       </div>
     );
   }
 
-  // Compact mode
+  // Compact mode — one row per account.
+  //
+  // Stacking the name over the code left compact barely shorter than a normal
+  // card while opening a wide gap between the code and the ring. On one line the
+  // name takes the slack, the code sits against the ring, and twice as many
+  // accounts fit on screen — which is the only reason to pick this mode.
   if (viewMode === 'compact') {
     return (
-      <div {...dragProps} className={`${baseClass} py-2 px-4`}>
+      // overflow-hidden so a row that runs out of width clips instead of laying
+      // the code and the copy icon over the hover actions and the ring.
+      <div {...dragProps} className={`${baseClass} py-1.5 px-4 overflow-hidden`}>
         <div className="flex items-center gap-2">
           {draggable && (
             <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-gray-500 flex-shrink-0">
@@ -139,34 +174,37 @@ export function AccountCard({
             </div>
           )}
 
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5">
-              <h3 className="text-gray-500 dark:text-gray-400 text-xs truncate leading-tight">
-                {account.issuer}{account.issuer && account.name ? ': ' : ''}{account.name}
-              </h3>
-              {suggestedBadge}
-            </div>
-            <button
-              onClick={handleCopy}
-              className="flex items-center gap-1.5 group/copy"
-            >
-              <span className={`font-mono text-lg tracking-wide transition-colors leading-tight ${
-                isExpiringSoon
-                  ? 'text-orange-600 dark:text-orange-400 animate-pulse'
-                  : 'text-[#4285F4]'
-              }`}>
-                {formattedCode}
-              </span>
-              <span className={`transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
-                {copied ? (
-                  <Check size={14} className="text-green-600 dark:text-green-400" />
-                ) : (
-                  <Copy size={14} className="text-gray-400 dark:text-gray-500" />
-                )}
-              </span>
-            </button>
-          </div>
+          <button
+            onClick={handleCopy}
+            className="flex-1 min-w-0 flex items-center gap-2 text-start group/copy"
+          >
+            {/* min-w-0: a flex item will not shrink below its content without
+                it, so a long name would push the code off the row instead of
+                truncating. */}
+            <span className="min-w-0 text-sm text-gray-700 dark:text-gray-300 truncate">
+              {account.issuer}{account.issuer && account.name ? ': ' : ''}{account.name}
+            </span>
+            {suggestedBadge}
+            {groupBadgeFor(true)}
+            <span className={`ms-auto flex-shrink-0 font-mono text-base tracking-wide transition-colors ${
+              isExpiringSoon
+                ? 'text-orange-600 dark:text-orange-400 animate-pulse'
+                : 'text-[#4285F4]'
+            }`}>
+              {formattedCode}
+            </span>
+            <span className={`flex-shrink-0 transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
+              {copied ? (
+                <Check size={14} className="text-green-600 dark:text-green-400" />
+              ) : (
+                <Copy size={14} className="text-gray-400 dark:text-gray-500" />
+              )}
+            </span>
+          </button>
 
+          {/* Always in the flow, only faded: revealing them on hover by taking
+              them out of the layout would shove the code sideways under the
+              cursor, and the code is what the row exists to show. */}
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
             <button
               onClick={() => onEdit(account)}
@@ -185,7 +223,7 @@ export function AccountCard({
           </div>
 
           <div className="flex-shrink-0">
-            <ProgressRing remaining={totp.remaining} period={totp.period} />
+            <ProgressRing remaining={totp.remaining} period={totp.period} size={26} />
           </div>
         </div>
       </div>
@@ -201,6 +239,7 @@ export function AccountCard({
             {account.issuer}: {account.name}
           </h3>
           {suggestedBadge}
+          {groupBadge}
           {draggable && (
             <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-gray-500 flex-shrink-0">
               <GripVertical size={14} />
@@ -237,12 +276,11 @@ export function AccountCard({
           }`}>
             {formattedCode}
           </div>
-          <div className="ml-auto flex items-center gap-2">
-            {copied && (
-              <span className="text-xs font-medium text-green-600 dark:text-green-400 animate-in fade-in slide-in-from-right-2 duration-200">
-                {t('accounts.copied')}
-              </span>
-            )}
+          {/* Sits directly after the digits rather than pushed to the far right:
+              the icon belongs to the code it copies, and across the width of the
+              card it read as an unrelated control. The label goes after the icon
+              so appearing does not shove the icon sideways. */}
+          <div className="flex items-center gap-2">
             <div className={`transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
               {copied ? (
                 <Check size={16} className="text-green-600 dark:text-green-400" />
@@ -250,10 +288,15 @@ export function AccountCard({
                 <Copy size={16} className="text-gray-400 dark:text-gray-500" />
               )}
             </div>
+            {copied && (
+              <span className="text-xs font-medium text-green-600 dark:text-green-400 animate-in fade-in slide-in-from-left-1 duration-200">
+                {t('accounts.copied')}
+              </span>
+            )}
           </div>
         </button>
 
-        <div className="ml-2">
+        <div className="ms-2">
           <ProgressRing remaining={totp.remaining} period={totp.period} />
         </div>
       </div>

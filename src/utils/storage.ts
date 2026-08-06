@@ -14,8 +14,9 @@ import {
   VaultLockedError,
   verifyPassword,
 } from './vault';
-import { replaceAllBackups } from './auto-backup';
+import { replaceAllBackups, wipeAllBackups } from './auto-backup';
 import { isSyncEnabled, setSyncPreference } from './sync-preference';
+import { deletedHere, forgetDeleted, markDeleted } from './tombstones';
 
 const STORAGE_KEY = 'authenticator_accounts';
 const SYNC_OVERFLOW_KEY = 'syncOverflow';
@@ -26,10 +27,12 @@ const SYNC_OVERFLOW_KEY = 'syncOverflow';
 // protection roughly doubles each record. Chunking raises that to a few
 // hundred, which is past any realistic collection.
 const SYNC_CHUNK_PREFIX = 'authenticator_accounts_';
-const SYNC_CHUNK_BYTES = 7000; // headroom under the 8192-per-item limit
+const SYNC_CHUNK_BYTES = 7000; // real UTF-8 bytes; headroom under the 8192-per-item limit
 const SYNC_MAX_CHUNKS = 12; // ~84 KB, leaving room for the vault metadata
 /** Owned by suggestions.ts; named here only so the vault can scrub it. */
 const USAGE_HISTORY_KEY = 'accountUsageByDomain';
+/** Owned by active-group.ts; same reason — it holds a group name the user typed. */
+const ACTIVE_GROUP_KEY = 'activeGroup';
 
 // --- cross-device sync ------------------------------------------------------
 // Local is always the primary store; sync is an additional copy that lets a
@@ -58,6 +61,16 @@ export async function setSyncEnabled(enabled: boolean): Promise<void> {
   await chrome.storage.sync.remove([...(await syncKeysInUse()), 'vault_meta']).catch(() => {});
 }
 
+// Chrome measures the quota in UTF-8 bytes, and `String.length` counts UTF-16
+// code units — equal only for ASCII. A Cyrillic account name costs twice what
+// the old arithmetic charged it and CJK three times, so chunks that measured
+// ~7 KB were really over 8 KB and the whole write was rejected. Local kept the
+// accounts, but sync stopped updating and said nothing.
+const encoder = new TextEncoder();
+function byteLength(value: unknown): number {
+  return encoder.encode(JSON.stringify(value)).length;
+}
+
 /** Split records so that each chunk serialises below the per-key limit. */
 function chunkForSync(records: StoredAccount[]): StoredAccount[][] {
   const chunks: StoredAccount[][] = [];
@@ -65,7 +78,7 @@ function chunkForSync(records: StoredAccount[]): StoredAccount[][] {
   let size = 2; // the enclosing []
 
   for (const record of records) {
-    const cost = JSON.stringify(record).length + 1;
+    const cost = byteLength(record) + 1; // + the separating comma
     if (current.length > 0 && size + cost > SYNC_CHUNK_BYTES) {
       chunks.push(current);
       current = [];
@@ -132,7 +145,17 @@ async function pushToSync(records: StoredAccount[]): Promise<void> {
     payload[`${SYNC_CHUNK_PREFIX}${index}`] = chunk;
   });
 
-  await chrome.storage.sync.set(payload);
+  try {
+    await chrome.storage.sync.set(payload);
+  } catch (error) {
+    // Every way this can fail — per-item quota, total quota, the write-rate
+    // limit — leaves sync silently stale. The flag is the only thing that puts
+    // it in front of the user, so it has to be set here too and not just on the
+    // chunk-count check above.
+    await chrome.storage.local.set({ [SYNC_OVERFLOW_KEY]: true });
+    throw error;
+  }
+
   await chrome.storage.local.set({ [SYNC_OVERFLOW_KEY]: false });
 
   // Drop the legacy single key and any chunk left over from a longer list.
@@ -363,7 +386,21 @@ export async function getStoredAccounts(): Promise<StoredAccount[]> {
     }
 
     const seen = new Set(localAccounts.map(identityOf));
-    const additions = syncAccounts.filter(acc => !seen.has(identityOf(acc)));
+    const candidates = syncAccounts.filter(acc => !seen.has(identityOf(acc)));
+
+    if (candidates.length === 0) {
+      return localAccounts;
+    }
+
+    // "In sync but not local" is usually another device's account — but it is
+    // also exactly what a record this device just deleted looks like, until the
+    // sync write catches up. Without this the reload after a delete put the
+    // account straight back, and a second delete was needed to make it stick.
+    const wasDeletedHere = await deletedHere();
+    const additions: StoredAccount[] = [];
+    for (const acc of candidates) {
+      if (!(await wasDeletedHere(identityOf(acc)))) additions.push(acc);
+    }
 
     if (additions.length === 0) {
       return localAccounts;
@@ -392,6 +429,15 @@ export async function getAccounts(): Promise<Account[]> {
 export interface SaveOptions {
   /** Set by callers that legitimately remove accounts. */
   allowShrink?: boolean;
+  /**
+   * Wait for the sync copy to be rewritten before returning.
+   *
+   * Normally the push is fire-and-forget: a quota rejection must not fail a
+   * save that already succeeded locally. Deleting is the exception — its caller
+   * reloads immediately, and a read that races the push sees the record still
+   * in sync and treats it as an account from another device.
+   */
+  awaitSync?: boolean;
 }
 
 export async function saveAccounts(accounts: Account[], options: SaveOptions = {}): Promise<void> {
@@ -415,11 +461,18 @@ export async function saveAccounts(accounts: Account[], options: SaveOptions = {
   // Local is the source of truth — must succeed or we throw
   await retryOperation(() => chrome.storage.local.set(data));
 
+  // An account that is present again is one the user wants back — a re-scanned
+  // QR, a restored backup — so whatever marked it deleted has to go. Doing it
+  // here covers add, import and restore in one place, instead of leaving each
+  // path to remember.
+  await forgetDeleted(records.map(identityOf)).catch(() => {});
+
   // Sync is best-effort: failures here (e.g. QUOTA_BYTES_PER_ITEM exceeded
   // with many accounts) must not block the save or be retried.
-  pushToSync(records).catch(syncError => {
+  const push = pushToSync(records).catch(syncError => {
     console.warn('Sync storage failed (local save succeeded):', syncError);
   });
+  if (options.awaitSync) await push;
 }
 
 export async function addAccount(account: Account): Promise<void> {
@@ -475,15 +528,34 @@ export async function updateAccount(id: string, updates: Partial<Account>): Prom
   const accounts = await getAccounts();
   const index = accounts.findIndex(acc => acc.id === id);
   if (index !== -1) {
-    accounts[index] = { ...accounts[index], ...updates };
+    const merged = { ...accounts[index], ...updates };
+
+    // An explicit `undefined` means "clear this field" — clearing an account's
+    // group, say. Spreading it leaves the key present with an undefined value,
+    // which chrome.storage serialises as null, and `null.trim()` throws on the
+    // next read. Drop the key instead.
+    for (const key of Object.keys(updates) as (keyof Account)[]) {
+      if (updates[key] === undefined) delete merged[key];
+    }
+
+    accounts[index] = merged;
     await saveAccounts(accounts);
   }
 }
 
 export async function deleteAccount(id: string): Promise<void> {
-  const accounts = await getAccounts();
+  // The identity is taken from the stored record rather than recomputed from
+  // the decoded account, so it matches exactly what the merge will compare a
+  // stale sync copy against — the fingerprint when a vault is on, the secret
+  // when it is not.
+  const stored = await getStoredAccounts();
+  const removed = stored.filter(record => record.id === id).map(identityOf);
+
+  const accounts = await decodeAccounts(stored);
   const filtered = accounts.filter(acc => acc.id !== id);
-  await saveAccounts(filtered, { allowShrink: true });
+
+  await saveAccounts(filtered, { allowShrink: true, awaitSync: true });
+  await markDeleted(removed).catch(() => {});
 }
 
 export async function exportAccounts(): Promise<string> {
@@ -491,7 +563,7 @@ export async function exportAccounts(): Promise<string> {
   return JSON.stringify(accounts, null, 2);
 }
 
-export async function importAccounts(jsonData: string): Promise<void> {
+export async function importAccounts(jsonData: string): Promise<ImportResult> {
   try {
     const parsed = JSON.parse(jsonData);
 
@@ -509,7 +581,7 @@ export async function importAccounts(jsonData: string): Promise<void> {
       throw new Error('Invalid format');
     }
 
-    await importAccountList(importedAccounts);
+    return await importAccountList(importedAccounts);
   } catch (error) {
     console.error('Error importing accounts:', error);
     if (error instanceof VaultLockedError) throw error;
@@ -517,26 +589,94 @@ export async function importAccounts(jsonData: string): Promise<void> {
   }
 }
 
+export interface ImportResult {
+  /** Records actually written, after de-duplication against what is already here. */
+  added: number;
+  /**
+   * Entries in the file that could not be used at all. Distinct from the
+   * `skipped` in import-message.ts, which counts accounts the user already had.
+   */
+  unreadable: number;
+}
+
+/** Longest group name we will store. Display truncates anyway; this keeps a
+ *  pathological name out of the sync chunk budget and off every record. */
+const MAX_GROUP_LENGTH = 64;
+
+/**
+ * Coerce one entry from a file into an Account, or return null if it is beyond
+ * saving.
+ *
+ * Only `secret` is irreplaceable — it is the account. A missing id or name can
+ * be filled in, and rejecting the file over either is how one bad row used to
+ * cost someone every other row in their only backup.
+ *
+ * Types are checked, not assumed: these values come from a file, and until 1.11
+ * a `group` that was a number rather than a string sailed through and threw on
+ * `.trim()` during the next render — a permanently blank popup with the data
+ * still on disk and no way to reach the export button.
+ */
+function normalizeImported(entry: unknown, index: number): Account | null {
+  if (!entry || typeof entry !== 'object') return null;
+  const acc = entry as Record<string, unknown>;
+
+  if (typeof acc.secret !== 'string' || !acc.secret.trim()) return null;
+
+  const name = typeof acc.name === 'string' && acc.name.trim()
+    ? acc.name
+    : typeof acc.issuer === 'string' && acc.issuer.trim()
+      ? acc.issuer
+      : 'Unknown';
+
+  const normalized: Account = {
+    ...(acc as unknown as Account),
+    id: typeof acc.id === 'string' && acc.id ? acc.id : `imported-${Date.now()}-${index}`,
+    name,
+    issuer: typeof acc.issuer === 'string' ? acc.issuer : '',
+    secret: acc.secret,
+  };
+
+  if (typeof acc.group === 'string') {
+    const group = acc.group.slice(0, MAX_GROUP_LENGTH);
+    if (group.trim()) normalized.group = group;
+    else delete normalized.group;
+  } else {
+    delete normalized.group;
+  }
+
+  return normalized;
+}
+
 /** Shared merge path for JSON, encrypted-file and QR imports. */
-export async function importAccountList(importedAccounts: Account[]): Promise<void> {
+export async function importAccountList(importedAccounts: Account[]): Promise<ImportResult> {
   if (!Array.isArray(importedAccounts)) {
     throw new Error('Invalid format');
   }
 
-  for (const acc of importedAccounts) {
-    if (!acc.id || !acc.name || !acc.secret) {
-      throw new Error('Invalid account structure');
-    }
+  const usable: Account[] = [];
+  for (const [index, entry] of importedAccounts.entries()) {
+    const account = normalizeImported(entry, index);
+    if (account) usable.push(account);
+  }
+
+  const unreadable = importedAccounts.length - usable.length;
+
+  // A file with entries in it but nothing usable is a broken file, and saying so
+  // is more honest than reporting that zero accounts were restored.
+  if (importedAccounts.length > 0 && usable.length === 0) {
+    throw new Error('Invalid account structure');
   }
 
   const existingAccounts = await getAccounts();
   const existingSecrets = new Set(existingAccounts.map(acc => acc.secret));
 
   // Merge: keep existing accounts and add only new ones (deduplicate by secret)
-  const newAccounts = importedAccounts.filter(acc => !existingSecrets.has(acc.secret));
+  const newAccounts = usable.filter(acc => !existingSecrets.has(acc.secret));
   const mergedAccounts = [...existingAccounts, ...newAccounts];
 
   await saveAccounts(mergedAccounts);
+
+  return { added: newAccounts.length, unreadable };
 }
 
 // --- vault migration ------------------------------------------------------
@@ -595,6 +735,22 @@ export async function prepareVault(password: string): Promise<PreparedVault> {
   }
 
   const commit = async (): Promise<void> => {
+    // The exact bytes currently on disk, captured before anything is
+    // overwritten. Rolling back the metadata alone is not enough: once the
+    // ciphertext has landed, the only key that opens it lives in vault_meta, so
+    // deleting the metadata to "undo" the operation destroys every account
+    // instead of restoring it.
+    const previousRecords = (await chrome.storage.local.get(STORAGE_KEY))[STORAGE_KEY];
+
+    const rollback = async (): Promise<void> => {
+      if (previousRecords !== undefined) {
+        await retryOperation(() => chrome.storage.local.set({ [STORAGE_KEY]: previousRecords }))
+          .catch(err => console.error('Vault rollback could not restore local accounts:', err));
+        await pushToSync(previousRecords).catch(() => {});
+      }
+      await clearVaultMeta().catch(() => {});
+    };
+
     // Metadata first, and roll it back on any failure below. The reverse order
     // is worse: ciphertext with no metadata is unopenable, whereas metadata with
     // cleartext still under it is readable the moment the user unlocks, and the
@@ -614,22 +770,38 @@ export async function prepareVault(password: string): Promise<PreparedVault> {
         await chrome.storage.sync.remove(await syncKeysInUse()).catch(() => {});
       }
 
-      // Snapshots are replaced inside a single IndexedDB transaction so there
-      // is never a moment with zero backups.
-      await replaceAllBackups(encrypted);
-
-      // The per-site usage history is account metadata the vault does not cover;
-      // leaving it behind would expose exactly which services the user holds.
-      await chrome.storage.local.remove(USAGE_HISTORY_KEY).catch(() => {});
-
       // Going through the real unlock path rather than stashing the key we
       // already hold also proves the password round-trips through PBKDF2 and
-      // unwraps what we just wrote.
+      // unwraps what we just wrote. Done before the snapshots are replaced: a
+      // failure here still has cleartext backups to fall back on.
       await unlockWithPassword(password);
     } catch (error) {
-      await clearVaultMeta().catch(() => {});
+      await rollback();
       throw error;
     }
+
+    // Past this point the vault is real and usable, so nothing below may undo
+    // it — a rollback here would take the accounts with it.
+
+    // Snapshots are replaced inside a single IndexedDB transaction so there is
+    // never a moment with zero backups. IndexedDB can be unavailable for reasons
+    // that have nothing to do with us (blocked site data, a corrupted profile,
+    // a full disk); leaving cleartext snapshots behind is a real weakness, but
+    // it is a far smaller one than tearing down a working vault over it.
+    try {
+      await replaceAllBackups(encrypted);
+    } catch (error) {
+      console.error('Vault enabled, but the encrypted backup snapshots could not be written:', error);
+      // The snapshots still hold cleartext copies of everything the vault was
+      // just turned on to protect. If they cannot be replaced, try to remove
+      // them — losing the automatic backups is recoverable (the user can export
+      // at any time), leaving readable secrets on disk under a vault is not.
+      await wipeAllBackups().catch(() => {});
+    }
+
+    // Metadata the vault does not cover but a stolen profile would expose:
+    // which services the user holds, and which group they filed them under.
+    await chrome.storage.local.remove([USAGE_HISTORY_KEY, ACTIVE_GROUP_KEY]).catch(() => {});
   };
 
   return { recoveryCode, commit };

@@ -40,6 +40,39 @@ export const languages: { code: Language; label: string; flag: string }[] = [
   { code: 'sv', label: 'Svenska', flag: '🇸🇪' },
 ];
 
+/**
+ * Languages written right to left.
+ *
+ * Without `dir`, the document lays out left-to-right and Arabic gets a
+ * left-to-right paragraph direction. Purely Arabic runs still read correctly —
+ * the bidi algorithm handles those — but anything mixed comes out wrong:
+ * "قيّمنا على متجر Chrome الإلكتروني" places its three runs in the wrong visual
+ * order, and trailing punctuation lands at the start of the line.
+ */
+const RTL_LANGUAGES: ReadonlySet<Language> = new Set<Language>(['ar']);
+
+export function isRTL(language: Language): boolean {
+  return RTL_LANGUAGES.has(language);
+}
+
+/**
+ * Put the active language on <html>, along with its writing direction.
+ *
+ * `dir` mirrors the whole layout, which is why every physical spacing and
+ * position utility in the UI is a logical one (`ms-`/`me-`, `ps-`/`pe-`,
+ * `start-`/`end-`, `text-start`): in a left-to-right language they resolve
+ * identically, and in Arabic they flip with everything else instead of leaving
+ * the odd control stranded on the wrong side.
+ *
+ * `lang` matters on its own too — it picks the font stack and hyphenation, and
+ * tells a screen reader which language to pronounce.
+ */
+export function applyDocumentLanguage(language: Language): void {
+  if (typeof document === 'undefined') return;
+  document.documentElement.lang = language;
+  document.documentElement.dir = isRTL(language) ? 'rtl' : 'ltr';
+}
+
 const loaded: Partial<Record<Language, TranslationStrings>> = { en };
 let active: TranslationStrings = en;
 let activeLanguage: Language = 'en';
@@ -85,7 +118,12 @@ export function getTranslation(
 ): string {
   let text = active[key] || en[key] || key;
   args.forEach((arg, i) => {
-    text = text.replace(`{${i}}`, String(arg));
+    // The replacement goes through a function so `$&`, `` $` ``, `$'` and `$1`
+    // inside it are inserted literally. Arguments are user-typed values — group
+    // names, account names — and as a plain string a group called "Work $& Home"
+    // made replace() splice the match back in, while "A$'B" silently deleted
+    // text.
+    text = text.replace(`{${i}}`, () => String(arg));
   });
   return text;
 }

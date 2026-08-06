@@ -11,6 +11,21 @@ type TranslationKeys = {
   // Search
   'search.placeholder': string;
 
+  // Popup size
+  'settings.popupSize': string;
+  'settings.sizeSmall': string;
+  'settings.sizeMedium': string;
+  'settings.sizeLarge': string;
+
+  // Groups
+  'groups.all': string;
+  'groups.ungrouped': string;
+  'groups.field': string;
+  'groups.placeholder': string;
+  'groups.optional': string;
+  'groups.clear': string;
+  'groups.hint': string;
+
   // Accounts
   'accounts.noAccounts': string;
   'accounts.noAccountsFound': string;
@@ -51,11 +66,6 @@ type TranslationKeys = {
   'settings.viewNormal': string;
   'settings.viewCompact': string;
   'settings.viewHidden': string;
-
-  // FAQ
-  'faq.title': string;
-  'faq.contact': string;
-  'faq.haveQuestions': string;
 
   // Add Account Modal - errors
   'addAccount.errorNameRequired': string;
@@ -120,10 +130,9 @@ type TranslationKeys = {
   'delete.cannotUndo': string;
 
   // Review prompt
-  'review.title': string;
-  'review.subtitle': string;
+  'review.pitch': string;
+  'review.cta': string;
   'review.later': string;
-  'review.thanksLow': string;
 
   // Theme
   'theme.toggle': string;
@@ -135,6 +144,8 @@ type TranslationKeys = {
   'update.feature.suggestedAccount': string;
   'update.feature.qrScanning': string;
   'update.feature.timeSync': string;
+  'update.feature.groups': string;
+  'update.feature.appearance': string;
   'promo.text': string;
   'promo.cta': string;
 
@@ -235,6 +246,7 @@ type VaultTranslationKeys = {
 
   'common.cancel': string;
   'common.support': string;
+  'common.requestFeature': string;
 
   'update.feature.vault': string;
   'update.feature.encryptedExport': string;
@@ -243,9 +255,12 @@ type VaultTranslationKeys = {
   'update.feature.cameraScan': string;
   'import.qrNothingNew': string;
   'import.qrSuccessPartial': string;
+  'import.qrSuccessGroup': string;
+  'import.qrSuccessPartialGroup': string;
   'common.ok': string;
   'common.confirm': string;
   'accounts.added': string;
+  'accounts.addedToGroup': string;
   'accounts.updated': string;
   'accounts.deleted': string;
   'export.plainConfirmTitle': string;
@@ -264,6 +279,11 @@ type VaultTranslationKeys = {
   'scan.lockedTitle': string;
   'scan.lockedBody': string;
   'scan.errorTitle': string;
+  'accounts.emptyGroup': string;
+  'accounts.clearFilters': string;
+  'edit.nameRequired': string;
+  'addAccount.errorInvalidPeriod': string;
+  'import.successUnreadable': string;
 };
 
 /** A complete set of strings for one language. */

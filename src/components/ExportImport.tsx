@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import { Download, Lock, Unlock, Upload } from 'lucide-react';
-import { exportAccounts, importAccounts, importAccountList, addMultipleAccounts, getAccounts } from '@/utils/storage';
+import {
+  exportAccounts,
+  importAccounts,
+  importAccountList,
+  addMultipleAccounts,
+  getAccounts,
+  type ImportResult,
+} from '@/utils/storage';
 import { markBackupDone } from '@/utils/backup-reminder';
 import { parseQRCode, generateRandomColor } from '@/utils/qr-parser';
 import { decodeQrFromImage } from '@/utils/qr-decode';
@@ -28,22 +35,31 @@ interface ExportImportProps {
 /**
  * Reads a backup file of any supported shape. Encrypted files are prompted for
  * separately so the caller doesn't need to know the format up front.
+ *
+ * Returns null when the user cancelled at the password prompt, otherwise the
+ * result — including how many entries were unreadable, which the caller must
+ * report rather than round up to "import successful".
  */
 export async function importBackupText(
   text: string,
   promptForPassword: () => Promise<string | null> | string | null
-): Promise<boolean> {
+): Promise<ImportResult | null> {
   if (!isEncryptedBackupFile(text)) {
-    await importAccounts(text);
-    return true;
+    return await importAccounts(text);
   }
 
   const password = await promptForPassword();
-  // Cancelled at the password prompt — the caller must not report success.
-  if (!password) return false;
+  if (!password) return null;
 
-  await importAccountList(await readEncryptedBackupFile(text, password));
-  return true;
+  return await importAccountList(await readEncryptedBackupFile(text, password));
+}
+
+/** "Restored" plus, if any entry was beyond saving, how many and that they were skipped. */
+export function importResultMessage(result: ImportResult, language: Language): string {
+  const t = createT(language);
+  return result.unreadable > 0
+    ? t('import.successUnreadable', result.unreadable)
+    : t('import.success');
 }
 
 export function ExportImport({ onImportComplete, onExportComplete, language }: ExportImportProps) {
@@ -120,7 +136,10 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
         if (imported) {
           await markBackupDone(0); // Mark as backed up to suppress reminder
           onImportComplete();
-          toast('success', t('import.success'));
+          toast(
+            imported.unreadable > 0 ? 'info' : 'success',
+            importResultMessage(imported, language)
+          );
         }
       }
     } catch (error) {

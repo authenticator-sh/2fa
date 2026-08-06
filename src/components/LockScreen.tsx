@@ -144,12 +144,12 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
                 onKeyDown={e => e.key === 'Enter' && handleUnlock()}
                 placeholder={t('vault.lock.password')}
                 autoFocus
-                className="w-full px-3 py-2.5 pr-9 text-sm rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4]"
+                className="w-full px-3 py-2.5 pe-9 text-sm rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4]"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                className="absolute end-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>

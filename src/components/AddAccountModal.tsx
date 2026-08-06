@@ -5,19 +5,25 @@ import { validateSecret, cleanSecret } from '@/utils/totp';
 import { parseQRCode, generateRandomColor } from '@/utils/qr-parser';
 import { captureCurrentTab } from '@/utils/screen-capture';
 import { decodeQrFromImage } from '@/utils/qr-decode';
+import { GroupInput } from './GroupInput';
 import { createT, type Language } from '@/utils/i18n';
 
 interface AddAccountModalProps {
   onClose: () => void;
   onAdd: (account: Account | Account[]) => Promise<void>;
   language: Language;
+  /** Existing group names, offered as suggestions — the field stays free text. */
+  groups?: string[];
+  /** Group to prefill, so adding from inside a filtered list lands in it. */
+  defaultGroup?: string;
 }
 
-export function AddAccountModal({ onClose, onAdd, language }: AddAccountModalProps) {
+export function AddAccountModal({ onClose, onAdd, language, groups = [], defaultGroup = '' }: AddAccountModalProps) {
   const t = createT(language);
   const [tab, setTab] = useState<'manual' | 'qr'>('qr');
   const [name, setName] = useState('');
   const [issuer, setIssuer] = useState('');
+  const [group, setGroup] = useState(defaultGroup);
   const [secret, setSecret] = useState('');
   const [algorithm, setAlgorithm] = useState<'SHA1' | 'SHA256' | 'SHA512'>('SHA1');
   const [digits, setDigits] = useState<6 | 8>(6);
@@ -34,6 +40,17 @@ export function AddAccountModal({ onClose, onAdd, language }: AddAccountModalPro
     }
   }, [error]);
 
+  // What the manual form's own field was set to.
+  const typedGroup = group.trim() ? { group: group.trim() } : {};
+
+  // The QR tab has no group field — a scan adds the accounts and closes the
+  // modal in one click, so any field there would have to be filled before the
+  // thing it applies to exists, and grouping is easy enough to do afterwards by
+  // editing. What a scan does inherit is the group the list was filtered to:
+  // scanning from inside "Work" and having the accounts land outside it looks
+  // like the scan silently failed, because they are not in the visible list.
+  const filteredGroup = defaultGroup.trim() ? { group: defaultGroup.trim() } : {};
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -48,6 +65,14 @@ export function AddAccountModal({ onClose, onAdd, language }: AddAccountModalPro
       return;
     }
 
+    // Emptying the number field gives parseInt('') === NaN, which saved an
+    // account whose code never changes and never works. Nothing downstream can
+    // recover from it, so it is caught here.
+    if (!Number.isFinite(period) || period < 1) {
+      setError(t('addAccount.errorInvalidPeriod'));
+      return;
+    }
+
     const account: Account = {
       id: Date.now().toString() + Math.random().toString(36).substring(7),
       name,
@@ -58,6 +83,7 @@ export function AddAccountModal({ onClose, onAdd, language }: AddAccountModalPro
       period,
       createdAt: Date.now(),
       color: generateRandomColor(),
+      ...typedGroup,
     };
 
     onAdd(account);
@@ -100,6 +126,7 @@ export function AddAccountModal({ onClose, onAdd, language }: AddAccountModalPro
             period: accountData.period,
             createdAt: Date.now() + index,
             color: generateRandomColor(),
+            ...filteredGroup,
           }));
 
           // Add all accounts through onAdd to ensure state updates
@@ -121,6 +148,7 @@ export function AddAccountModal({ onClose, onAdd, language }: AddAccountModalPro
           period: accountData.period,
           createdAt: Date.now(),
           color: generateRandomColor(),
+          ...filteredGroup,
         };
         await onAdd(account);
         onClose();
@@ -349,6 +377,17 @@ export function AddAccountModal({ onClose, onAdd, language }: AddAccountModalPro
                   </div>
                 </div>
               )}
+
+              {/* Last field before the button: the only optional one on this
+                  form, and an empty box above the name and the secret reads as
+                  another thing that has to be filled in. */}
+              <GroupInput
+                inputId="add-account-group"
+                value={group}
+                onChange={setGroup}
+                groups={groups}
+                language={language}
+              />
 
               {error && (
                 <div ref={errorRef} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">

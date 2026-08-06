@@ -1,6 +1,6 @@
 {
   "name": "authenticator-extension",
-  "version": "1.0.0",
+  "version": "1.11.0",
   "description": "Modern Google Authenticator Chrome Extension",
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "generate-icons": "node generate-icons.cjs",
+    "checksums": "node scripts/checksums.js",
     "test": "tsx test/run.ts"
   },
   "dependencies": {

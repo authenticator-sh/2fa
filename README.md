@@ -6,6 +6,7 @@ A privacy-focused TOTP/HOTP authenticator for Chrome. We operate no servers, col
 - **Website:** [authenticator.sh](https://authenticator.sh)
 - **Security policy:** [authenticator.sh/security](https://authenticator.sh/security)
 - **Privacy policy:** [authenticator.sh/privacy](https://authenticator.sh/privacy)
+- **Feature requests:** [authenticator.featurebase.app](https://authenticator.featurebase.app)
 
 ## Features
 
@@ -134,7 +135,7 @@ To verify that the version published on the Chrome Web Store was built from this
 
 1. Download the `.crx` for the published version from the Chrome Web Store
 2. Unzip it to a directory
-3. Check out this repository at the matching git tag (e.g. `v1.10.0`)
+3. Check out this repository at the matching git tag (e.g. `v1.11.0`)
 4. Run `npm ci && npm run build` using **Node 20 LTS**
 5. Compare the `dist/` directory contents with the unzipped `.crx`
 
@@ -142,7 +143,11 @@ Differences should only exist in:
 - File ordering inside zips
 - Whitespace differences in minified output across Node patch versions
 
-For each release we publish a SHA256 hash of the produced `dist/` directory in [GitHub Releases](https://github.com/authenticator-sh/2fa/releases).
+For each release we publish `SHA256SUMS-v<version>.txt` — a SHA-256 for every file in the produced `dist/` — in [GitHub Releases](https://github.com/authenticator-sh/2fa/releases). It is in `sha256sum` format, so you can check your own build against it directly:
+
+```bash
+cd dist && sha256sum -c ../SHA256SUMS-v1.11.0.txt   # shasum -a 256 -c on macOS
+```
 
 ## Architecture
 
@@ -183,7 +188,10 @@ The extension makes **no automatic network requests** during normal use. The onl
 |---------------------------------------------|-------------------------------|--------------------------------|
 | `https://authenticator.sh/welcome`          | First install                 | Opens welcome page in a new tab |
 | `https://authenticator.sh/uninstall`        | After uninstall (Chrome API)  | Opens feedback page            |
-| `https://authenticator.sh/rate`             | User rates the extension      | Opens the review page          |
+| `https://chromewebstore.google.com/.../reviews` | User takes the rating prompt | Opens the Web Store review form |
+| `https://authenticator.sh/support`          | User clicks "Help & support"  | Opens the support page         |
+| `https://authenticator.sh/<lang>/faq`       | User clicks the help icon, or "How do I fix this?" on the clock warning | Opens the answers, in the popup's language |
+| `https://authenticator.featurebase.app`     | User clicks "Request a feature" | Opens the public feature board |
 | `https://worldtimeapi.org/api/timezone/...` | Popup open (optional, cached) | Clock drift detection for TOTP |
 | `https://timeapi.io/api/time/current/zone`  | Fallback if the above fails   | Clock drift detection for TOTP |
 

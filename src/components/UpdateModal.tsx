@@ -1,31 +1,42 @@
 import { useState } from 'react';
-import { Sparkles, Star } from 'lucide-react';
+import { Sparkles, ExternalLink, Lightbulb } from 'lucide-react';
 import { createT, type Language } from '@/utils/i18n';
 import { WHATS_NEW } from '@/utils/update-notes';
+import { FEATURE_REQUEST_URL } from '@/utils/links';
 
 interface UpdateModalProps {
   version: string;
   language: Language;
   onClose: () => void;
   reviewDismissed: boolean;
-  onRate: (stars: number) => void;
+  onRate: () => void;
+  /** Records the snooze, so declining here also stands down the standalone card. */
+  onSnoozeReview: () => void;
 }
 
-export function UpdateModal({ version, language, onClose, reviewDismissed, onRate }: UpdateModalProps) {
+export function UpdateModal({ version, language, onClose, reviewDismissed, onRate, onSnoozeReview }: UpdateModalProps) {
   const t = createT(language);
   const highlights = WHATS_NEW[version] || [];
-  const [hoverRating, setHoverRating] = useState(0);
-  const [votedLow, setVotedLow] = useState(false);
   const [laterClicked, setLaterClicked] = useState(false);
 
-  const handleStarClick = (stars: number) => {
-    onRate(stars);
-    if (stars < 4) setVotedLow(true);
+  const showRatingPrompt = !reviewDismissed && !laterClicked;
+
+  /**
+   * Anything that navigates away closes the popup, and the modal is re-armed
+   * from storage on the next open. Without recording the dismissal first, taking
+   * either of the links below means the changelog is waiting again the next time
+   * the user comes for a code — and again after that, until they happen to press
+   * "Got it".
+   */
+  const openAndClose = (url: string) => {
+    onClose();
+    chrome.tabs.create({ url });
   };
 
-  // votedLow must win even after the parent flips reviewDismissed=true on rate,
-  // otherwise the thank-you message never gets a chance to render.
-  const showRatingPrompt = votedLow || (!reviewDismissed && !laterClicked);
+  const handleLater = () => {
+    setLaterClicked(true);
+    onSnoozeReview();
+  };
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -37,7 +48,7 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
           <div className="flex items-center gap-2">
             <Sparkles className="text-[#4285F4]" size={20} />
             <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{t('update.title')}</h2>
-            <span className="ml-auto text-xs font-medium text-gray-400 dark:text-gray-500">v{version}</span>
+            <span className="ms-auto text-xs font-medium text-gray-400 dark:text-gray-500">v{version}</span>
           </div>
         </div>
 
@@ -50,59 +61,55 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
               </li>
             ))}
           </ul>
+
+          {/* Reading what just shipped is when someone is most likely to think
+              "and what about…". Kept inside the scroll area so it can never
+              push the rating block out of view. */}
+          <button
+            type="button"
+            onClick={() => openAndClose(FEATURE_REQUEST_URL)}
+            className="mb-3 flex items-center gap-1.5 text-xs font-medium text-[#4285F4] hover:underline"
+          >
+            <Lightbulb size={13} />
+            {t('common.requestFeature')}
+          </button>
         </div>
 
         <div className="flex-shrink-0 px-5 pb-5 pt-3 border-t border-gray-100 dark:border-dark-700">
           {showRatingPrompt && (
             <div className="mb-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/40 p-3">
-              {votedLow ? (
-                <p className="text-xs text-gray-600 dark:text-gray-400">{t('review.thanksLow')}</p>
-              ) : (
-                <>
-                  <p className="text-center text-sm font-semibold text-gray-900 dark:text-gray-100">
-                    {t('review.title')}
-                  </p>
-                  <p className="mt-0.5 text-center text-xs text-gray-500 dark:text-gray-400">
-                    {t('review.subtitle')}
-                  </p>
-                  <div className="mt-2 flex items-center justify-center gap-1">
-                    {[1, 2, 3, 4, 5].map((n) => (
-                      <button
-                        key={n}
-                        type="button"
-                        onClick={() => handleStarClick(n)}
-                        onMouseEnter={() => setHoverRating(n)}
-                        onMouseLeave={() => setHoverRating(0)}
-                        className="p-1 transition-transform hover:scale-110"
-                        aria-label={String(n)}
-                      >
-                        <Star
-                          size={28}
-                          className={
-                            hoverRating >= n
-                              ? 'fill-yellow-400 text-yellow-400'
-                              : 'text-gray-300 dark:text-gray-600'
-                          }
-                        />
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setLaterClicked(true)}
-                    className="mt-1.5 w-full text-center text-[11px] text-gray-500 dark:text-gray-400 hover:underline"
-                  >
-                    {t('review.later')}
-                  </button>
-                </>
-              )}
+              {/* Left-aligned and headingless, same as the standalone card:
+                  the copy carries its own opening, and centring a paragraph
+                  this long just makes it harder to read. */}
+              <p className="text-xs leading-snug text-gray-600 dark:text-gray-400">
+                {t('review.pitch')}
+              </p>
+              {/* One button, one destination, and no stars on it: collecting a
+                  score here and forwarding only the high ones would be review
+                  gating, and a row of filled stars next to "rate" names the
+                  answer we want. The label says where the click leads. */}
+              <button
+                type="button"
+                onClick={onRate}
+                className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-white py-2 text-xs font-medium text-[#4285F4] transition-colors hover:bg-blue-50 dark:border-blue-900/40 dark:bg-dark-800 dark:hover:bg-dark-700"
+              >
+                {t('review.cta')}
+                <ExternalLink size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={handleLater}
+                className="mt-1.5 w-full text-center text-[11px] text-gray-500 dark:text-gray-400 hover:underline"
+              >
+                {t('review.later')}
+              </button>
             </div>
           )}
 
           <button
             onClick={onClose}
             className={`w-full font-medium text-sm py-2.5 rounded-lg transition-colors ${
-              showRatingPrompt && !votedLow
+              showRatingPrompt
                 ? 'border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
                 : 'bg-[#4285F4] hover:bg-[#3367D6] text-white'
             }`}

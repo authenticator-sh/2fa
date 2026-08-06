@@ -8,6 +8,15 @@ export interface Account {
   period: number;
   createdAt: number;
   color?: string;
+  /**
+   * Optional group name, free text, one per account.
+   *
+   * Deliberately not a separate list of groups: derived from the accounts
+   * themselves there is nothing to keep in sync, nothing to migrate, and no
+   * orphan group left behind when its last account is deleted. Absent or blank
+   * means ungrouped, which is what every account imported from anywhere else is.
+   */
+  group?: string;
 }
 
 /**

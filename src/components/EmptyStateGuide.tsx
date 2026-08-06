@@ -65,7 +65,7 @@ export function EmptyStateGuide({
             <button
               key={path.id}
               onClick={() => setOpenPath(path)}
-              className="flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white px-3.5 py-3 text-left transition-colors hover:border-[#4285F4] hover:bg-blue-50/50 dark:border-dark-600 dark:bg-dark-800 dark:hover:border-[#4285F4] dark:hover:bg-dark-700"
+              className="flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white px-3.5 py-3 text-start transition-colors hover:border-[#4285F4] hover:bg-blue-50/50 dark:border-dark-600 dark:bg-dark-800 dark:hover:border-[#4285F4] dark:hover:bg-dark-700"
             >
               <path.icon size={18} className="flex-shrink-0 text-[#4285F4]" />
               <span className="flex-1 text-sm font-medium text-gray-900 dark:text-gray-100">

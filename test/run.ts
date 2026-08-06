@@ -13,6 +13,9 @@ const suites = [
   ['vault', () => import('./vault.test')],
   ['data-loss', () => import('./dataloss.test')],
   ['suggestions', () => import('./suggestions.test')],
+  ['groups', () => import('./groups.test')],
+  ['recovery', () => import('./recovery.test')],
+  ['review prompt', () => import('./review-prompt.test')],
 ] as const;
 
 for (const [name, load] of suites) {
