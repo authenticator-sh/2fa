@@ -4,8 +4,11 @@
 // Hosted rather than bundled so the copy can be updated without shipping a new
 // extension version, and so the uninstall feedback survives the extension being
 // gone by the time the page opens.
-const WELCOME_URL = 'https://authenticator.sh/welcome';
-const UNINSTALL_FEEDBACK_URL = 'https://authenticator.sh/uninstall';
+// www, not the apex: the apex only redirects here, and the uninstall URL in
+// particular is handed to Chrome and opened after we are gone — a hop we do not
+// need on the one page we get no second chance at.
+const WELCOME_URL = 'https://www.authenticator.sh/welcome';
+const UNINSTALL_FEEDBACK_URL = 'https://www.authenticator.sh/uninstall';
 
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.runtime.setUninstallURL(UNINSTALL_FEEDBACK_URL);

@@ -2,7 +2,8 @@ import { LifeBuoy, Lightbulb } from 'lucide-react';
 import { createT, type Language } from '@/utils/i18n';
 import { FEATURE_REQUEST_URL } from '@/utils/links';
 
-const SUPPORT_URL = 'https://authenticator.sh/support';
+// www, not the apex — the apex only redirects here. See helpUrl in utils/links.
+const SUPPORT_URL = 'https://www.authenticator.sh/support';
 
 /**
  * Always-visible way out when someone is stuck, and a way to ask for what is

@@ -22,10 +22,12 @@ export const FEATURE_REQUEST_URL = 'https://authenticator.featurebase.app';
  * keep answering to them.
  */
 export function helpUrl(language: string, anchor?: string): string {
-  // www, not the apex: the apex 307-redirects here, and the site declares
-  // itself at this host in every canonical and hreflang. Sending people through
-  // a redirect also drops the fragment in some clients, which would land
-  // someone who clicked "how do I fix this?" at the top of the page instead of
-  // on the answer.
-  return `https://www.authenticator.sh/${language}/faq${anchor ? `#${anchor}` : ''}`;
+  // www, not the apex, and no /en for English: the apex redirects to www and
+  // /en/faq redirects to /faq, and the site declares itself at the redirect
+  // destination in every canonical and hreflang. Sending people through a
+  // redirect also drops the fragment in some clients, which would land someone
+  // who clicked "how do I fix this?" at the top of the page instead of on the
+  // answer — and every anchor this function takes is exactly that case.
+  const path = language === 'en' ? '/faq' : `/${language}/faq`;
+  return `https://www.authenticator.sh${path}${anchor ? `#${anchor}` : ''}`;
 }
