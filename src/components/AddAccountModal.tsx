@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { X, Upload, Monitor, Loader2, Camera } from 'lucide-react';
 import type { Account } from '@/types';
 import { validateSecret, cleanSecret } from '@/utils/totp';
-import { parseQRCode, generateRandomColor } from '@/utils/qr-parser';
+import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/utils/qr-parser';
 import { captureCurrentTab } from '@/utils/screen-capture';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { GroupInput } from './GroupInput';
@@ -10,7 +10,15 @@ import { createT, type Language } from '@/utils/i18n';
 
 interface AddAccountModalProps {
   onClose: () => void;
-  onAdd: (account: Account | Account[]) => Promise<void>;
+  /**
+   * `batch` says which code of a split Google Authenticator export this was, so
+   * the parent can tell the user there are more to scan. The modal closes on
+   * success, so it cannot say so itself.
+   */
+  onAdd: (
+    account: Account | Account[],
+    batch?: { index: number; total: number }
+  ) => Promise<void>;
   language: Language;
   /** Existing group names, offered as suggestions — the field stays free text. */
   groups?: string[];
@@ -130,7 +138,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
           }));
 
           // Add all accounts through onAdd to ensure state updates
-          await onAdd(accountsToAdd);
+          await onAdd(accountsToAdd, parsed.batch);
           console.log(`Successfully added ${accountsToAdd.length} accounts from migration`);
           onClose();
           return;
@@ -160,8 +168,12 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
         );
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
       console.error('QR scan error:', err);
+      if (err instanceof UnsupportedOTPTypeError) {
+        setError(t('addAccount.errorHotp'));
+        return;
+      }
+      const errorMessage = err instanceof Error ? err.message : String(err);
       setError(t('addAccount.errorScanFailed', errorMessage));
     }
   };

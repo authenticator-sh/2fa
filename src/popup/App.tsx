@@ -19,6 +19,7 @@ import { VaultPrompt } from '@/components/VaultPrompt';
 import { VaultSettings } from '@/components/VaultSettings';
 import { VaultSetupModal } from '@/components/VaultSetupModal';
 import { EmptyStateGuide } from '@/components/EmptyStateGuide';
+import { AccountsUnavailable } from '@/components/AccountsUnavailable';
 import { GroupFilter } from '@/components/GroupFilter';
 import { SupportFooter } from '@/components/SupportFooter';
 import { getTimeSyncNotice, dismissTimeNotice } from '@/utils/time-sync';
@@ -33,7 +34,7 @@ import { shouldShowPromoBanner, recordFirstOpen } from '@/utils/promo-banner';
 import { recordOpen, shouldShowReviewPrompt, snoozeReviewPrompt } from '@/utils/review-prompt';
 import { readActiveGroup, rememberActiveGroup, forgetActiveGroup } from '@/utils/active-group';
 import { helpUrl } from '@/utils/links';
-import { parseQRCode, generateRandomColor } from '@/utils/qr-parser';
+import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/utils/qr-parser';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, loadTimeOffset } from '@/utils/totp';
 import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
@@ -55,7 +56,7 @@ const REVIEW_URL = 'https://chromewebstore.google.com/detail/2fa/ebhcbenbgjmaebp
 
 function App() {
   const vault = useVault();
-  const { accounts, loading, error, addAccount, deleteAccount, updateAccount, reorderAccounts, reload } =
+  const { accounts, loading, error, heldCount, addAccount, deleteAccount, updateAccount, reorderAccounts, reload } =
     // Unknown vault state counts as locked. `enabled` starts as null while
     // storage is read, and `null === true` is false — so the account list used
     // to start loading in parallel with the vault check and could win the race,
@@ -292,7 +293,10 @@ function App() {
     }
   }, [loading, activeGroup, groups, ungroupedCount, vaultHidingAccounts]);
 
-  const handleAddAccount = async (account: Account | Account[]) => {
+  const handleAddAccount = async (
+    account: Account | Account[],
+    batch?: { index: number; total: number }
+  ) => {
     if (Array.isArray(account)) {
       const result = await addMultipleAccounts(account);
       reload();
@@ -301,7 +305,13 @@ function App() {
       // Worth naming: a scan started from inside a filtered list inherits that
       // filter silently, and "added" alone leaves the user to work out why the
       // accounts are nowhere to be seen once they clear the filter.
-      toast(result.added > 0 ? 'success' : 'info', describeImport(result, language, account[0]?.group));
+      const more = batch && batch.index < batch.total
+        ? ` ${t('import.qrBatch', batch.index, batch.total)}`
+        : '';
+      toast(
+        result.added > 0 ? 'success' : 'info',
+        describeImport(result, language, account[0]?.group) + more
+      );
     } else {
       await addAccount(account);
       revealAccount(account);
@@ -426,12 +436,24 @@ function App() {
 
         const result = await addMultipleAccounts(accountsToAdd);
         reload();
-        toast(result.added > 0 ? 'success' : 'info', describeImport(result, language));
+        // A split Google Authenticator export is the common case for anyone with
+        // more than ten accounts, and stopping after the first code is the
+        // default mistake. Say which code this was.
+        const more = parsed.batch && parsed.batch.index < parsed.batch.total
+          ? ` ${t('import.qrBatch', parsed.batch.index, parsed.batch.total)}`
+          : '';
+        toast(result.added > 0 ? 'success' : 'info', describeImport(result, language) + more);
       } else {
         throw new Error(t('addAccount.errorInvalidQR'));
       }
     } catch (error) {
       console.error('QR import failed:', error);
+      if (error instanceof UnsupportedOTPTypeError) {
+        // Understood, and refused on purpose — saying "invalid QR" here would
+        // send the user off to re-export a code that can never work.
+        toast('error', t('addAccount.errorHotp'));
+        return;
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       toast('error', t('import.qrFailed', errorMessage));
     }
@@ -655,6 +677,17 @@ function App() {
         </div>
       )}
 
+      {/* Only when a list is actually shown: with nothing readable the panel
+          below carries the whole explanation and a banner would just repeat it. */}
+      {heldCount > 0 && accounts.length > 0 && !showSettings && (
+        <div className="flex items-start gap-2 border-b border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+          <AlertTriangle className="mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400" size={16} />
+          <div className="flex-1 text-xs text-amber-800 dark:text-amber-300">
+            {t('held.banner', heldCount)}
+          </div>
+        </div>
+      )}
+
       {timeOffsetSec !== null && !error && (
         <div className="bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 p-3 flex items-start gap-2">
           <AlertTriangle className="text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" size={16} />
@@ -806,7 +839,18 @@ function App() {
           // is the setup guide, whatever the filter says. Otherwise someone who
           // deletes their last account while filtered gets "no results" and no
           // way to add anything.
-          isFiltered && accounts.length > 0 ? (
+          error || heldCount > 0 ? (
+            // Not a new user: the records are on disk, they just cannot be read
+            // right now. Showing the setup guide here was the app saying "you
+            // have no accounts" to someone whose accounts are intact.
+            <AccountsUnavailable
+              heldCount={heldCount}
+              failed={Boolean(error)}
+              language={language}
+              onRetry={reload}
+              onImport={handleImportClick}
+            />
+          ) : isFiltered && accounts.length > 0 ? (
             <div className="flex flex-col items-center justify-center h-[340px] text-center p-6">
               <Logo size={48} className="mb-3 opacity-30" />
               <h2 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-1">

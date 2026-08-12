@@ -178,8 +178,30 @@ export function syncAccountKeys(): string[] {
   return Object.keys(areas.sync).filter(key => key.startsWith('authenticator_accounts'));
 }
 
+/**
+ * Present this profile as one that has already seen chrome.storage.sync work.
+ *
+ * Storage holds pushes back while the sync area is empty AND has never been
+ * observed to hold anything, because on a real profile that state is
+ * indistinguishable from "the download has not arrived yet" — and writing into
+ * it replaces the cloud copy. Scenarios about an existing install would
+ * otherwise all be testing the first-run hold instead of what they are about.
+ *
+ * Scenarios that DO want the fresh-profile behaviour skip this (see
+ * `resetStateFreshProfile`).
+ */
+export function markSyncEstablished(): void {
+  areas.local.syncObserved = true;
+}
+
 /** Wipe all persisted state between scenarios so they cannot leak into each other. */
 export async function resetState(): Promise<void> {
+  await resetStateFreshProfile();
+  markSyncEstablished();
+}
+
+/** As `resetState`, but leaves the profile looking newly installed. */
+export async function resetStateFreshProfile(): Promise<void> {
   for (const store of Object.values(areas)) {
     for (const key of Object.keys(store)) delete store[key];
   }

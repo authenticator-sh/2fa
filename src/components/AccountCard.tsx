@@ -45,7 +45,15 @@ export function AccountCard({
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(totp.code);
+    if (!totp) return;
+    try {
+      await navigator.clipboard.writeText(totp.code);
+    } catch (error) {
+      // Rejected when the document is not focused, or by policy. Swallowing it
+      // silently left the user unable to tell a failed copy from a misclick.
+      console.error('Could not copy the code to the clipboard', error);
+      return;
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
     if (currentDomain) {
@@ -81,8 +89,8 @@ export function AccountCard({
 
   const groupBadge = groupBadgeFor(false);
 
-  const formattedCode = totp.code.match(/.{1,3}/g)?.join(' ') || totp.code;
-  const isExpiringSoon = totp.remaining <= 5;
+  const formattedCode = totp ? totp.code.match(/.{1,3}/g)?.join(' ') || totp.code : '';
+  const isExpiringSoon = totp ? totp.remaining <= 5 : false;
 
   const dragProps = {
     draggable,
@@ -94,6 +102,51 @@ export function AccountCard({
   const baseClass = `relative group bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700 transition-all duration-200 after:content-[''] after:absolute after:bottom-0 after:inset-x-4 after:h-px after:bg-gray-200 dark:after:bg-dark-600 last:after:hidden ${
     isDragOver ? 'border-t-2 border-[#4285F4]' : ''
   }`;
+
+  /**
+   * A record whose secret cannot produce a code.
+   *
+   * Placed ahead of the three view modes so every one of them is covered by a
+   * single branch. It deliberately keeps Edit and Delete reachable: this row is
+   * the only handle the user has on a record that would otherwise be unfixable
+   * from inside the app, and the secret is very often one paste away from being
+   * correct.
+   */
+  if (!totp) {
+    return (
+      <div {...dragProps} className={`${baseClass} px-4 py-3`}>
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">
+              {account.issuer}
+              {account.issuer && account.name ? ': ' : ''}
+              {account.name}
+            </div>
+            <div className="mt-0.5 text-xs text-red-600 dark:text-red-400">
+              {t('accounts.invalidSecret')}
+            </div>
+          </div>
+
+          <div className="flex flex-shrink-0 items-center gap-0.5">
+            <button
+              onClick={() => onEdit(account)}
+              className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-600 dark:hover:text-gray-300"
+              title={t('edit.title')}
+            >
+              <Pencil size={13} />
+            </button>
+            <button
+              onClick={() => onDelete(account.id)}
+              className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/30"
+              title={t('accounts.deleteAccount')}
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Hidden mode — just name, click whole row to copy
   if (viewMode === 'hidden') {

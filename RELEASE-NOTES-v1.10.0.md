@@ -54,11 +54,11 @@ on **Node 20.9.0**, at this tag. The build is deterministic — two consecutive
 runs from a clean tree produce identical hashes.
 
 To check the published extension against this source, see
-[Verifying the Chrome Web Store Build](extension/README.md#verifying-the-chrome-web-store-build).
+[Verifying the Chrome Web Store Build](README.md#verifying-the-chrome-web-store-build).
 
 ## Security
 
 The cryptography, storage model, threat model and permissions are documented at
 [authenticator.sh/how-it-works](https://authenticator.sh/how-it-works). Report
 vulnerabilities to security@authenticator.sh — see
-[SECURITY.md](extension/SECURITY.md) for scope, response times and safe harbour.
+[SECURITY.md](SECURITY.md) for scope, response times and safe harbour.

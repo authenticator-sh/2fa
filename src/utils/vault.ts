@@ -141,15 +141,41 @@ export async function getVaultMeta(): Promise<VaultMeta | null> {
     // Sync unavailable — fall back to whatever is local.
   }
 
-  // Always compare, never just cache. A fresh install on a second device has
-  // the synced records but no local metadata; an existing device may hold
-  // metadata that a password change elsewhere has superseded.
-  if (syncedMeta && (!localMeta || metaVersion(syncedMeta) > metaVersion(localMeta))) {
+  if (!syncedMeta) return localMeta ?? null;
+
+  // A fresh install on a second device has the synced records but no local
+  // metadata, so there is nothing here that adopting could strand.
+  if (!localMeta) {
     await chrome.storage.local.set({ [VAULT_META_KEY]: syncedMeta });
     return syncedMeta;
   }
 
-  return localMeta ?? null;
+  // Same vault: a newer copy is a password change made on another device, and
+  // adopting it is the entire reason this comparison exists — without it the
+  // user's new password is rejected here forever while the old one keeps
+  // working, which is a live backdoor on every device that missed the change.
+  if (syncedMeta.vaultId === localMeta.vaultId) {
+    if (metaVersion(syncedMeta) > metaVersion(localMeta)) {
+      await chrome.storage.local.set({ [VAULT_META_KEY]: syncedMeta });
+      return syncedMeta;
+    }
+    return localMeta;
+  }
+
+  // Different vault. Whatever the timestamps say, this metadata cannot open the
+  // records this device holds — and `updatedAt` is a wall clock, so "newer" also
+  // loses to a skewed clock on the other machine.
+  //
+  // Overwriting here was unrecoverable: the local wrapping is the only copy of
+  // the key for the local ciphertext, and replacing it left every account
+  // quarantined with nothing anywhere able to decrypt them. Two vaults existing
+  // at once is a state the user has to resolve; it is not one we may resolve for
+  // them by discarding a key.
+  console.warn(
+    'Ignoring vault metadata from sync: it belongs to a different vault than the records ' +
+      'on this device. Both vaults still have their own key.'
+  );
+  return localMeta;
 }
 
 export async function isVaultEnabled(): Promise<boolean> {

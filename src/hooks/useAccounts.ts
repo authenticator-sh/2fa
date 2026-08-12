@@ -8,6 +8,7 @@ import {
   deleteAccount as deleteAccountFromStorage,
   updateAccount as updateAccountInStorage,
   reorderAccounts as reorderAccountsInStorage,
+  quarantinedCount,
 } from '@/utils/storage';
 import { autoBackup, getLatestBackup } from '@/utils/auto-backup';
 import { VaultLockedError } from '@/utils/vault';
@@ -16,6 +17,17 @@ export function useAccounts(vaultLocked: boolean) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Records on disk that this device cannot read — ciphertext from another
+   * vault, or a record whose decryption failed.
+   *
+   * Storage has always kept them safe, but nothing ever told the user they
+   * existed: the popup counted the readable accounts, found none, and rendered
+   * the first-run guide. "Set up your first account" is indistinguishable from
+   * "your accounts are gone", which is the worst thing a 2FA app can say to
+   * someone whose data is in fact intact.
+   */
+  const [heldCount, setHeldCount] = useState(0);
 
   const loadAccounts = useCallback(async () => {
     setLoading(true);
@@ -23,6 +35,8 @@ export function useAccounts(vaultLocked: boolean) {
       const data = await getAccounts();
       setAccounts(data);
       setError(null);
+      // Set by the read that just happened, so it has to be sampled after it.
+      setHeldCount(quarantinedCount());
 
       // Trigger auto backup (non-blocking). The snapshot stores records in
       // their on-disk form, so an encrypted vault yields an encrypted backup.
@@ -35,6 +49,7 @@ export function useAccounts(vaultLocked: boolean) {
       if (error instanceof VaultLockedError) {
         // Not a failure — App renders the unlock screen and calls us again.
         setAccounts([]);
+        setHeldCount(0);
         setError(null);
         setLoading(false);
         return;
@@ -71,6 +86,7 @@ export function useAccounts(vaultLocked: boolean) {
   useEffect(() => {
     if (vaultLocked) {
       setAccounts([]);
+      setHeldCount(0);
       setLoading(false);
       return;
     }
@@ -101,6 +117,7 @@ export function useAccounts(vaultLocked: boolean) {
     accounts,
     loading,
     error,
+    heldCount,
     addAccount,
     deleteAccount,
     updateAccount,

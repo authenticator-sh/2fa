@@ -20,7 +20,7 @@ import { applyDocumentLanguage, createT, loadLanguage, type Language } from '@/u
 import { addMultipleAccounts } from '@/utils/storage';
 import { readActiveGroup } from '@/utils/active-group';
 import { VaultLockedError } from '@/utils/vault';
-import { generateRandomColor, parseQRCode } from '@/utils/qr-parser';
+import { generateRandomColor, parseQRCode, UnsupportedOTPTypeError } from '@/utils/qr-parser';
 import { cleanSecret } from '@/utils/totp';
 import type { Account } from '@/types';
 import { describeImport, type ImportOutcome } from '@/utils/import-message';
@@ -30,7 +30,7 @@ type Status =
   | { kind: 'scanning' }
   // `group` is the filter the popup had on when it opened the scanner, if any —
   // named in the result so the accounts are not simply missing later.
-  | { kind: 'added'; outcome: ImportOutcome; group?: string }
+  | { kind: 'added'; outcome: ImportOutcome; group?: string; batch?: { index: number; total: number } }
   | { kind: 'locked' }
   | { kind: 'denied' }
   | { kind: 'noCamera' }
@@ -44,13 +44,20 @@ export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const frameRef = useRef<number>();
+  /** Stops whichever frame loop is running — rVFC and rAF cancel differently. */
+  const stopLoopRef = useRef<(() => void) | null>(null);
+  /** A second start() while the first is still awaiting getUserMedia leaked its stream. */
+  const startingRef = useRef(false);
   // Guards the async add path: a QR stays in frame for many frames, and without
   // this the same account gets submitted a dozen times before the first write
   // lands.
   const handledRef = useRef(false);
 
   const t = createT(language);
+
+  /** This export has codes the user has not scanned yet. */
+  const moreCodes =
+    status.kind === 'added' && !!status.batch && status.batch.index < status.batch.total;
 
   useEffect(() => {
     chrome.storage.local.get(['language', 'darkMode'], result => {
@@ -65,14 +72,32 @@ export default function App() {
   }, [language]);
 
   const stopCamera = useCallback(() => {
-    if (frameRef.current) cancelAnimationFrame(frameRef.current);
+    stopLoopRef.current?.();
+    stopLoopRef.current = null;
     streamRef.current?.getTracks().forEach(track => track.stop());
     streamRef.current = null;
   }, []);
 
   const handleDecoded = useCallback(
     async (text: string) => {
-      const parsed = parseQRCode(text);
+      let parsed;
+      try {
+        parsed = parseQRCode(text);
+      } catch (error) {
+        // A QR we read and refuse — currently only counter-based tokens. Unlike
+        // an unrecognised code, rescanning this one will never help, so the
+        // session ends with an explanation instead of looping on the camera.
+        stopCamera();
+        setStatus({
+          kind: 'error',
+          message:
+            error instanceof UnsupportedOTPTypeError
+              ? t('addAccount.errorHotp')
+              : t('addAccount.errorInvalidQR'),
+        });
+        return;
+      }
+
       if (!parsed || parsed.accounts.length === 0) {
         // Not an otpauth QR — keep scanning rather than failing the session.
         handledRef.current = false;
@@ -104,7 +129,7 @@ export default function App() {
 
       try {
         const result = await addMultipleAccounts(accounts);
-        setStatus({ kind: 'added', outcome: result, group: filteredGroup });
+        setStatus({ kind: 'added', outcome: result, group: filteredGroup, batch: parsed.batch });
       } catch (error) {
         if (error instanceof VaultLockedError) {
           setStatus({ kind: 'locked' });
@@ -118,65 +143,147 @@ export default function App() {
   );
 
   const start = useCallback(async () => {
+    // Two starts overlapping — a double click on "Scan another" — used to leave
+    // the first getUserMedia stream running with nothing tracking it, so the
+    // camera light stayed on until the tab closed.
+    if (startingRef.current) return;
+    startingRef.current = true;
+    stopCamera();
+
     setStatus({ kind: 'starting' });
     handledRef.current = false;
 
-    let decode: typeof jsQRType;
     try {
-      // Same lazy import as the image path — jsQR only loads once a scan starts.
-      decode = (await import('jsqr')).default;
-    } catch (error) {
-      setStatus({ kind: 'error', message: String(error) });
-      return;
-    }
+      let decode: typeof jsQRType;
+      try {
+        // Same lazy import as the image path — jsQR only loads once a scan starts.
+        decode = (await import('jsqr')).default;
+      } catch (error) {
+        setStatus({ kind: 'error', message: String(error) });
+        return;
+      }
 
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
-      });
-    } catch (error) {
-      const name = error instanceof DOMException ? error.name : '';
-      if (name === 'NotAllowedError' || name === 'SecurityError') {
-        setStatus({ kind: 'denied' });
-      } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-        setStatus({ kind: 'noCamera' });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+      } catch (error) {
+        const name = error instanceof DOMException ? error.name : '';
+        if (name === 'NotAllowedError' || name === 'SecurityError') {
+          setStatus({ kind: 'denied' });
+        } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+          setStatus({ kind: 'noCamera' });
+        } else {
+          setStatus({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
+        }
+        return;
+      }
+
+      streamRef.current = stream;
+
+      // Most of the "hold it there, keep holding it" is the webcam hunting for
+      // focus on a phone screen 30cm away, not the decoder. Asking for
+      // continuous autofocus costs nothing where it is unsupported.
+      try {
+        const [track] = stream.getVideoTracks();
+        const capabilities = (track.getCapabilities?.() ?? {}) as { focusMode?: string[] };
+        if (capabilities.focusMode?.includes('continuous')) {
+          await track.applyConstraints({
+            advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
+          });
+        }
+      } catch {
+        // Focus control is optional; scanning still works without it.
+      }
+
+      const video = videoRef.current;
+      if (!video) return;
+
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+      setStatus({ kind: 'scanning' });
+
+      const canvas = canvasRef.current!;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      // The camera runs at 1280x720, and reading that back is ~3.7 MB per frame
+      // before jsQR has looked at a single pixel. A QR needs nothing like it:
+      // decoding a downscaled centre square costs about a sixteenth as much, and
+      // the frames saved go into a preview that no longer stutters — which is
+      // itself most of why aiming took so long.
+      const DECODE_SIZE = 480;
+      const CROP = 0.8;
+      let frameCount = 0;
+
+      const scanFrame = () => {
+        if (handledRef.current || !ctx || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        if (!vw || !vh) return;
+
+        // The viewfinder points people at the middle; the edges are background
+        // that costs pixels and never holds the code.
+        const side = Math.min(vw, vh) * CROP;
+        const sx = (vw - side) / 2;
+        const sy = (vh - side) / 2;
+        const size = Math.min(DECODE_SIZE, Math.round(side));
+
+        // Assigning width resets the whole canvas, so only do it on a change.
+        if (canvas.width !== size || canvas.height !== size) {
+          canvas.width = size;
+          canvas.height = size;
+        }
+
+        ctx.drawImage(video, sx, sy, side, side, 0, 0, size, size);
+        const { data } = ctx.getImageData(0, 0, size, size);
+
+        // `attemptBoth` runs the detector a second time over the whole frame
+        // whenever the first pass finds nothing — which is every frame while the
+        // user is still aiming, the entire stretch that actually matters.
+        // Inverted codes barely exist for otpauth, so they get an occasional
+        // frame instead of half the budget.
+        const found = decode(data, size, size, {
+          inversionAttempts: frameCount++ % 8 === 7 ? 'attemptBoth' : 'dontInvert',
+        });
+
+        if (found?.data) {
+          handledRef.current = true;
+          handleDecoded(found.data);
+        }
+      };
+
+      // requestVideoFrameCallback fires once per frame the camera actually
+      // delivers (~30/s); rAF fires 60 times a second and would decode half of
+      // them twice over.
+      const withVideoFrames = video as HTMLVideoElement & {
+        requestVideoFrameCallback?: (cb: () => void) => number;
+        cancelVideoFrameCallback?: (handle: number) => void;
+      };
+
+      if (typeof withVideoFrames.requestVideoFrameCallback === 'function') {
+        let handle = 0;
+        const onFrame = () => {
+          scanFrame();
+          if (!handledRef.current) handle = withVideoFrames.requestVideoFrameCallback!(onFrame);
+        };
+        handle = withVideoFrames.requestVideoFrameCallback(onFrame);
+        stopLoopRef.current = () => withVideoFrames.cancelVideoFrameCallback?.(handle);
       } else {
-        setStatus({ kind: 'error', message: error instanceof Error ? error.message : String(error) });
+        let handle = 0;
+        const tick = () => {
+          handle = requestAnimationFrame(tick);
+          scanFrame();
+        };
+        handle = requestAnimationFrame(tick);
+        stopLoopRef.current = () => cancelAnimationFrame(handle);
       }
-      return;
+    } finally {
+      startingRef.current = false;
     }
-
-    streamRef.current = stream;
-    const video = videoRef.current;
-    if (!video) return;
-
-    video.srcObject = stream;
-    await video.play().catch(() => {});
-    setStatus({ kind: 'scanning' });
-
-    const canvas = canvasRef.current!;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-    const tick = () => {
-      frameRef.current = requestAnimationFrame(tick);
-      if (handledRef.current || !ctx || video.readyState !== video.HAVE_ENOUGH_DATA) return;
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const found = decode(data, canvas.width, canvas.height, { inversionAttempts: 'attemptBoth' });
-      if (found?.data) {
-        handledRef.current = true;
-        handleDecoded(found.data);
-      }
-    };
-
-    frameRef.current = requestAnimationFrame(tick);
-  }, [handleDecoded]);
+  }, [handleDecoded, stopCamera]);
 
   useEffect(() => {
     start();
@@ -228,19 +335,52 @@ export default function App() {
               <h2 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-1">
                 {describeImport(status.outcome, language, status.group)}
               </h2>
-              {status.outcome.added > 0 && (
+              {status.outcome.added > 0 && !moreCodes && (
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{t('scan.addedBody')}</p>
               )}
+
+              {/* Google Authenticator caps a code at ten accounts and puts the
+                  rest behind a "Next" button that is easy to miss. Someone who
+                  scans one code and reads "10 imported" as "finished" leaves the
+                  other twenty on the phone and only finds out when they need
+                  one. The payload says which code this was, so say it. */}
+              {moreCodes && (
+                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-start dark:border-amber-800 dark:bg-amber-900/20">
+                  <div className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                    {t('scan.batchMore', status.batch!.index, status.batch!.total, status.batch!.total - status.batch!.index)}
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-amber-800 dark:text-amber-300">
+                    {t('scan.batchBody')}
+                  </p>
+                </div>
+              )}
+
+              {status.batch && !moreCodes && (
+                <p className="mb-4 text-sm text-green-700 dark:text-green-400">
+                  {t('scan.batchLast', status.batch.total)}
+                </p>
+              )}
+
+              {/* With codes still to come, "Scan another" is the action that
+                  finishes the job, so it stops being the quiet one. */}
               <div className="flex gap-2">
                 <button
                   onClick={start}
-                  className="flex-1 text-sm font-medium py-2.5 rounded-lg border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors"
+                  className={`flex-1 text-sm font-medium py-2.5 rounded-lg transition-colors ${
+                    moreCodes
+                      ? 'bg-[#4285F4] hover:bg-[#3367D6] text-white'
+                      : 'border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
+                  }`}
                 >
-                  {t('scan.scanAnother')}
+                  {moreCodes ? t('scan.scanNext') : t('scan.scanAnother')}
                 </button>
                 <button
                   onClick={() => window.close()}
-                  className="flex-1 bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
+                  className={`flex-1 font-medium text-sm py-2.5 rounded-lg transition-colors ${
+                    moreCodes
+                      ? 'border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
+                      : 'bg-[#4285F4] hover:bg-[#3367D6] text-white'
+                  }`}
                 >
                   {t('scan.done')}
                 </button>

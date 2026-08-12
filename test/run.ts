@@ -10,6 +10,7 @@ import { failureCount, installMocks } from './harness';
 installMocks();
 
 const suites = [
+  ['totp and parsers', () => import('./totp.test')],
   ['vault', () => import('./vault.test')],
   ['data-loss', () => import('./dataloss.test')],
   ['suggestions', () => import('./suggestions.test')],

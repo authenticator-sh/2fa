@@ -2,7 +2,17 @@
 // loss of a user's TOTP seeds. Each one is written from the failure, not from
 // the happy path — the previous test suite passed while all of these were live.
 
-import { areas, check, flush, resetState, scenario, syncAccountKeys, throwsNamed } from './harness';
+import {
+  areas,
+  check,
+  faults,
+  flush,
+  resetState,
+  resetStateFreshProfile,
+  scenario,
+  syncAccountKeys,
+  throwsNamed,
+} from './harness';
 
 const PASSWORD = 'correct horse battery staple';
 
@@ -151,4 +161,105 @@ export async function run(): Promise<void> {
   check('the history exists beforehand', 'accountUsageByDomain' in areas.local);
   await (await storage.prepareVault(PASSWORD)).commit();
   check('it is gone once the vault is on', !('accountUsageByDomain' in areas.local));
+
+  // --- fixes for the 2026-08-12 audit ------------------------------------
+
+  // Every other write path carries quarantined records through untouched.
+  // Enabling the vault was the one exception, and it erased them.
+  scenario('Enabling the vault keeps records it cannot read');
+  await resetState();
+  await storage.saveAccounts(ACCOUNTS);
+  const foreign = { id: 'foreign-1', v: 'some-other-vault', fp: 'ff', enc: 'unreadable' };
+  areas.local.authenticator_accounts = [...(areas.local.authenticator_accounts as any[]), foreign];
+  const beforeCommit = (areas.local.authenticator_accounts as any[]).length;
+  await (await storage.prepareVault(PASSWORD)).commit();
+  await flush();
+  const afterCommit = areas.local.authenticator_accounts as any[];
+  check('the record count is unchanged', afterCommit.length === beforeCommit, `${afterCommit.length} vs ${beforeCommit}`);
+  check('the foreign record is still on disk', afterCommit.some(r => r.id === 'foreign-1'));
+
+  // prepare() and commit() are separated by the recovery-code screen, which the
+  // user is expected to linger on. The scanner tab can add accounts throughout.
+  scenario('Accounts added while the recovery code is on screen survive the commit');
+  await resetState();
+  await storage.saveAccounts(ACCOUNTS);
+  const pending = await storage.prepareVault(PASSWORD);
+  await storage.addAccount({
+    id: 'late', name: 'added-during-setup', issuer: 'Scanner',
+    secret: 'NBSWY3DPEHPK3PXQ', algorithm: 'SHA1', digits: 6, period: 30, createdAt: 99,
+  } as any);
+  await pending.commit();
+  await flush();
+  const afterLate = await storage.getAccounts();
+  check('the late account is there', afterLate.some(a => a.id === 'late'), JSON.stringify(afterLate.map(a => a.id)));
+  check('and so is everything else', afterLate.length === ACCOUNTS.length + 1, String(afterLate.length));
+
+  // The rollback used to clear vault_meta even when restoring the cleartext had
+  // failed — ciphertext on disk with its only key deleted.
+  scenario('A rollback that cannot restore the cleartext keeps the key');
+  await resetState();
+  await storage.saveAccounts(ACCOUNTS);
+  const doomed = await storage.prepareVault(PASSWORD);
+  faults.failLocalSetFor = 'authenticator_accounts';
+  let commitFailed = false;
+  try {
+    await doomed.commit();
+  } catch {
+    commitFailed = true;
+  }
+  faults.failLocalSetFor = null;
+  check('the commit reports failure', commitFailed);
+  check('vault_meta is kept rather than deleted', 'vault_meta' in areas.local);
+  check('the accounts are still readable on disk', (areas.local.authenticator_accounts as any[]).length === 3);
+
+  // vault_meta is compared on a wall clock, so a second device with a skewed
+  // clock — or simply a second vault — could overwrite the only wrapping that
+  // opens this device's ciphertext.
+  scenario('Vault metadata from a different vault is never adopted');
+  await resetState();
+  await storage.saveAccounts(ACCOUNTS);
+  await (await storage.prepareVault(PASSWORD)).commit();
+  await flush();
+  const ownMeta = areas.local.vault_meta as any;
+  areas.sync.vault_meta = { ...ownMeta, vaultId: 'a-different-vault', updatedAt: Date.now() + 60_000 };
+  const resolved = await vault.getVaultMeta();
+  check('the local vault id wins', resolved?.vaultId === ownMeta.vaultId, String(resolved?.vaultId));
+  check('local metadata is left alone', (areas.local.vault_meta as any).vaultId === ownMeta.vaultId);
+  check('the accounts still open with the original password', !!(await vault.unlockWithPassword(PASSWORD)));
+
+  scenario('A newer copy of the SAME vault is still adopted');
+  areas.sync.vault_meta = { ...ownMeta, updatedAt: (ownMeta.updatedAt ?? 0) + 60_000, iterations: ownMeta.iterations };
+  const sameVault = await vault.getVaultMeta();
+  check('the password-change path still works', (sameVault?.updatedAt ?? 0) > (ownMeta.updatedAt ?? 0));
+
+  // A fresh profile cannot tell "sync is empty" from "sync has not downloaded
+  // yet", and writing into that window replaced the cloud copy.
+  scenario('A brand-new profile does not write into an undownloaded sync area');
+  await resetStateFreshProfile();
+  await storage.saveAccounts(ACCOUNTS);
+  await flush();
+  check('nothing was pushed', syncAccountKeys().length === 0, JSON.stringify(syncAccountKeys()));
+  check('the push is recorded as pending', areas.local.syncPushPending === true);
+  check('local still has every account', (areas.local.authenticator_accounts as any[]).length === 3);
+
+  scenario('The held push is replayed once the area can be trusted');
+  // Backdate the first read past the settle window, as a later session would.
+  areas.local.syncFirstReadAt = Date.now() - 10 * 60 * 1000;
+  await storage.getAccounts();
+  await flush();
+  check('the accounts reach sync on the next read', syncAccountKeys().length > 0, JSON.stringify(syncAccountKeys()));
+  check('the pending flag is cleared', areas.local.syncPushPending === false);
+
+  scenario('An established profile is never held back');
+  await resetState();
+  await storage.saveAccounts(ACCOUNTS);
+  await flush();
+  check('the push goes straight through', syncAccountKeys().length > 0);
+
+  scenario('Sync content that is already present bypasses the hold entirely');
+  await resetStateFreshProfile();
+  areas.sync.authenticator_accounts_0 = [ACCOUNTS[0]];
+  await storage.saveAccounts(ACCOUNTS);
+  await flush();
+  check('an area with data is written normally', syncAccountKeys().length > 0, JSON.stringify(syncAccountKeys()));
 }

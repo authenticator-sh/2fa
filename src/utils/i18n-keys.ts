@@ -39,6 +39,19 @@ type TranslationKeys = {
   'accounts.or': string;
   'accounts.importFromBackup': string;
   'accounts.copied': string;
+  'accounts.invalidSecret': string;
+  'scan.batchMore': string;
+  'scan.batchBody': string;
+  'scan.batchLast': string;
+  'scan.scanNext': string;
+  'import.qrBatch': string;
+  'held.title': string;
+  'held.body': string;
+  'held.banner': string;
+  'recovery.title': string;
+  'recovery.body': string;
+  'recovery.retry': string;
+  'recovery.saveCopy': string;
   'accounts.clickToCopy': string;
   'accounts.suggested': string;
   'onboarding.title': string;
@@ -71,6 +84,7 @@ type TranslationKeys = {
   'addAccount.errorNameRequired': string;
   'addAccount.errorInvalidSecret': string;
   'addAccount.errorInvalidQR': string;
+  'addAccount.errorHotp': string;
   'addAccount.errorScanFailed': string;
   'addAccount.errorNoQr': string;
   'addAccount.errorScreenHint': string;

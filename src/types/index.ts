@@ -4,7 +4,13 @@ export interface Account {
   issuer: string;
   secret: string;
   algorithm: 'SHA1' | 'SHA256' | 'SHA512';
-  digits: 6 | 8;
+  /**
+   * Almost always 6 or 8, but 7 is issued in the wild and otpauth generates it.
+   * Narrowing the type to `6 | 8` forced the QR parser to round 7 down to 6,
+   * which produces a confident, permanently wrong code rather than a visible
+   * failure. Values are range-checked where they are read, not by the type.
+   */
+  digits: number;
   period: number;
   createdAt: number;
   color?: string;

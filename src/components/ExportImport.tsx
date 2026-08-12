@@ -9,7 +9,7 @@ import {
   type ImportResult,
 } from '@/utils/storage';
 import { markBackupDone } from '@/utils/backup-reminder';
-import { parseQRCode, generateRandomColor } from '@/utils/qr-parser';
+import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/utils/qr-parser';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret } from '@/utils/totp';
 import { createT, type Language } from '@/utils/i18n';
@@ -178,12 +178,22 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
         // Add all accounts at once
         const importResult = await addMultipleAccounts(accountsToAdd);
         onImportComplete();
-        toast(importResult.added > 0 ? 'success' : 'info', describeImport(importResult, language));
+        const summary = describeImport(importResult, language);
+        const more = parsed.batch && parsed.batch.index < parsed.batch.total
+          ? ` ${t('import.qrBatch', parsed.batch.index, parsed.batch.total)}`
+          : '';
+        toast(importResult.added > 0 ? 'success' : 'info', summary + more);
       } else {
         throw new Error(t('addAccount.errorInvalidQR'));
       }
     } catch (error) {
       console.error('QR import failed:', error);
+      if (error instanceof UnsupportedOTPTypeError) {
+        // Understood, and refused on purpose — saying "invalid QR" here would
+        // send the user off to re-export a code that can never work.
+        toast('error', t('addAccount.errorHotp'));
+        return;
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       toast('error', t('import.qrFailed', errorMessage));
     }

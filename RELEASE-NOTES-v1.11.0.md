@@ -40,6 +40,58 @@ each device works today; proper field-level merging is coming.
 
 ## Fixes
 
+- **A secret with dashes in it no longer takes the whole popup down.** Codes are
+  generated during render, and a secret containing anything outside the base32
+  alphabet made that throw — so a single such record replaced every account with
+  an error screen, on that open and every one after it, with the data still on
+  disk. Grouped secrets like `ABCD-EFGH-…` are how they are printed on setup
+  pages and how several other apps export them. Dashes and spaces are now
+  stripped wherever a secret is read, and a record that still cannot produce a
+  code costs its own row and nothing else — with its edit and delete buttons
+  intact, so it can be fixed or removed.
+- **Codes are no longer silently wrong for accounts that are not the default
+  shape.** A QR carrying `period=0` produced a code frozen at one value behind a
+  countdown that looked healthy; a seven-digit account was rounded down to six;
+  `SHA-256` written with a hyphen was quietly downgraded to SHA-1. Every one of
+  these is a code that is confidently wrong rather than visibly broken. The
+  values are now range-checked both when a QR is read and when a record is read
+  back from disk, so accounts already stored with a bad value are repaired
+  without needing a re-import.
+- **Counter-based (HOTP) codes are refused instead of stored as time-based
+  ones.** They were accepted, shown ticking over every 30 seconds, and were
+  never valid — the counter they depend on had nowhere to be kept. Importing one
+  now says so. A Google Authenticator export containing a mix imports the
+  time-based accounts and reports how many were left behind.
+- **Importing a Google Authenticator export no longer corrupts secrets.** The
+  payload was read with the rule that turns `+` into a space, and the decoder
+  skipped the space rather than failing, shifting every bit that followed. The
+  result was an account that imported cleanly and generated wrong codes forever.
+  Payloads that are damaged or cut short are now rejected outright instead of
+  yielding a shortened secret.
+- **A second device can no longer overwrite the vault key of the first.** Vault
+  metadata arriving from sync was adopted whenever it looked newer by wall
+  clock, without checking that it belonged to the same vault — and that metadata
+  is the only copy of the key for the records already encrypted here. Setting up
+  password protection separately on two devices was enough to leave one of them
+  unable to read anything. Metadata from a different vault is now ignored, and
+  both devices keep their own key.
+- **A newly installed copy no longer replaces your synced accounts.** Chrome
+  fills chrome.storage.sync in after a profile signs in, and an area that has
+  not arrived yet is indistinguishable from an empty one. Adding an account in
+  that window replaced the cloud copy with it. Writing now waits until the
+  synced data has either shown up or had long enough that empty is believable;
+  the account is saved to this device either way.
+- **Turning password protection on keeps everything on disk.** Accounts added
+  while the recovery code was on screen were discarded, and records this device
+  cannot read — ciphertext from a vault set up elsewhere — were erased rather
+  than carried across. If the changeover failed and the accounts could not be
+  put back, the key was deleted anyway; it is now kept until the restore is
+  confirmed.
+- **"No accounts yet" is no longer shown to people who have accounts.** Records
+  that cannot be read here, and a read that fails outright, both left the popup
+  showing the first-run setup guide — which for a 2FA app is indistinguishable
+  from having lost everything. Both now say what happened, how many records are
+  involved, and offer to save a copy of them to a file.
 - **Deleting an account works the first time.** It reported success, the
   account came back, and only a second delete made it stick. Accounts are read
   as the union of this device's copy and the synced one — which is how a second
@@ -110,11 +162,11 @@ on **Node 20.9.0**, at this tag. The build is deterministic — two consecutive
 runs from a clean tree produce identical hashes.
 
 To check the published extension against this source, see
-[Verifying the Chrome Web Store Build](extension/README.md#verifying-the-chrome-web-store-build).
+[Verifying the Chrome Web Store Build](README.md#verifying-the-chrome-web-store-build).
 
 ## Security
 
 The cryptography, storage model, threat model and permissions are documented at
 [authenticator.sh/how-it-works](https://authenticator.sh/how-it-works). Report
 vulnerabilities to security@authenticator.sh — see
-[SECURITY.md](extension/SECURITY.md) for scope, response times and safe harbour.
+[SECURITY.md](SECURITY.md) for scope, response times and safe harbour.

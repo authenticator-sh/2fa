@@ -3,6 +3,23 @@
  * Parses otpauth-migration:// URLs that contain protobuf-encoded account data
  */
 
+/**
+ * A whole MigrationPayload, batch metadata included.
+ *
+ * Google Authenticator caps an export at ten accounts per QR and splits the
+ * rest across further codes, behind a "Next" button people routinely miss —
+ * they scan one code, read "10 accounts imported" as "done", and never learn
+ * the other twenty stayed on the phone. The payload says which code this is,
+ * so the UI can say it too instead of hedging.
+ */
+export interface MigrationPayload {
+  accounts: MigrationAccount[];
+  /** 0-based position of this QR in the export. */
+  batchIndex?: number;
+  /** How many QR codes the export was split into. */
+  batchSize?: number;
+}
+
 export interface MigrationAccount {
   secret: string;
   name: string;
@@ -73,6 +90,15 @@ function skipField(buffer: Uint8Array, offset: number, wireType: number): number
  */
 function readLengthDelimited(buffer: Uint8Array, offset: number): { data: Uint8Array; offset: number } {
   const { value: length, offset: newOffset } = decodeVarint(buffer, offset);
+
+  // `slice` clamps silently, so a field claiming more bytes than remain used to
+  // yield a short secret rather than an error — a valid-looking base32 string
+  // that generates confident, permanently wrong codes. Truncation has to be an
+  // error here, not a shrug.
+  if (length < 0 || newOffset + length > buffer.length) {
+    throw new Error('Length-delimited field runs past the end of the buffer');
+  }
+
   const data = buffer.slice(newOffset, newOffset + length);
   return { data, offset: newOffset + length };
 }
@@ -178,7 +204,10 @@ function parseOtpParameters(buffer: Uint8Array): MigrationAccount {
     }
   }
 
-  if (!secret) {
+  // `!secret` is false for a zero-length Uint8Array, so an empty secret field
+  // used to sail through — and otpauth does not throw on an empty key either,
+  // it emits a plausible six-digit code from it.
+  if (!secret || secret.length === 0) {
     throw new Error('Missing secret in OtpParameters');
   }
 
@@ -194,9 +223,35 @@ function parseOtpParameters(buffer: Uint8Array): MigrationAccount {
 }
 
 /**
+ * Read one query parameter without the `+`-to-space substitution.
+ *
+ * Percent-escapes are still decoded, because Google's own exports use them;
+ * only the space rule — which belongs to form encoding, not to URLs — is left
+ * out.
+ */
+function readRawQueryParam(url: string, name: string): string | null {
+  const query = url.slice(url.indexOf('?') + 1);
+  if (url.indexOf('?') === -1) return null;
+
+  for (const pair of query.split('&')) {
+    const eq = pair.indexOf('=');
+    if (eq === -1) continue;
+    if (pair.slice(0, eq) !== name) continue;
+    try {
+      return decodeURIComponent(pair.slice(eq + 1));
+    } catch {
+      // A stray `%` that is not an escape — hand back the raw value and let the
+      // base64 check below decide.
+      return pair.slice(eq + 1);
+    }
+  }
+  return null;
+}
+
+/**
  * Parses Google Authenticator migration data from otpauth-migration:// URL
  */
-export function parseMigrationURL(url: string): MigrationAccount[] | null {
+export function parseMigrationURL(url: string): MigrationPayload | null {
   try {
     // The migration payload holds every secret — log nothing from it.
 
@@ -206,12 +261,24 @@ export function parseMigrationURL(url: string): MigrationAccount[] | null {
       return null;
     }
 
-    // Extract the data parameter
-    const urlObj = new URL(url);
-    const dataParam = urlObj.searchParams.get('data');
+    // Extract the data parameter.
+    //
+    // Deliberately NOT via URLSearchParams: it decodes `+` as a space, and the
+    // payload is standard base64, where `+` is a value. `atob` then *strips*
+    // whitespace instead of rejecting it, shifting the whole bit stream and
+    // producing secrets that are wrong but well-formed. Google percent-encodes
+    // its own exports, so this only bit payloads that had passed through a
+    // third-party tool or a text round-trip — silently, every time.
+    const dataParam = readRawQueryParam(url, 'data');
 
     if (!dataParam) {
       console.error('No data parameter found in migration URL');
+      return null;
+    }
+
+    // Reject rather than let atob skip characters it does not recognise.
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(dataParam)) {
+      console.error('Migration data is not valid base64');
       return null;
     }
 
@@ -226,6 +293,8 @@ export function parseMigrationURL(url: string): MigrationAccount[] | null {
 
     // Parse MigrationPayload protobuf message
     const accounts: MigrationAccount[] = [];
+    let batchIndex: number | undefined;
+    let batchSize: number | undefined;
     let offset = 0;
 
     while (offset < bytes.length) {
@@ -246,14 +315,24 @@ export function parseMigrationURL(url: string): MigrationAccount[] | null {
           // One malformed entry must not drop the rest of the batch
           console.warn('Skipping malformed OtpParameters:', err);
         }
+      } else if (wireType === WIRE_TYPE_VARINT && (fieldNumber === 3 || fieldNumber === 4)) {
+        // MigrationPayload: 2 = version, 3 = batch_size, 4 = batch_index,
+        // 5 = batch_id. Only the two that describe the split are of use here.
+        const { value, offset: newOffset } = decodeVarint(bytes, offset);
+        offset = newOffset;
+        if (fieldNumber === 3) batchSize = value;
+        else batchIndex = value;
       } else {
         // Forward-compatible: skip metadata or unknown fields instead of aborting
         offset = skipField(bytes, offset, wireType);
       }
     }
 
-    console.log(`Migration parser recovered ${accounts.length} account(s)`);
-    return accounts.length > 0 ? accounts : null;
+    console.log(
+      `Migration parser recovered ${accounts.length} account(s)` +
+        (batchSize ? ` from code ${(batchIndex ?? 0) + 1} of ${batchSize}` : '')
+    );
+    return accounts.length > 0 ? { accounts, batchIndex, batchSize } : null;
   } catch (error) {
     console.error('Error parsing migration URL:', error);
     return null;

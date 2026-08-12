@@ -46,7 +46,7 @@ export async function setSyncEnabled(enabled: boolean): Promise<void> {
   await setSyncPreference(enabled);
 
   if (enabled) {
-    await pushToSync(await getStoredAccounts()).catch(() => {});
+    await pushToSync(await getStoredAccounts(), { force: true }).catch(() => {});
 
     // The metadata has to go back up as well, or a second device sees the
     // synced records and has no way to derive the key that opens them.
@@ -122,12 +122,105 @@ export async function hasSyncOverflowed(): Promise<boolean> {
   return result[SYNC_OVERFLOW_KEY] === true;
 }
 
+// --- the download window ----------------------------------------------------
+//
+// Chrome populates chrome.storage.sync asynchronously after a profile signs in,
+// and an area that has not arrived yet is indistinguishable from an area that is
+// genuinely empty: both read as {}. A device that writes during that window
+// wins the per-key conflict when the real data lands, so the cloud copy is
+// replaced by whatever the new device happened to have.
+//
+// That is not an edge case — it is the restore path. Install on a new machine,
+// open the popup, see no accounts, add one, and the old machine's 90 accounts
+// are cut to whatever shares a chunk key with the new one.
+//
+// So: hold pushes back until sync has either produced content or had long enough
+// that empty is credible. Local is unaffected — it is the primary store and is
+// written either way — and a held-back push is retried on the next read.
+
+/** Sync has produced content on this profile at least once. */
+const SYNC_OBSERVED_KEY = 'syncObserved';
+/** When this profile first read an empty sync area. */
+const SYNC_FIRST_READ_KEY = 'syncFirstReadAt';
+/** A push was held back and needs replaying once the area is trustworthy. */
+const SYNC_PENDING_KEY = 'syncPushPending';
+
+/**
+ * How long an empty sync area stays untrustworthy.
+ *
+ * Long enough to cover the download, short enough that a genuinely first-ever
+ * install starts syncing within one sitting. The cost of being wrong in this
+ * direction is a delayed backup; in the other, it is deleted accounts.
+ */
+const SYNC_SETTLE_MS = 2 * 60 * 1000;
+
+async function noteSyncRead(recordCount: number): Promise<void> {
+  if (recordCount > 0) {
+    await chrome.storage.local.set({ [SYNC_OBSERVED_KEY]: true }).catch(() => {});
+    return;
+  }
+  const stored = await chrome.storage.local.get(SYNC_FIRST_READ_KEY).catch(() => ({}) as never);
+  if (typeof stored?.[SYNC_FIRST_READ_KEY] !== 'number') {
+    await chrome.storage.local.set({ [SYNC_FIRST_READ_KEY]: Date.now() }).catch(() => {});
+  }
+}
+
+async function isSyncTrustworthy(): Promise<boolean> {
+  try {
+    const stored = await chrome.storage.local.get([SYNC_OBSERVED_KEY, SYNC_FIRST_READ_KEY]);
+    if (stored[SYNC_OBSERVED_KEY] === true) return true;
+    const firstRead = stored[SYNC_FIRST_READ_KEY];
+    return typeof firstRead === 'number' && Date.now() - firstRead >= SYNC_SETTLE_MS;
+  } catch {
+    // Cannot tell — treat as untrustworthy. Skipping a push is recoverable.
+    return false;
+  }
+}
+
+/**
+ * Send up a push that was held back, once the area can be trusted.
+ *
+ * Called from the read path because that is the one thing guaranteed to happen
+ * on every popup open. Without it, a user who adds a single account on a fresh
+ * profile and never edits it again would keep that account out of sync forever.
+ */
+async function replayHeldSyncPush(records: StoredAccount[]): Promise<void> {
+  try {
+    const stored = await chrome.storage.local.get(SYNC_PENDING_KEY);
+    if (stored[SYNC_PENDING_KEY] !== true) return;
+    if (!(await isSyncTrustworthy())) return;
+
+    await chrome.storage.local.set({ [SYNC_PENDING_KEY]: false });
+    await pushToSync(records, { force: true });
+  } catch (error) {
+    console.warn('Could not replay the held sync push:', error);
+  }
+}
+
+interface PushOptions {
+  /**
+   * Bypass the download-window hold.
+   *
+   * For operations the user just asked for that must reach sync to be correct:
+   * turning sync on, and enabling or disabling the vault, where leaving stale
+   * cleartext or orphaned ciphertext up there is worse than the race.
+   */
+  force?: boolean;
+}
+
 /** Throws if the write is rejected, so callers can react to quota failures. */
-async function pushToSync(records: StoredAccount[]): Promise<void> {
+async function pushToSync(records: StoredAccount[], options: PushOptions = {}): Promise<void> {
   const stale = await syncKeysInUse();
 
   if (!(await isSyncEnabled())) {
     if (stale.length) await chrome.storage.sync.remove(stale).catch(() => {});
+    return;
+  }
+
+  if (!options.force && stale.length === 0 && !(await isSyncTrustworthy())) {
+    // Nothing up there to read and no reason yet to believe that is real.
+    await chrome.storage.local.set({ [SYNC_PENDING_KEY]: true }).catch(() => {});
+    console.warn('Holding the sync push back until the sync area has settled');
     return;
   }
 
@@ -157,6 +250,12 @@ async function pushToSync(records: StoredAccount[]): Promise<void> {
   }
 
   await chrome.storage.local.set({ [SYNC_OVERFLOW_KEY]: false });
+
+  // This device has now written content, so the area is real from here on and
+  // no further push needs holding back.
+  await chrome.storage.local
+    .set({ [SYNC_OBSERVED_KEY]: true, [SYNC_PENDING_KEY]: false })
+    .catch(() => {});
 
   // Drop the legacy single key and any chunk left over from a longer list.
   const obsolete = stale.filter(key => !(key in payload));
@@ -375,10 +474,19 @@ export async function getStoredAccounts(): Promise<StoredAccount[]> {
     const localAccounts: StoredAccount[] = localResult[STORAGE_KEY] || [];
 
     let syncAccounts: StoredAccount[] = [];
+    let syncReadable = false;
     try {
       syncAccounts = await readSyncRecords();
+      syncReadable = true;
     } catch (syncError) {
       console.warn('Sync storage unavailable:', syncError);
+    }
+
+    // Only a read that actually succeeded says anything about whether the area
+    // is populated; a thrown read says nothing and must not start the clock.
+    if (syncReadable) {
+      await noteSyncRead(syncAccounts.length);
+      await replayHeldSyncPush(localAccounts);
     }
 
     if (syncAccounts.length === 0) {
@@ -710,31 +818,57 @@ export async function prepareVault(password: string): Promise<PreparedVault> {
   const { meta, masterKeyBytes, recoveryCode } = await createVaultMeta(password);
   const { dataKey, fingerprintKey } = await deriveKeys(masterKeyBytes);
 
-  const encrypted: EncryptedAccount[] = await Promise.all(
-    plaintextAccounts.map(async account => {
-      const { id, ...secretFields } = account;
-      return {
-        id,
-        v: meta.vaultId,
-        fp: await fingerprintSecret(fingerprintKey, account.secret),
-        enc: await encryptJson(secretFields, dataKey),
-      };
-    })
-  );
+  /** Encrypt a list and prove it decrypts back to exactly what went in. */
+  const encryptVerified = async (accounts: Account[]): Promise<EncryptedAccount[]> => {
+    const records: EncryptedAccount[] = await Promise.all(
+      accounts.map(async account => {
+        const { id, ...secretFields } = account;
+        return {
+          id,
+          v: meta.vaultId,
+          fp: await fingerprintSecret(fingerprintKey, account.secret),
+          enc: await encryptJson(secretFields, dataKey),
+        };
+      })
+    );
 
-  // Round trip before anything destructive happens.
-  const verification: Account[] = await Promise.all(
-    encrypted.map(async record => {
-      const fields = await decryptJson<Omit<Account, 'id'>>(record.enc, dataKey);
-      return { id: record.id, ...fields };
-    })
-  );
+    const verification: Account[] = await Promise.all(
+      records.map(async record => {
+        const fields = await decryptJson<Omit<Account, 'id'>>(record.enc, dataKey);
+        return { id: record.id, ...fields };
+      })
+    );
 
-  if (!sameAccounts(verification, plaintextAccounts)) {
-    throw new Error('Encryption verification failed — no changes were made');
-  }
+    if (!sameAccounts(verification, accounts)) {
+      throw new Error('Encryption verification failed — no changes were made');
+    }
+
+    return records;
+  };
+
+  // Round trip before anything destructive happens, so a key that cannot
+  // round-trip is discovered before the user is ever shown a recovery code.
+  await encryptVerified(plaintextAccounts);
 
   const commit = async (): Promise<void> => {
+    // Re-read rather than reuse the list captured by `prepare`.
+    //
+    // The gap between the two is not a race in the narrow sense — it is a screen
+    // the user is expected to linger on, copying a recovery code onto paper —
+    // and the scanner runs in its own tab the whole time. Encrypting the stale
+    // snapshot silently dropped anything added in between.
+    //
+    // This must happen before the metadata is written: with vault_meta on disk
+    // and no key unlocked yet, this same read throws VaultLockedError.
+    const currentAccounts = await getAccounts();
+    // Captured by the read above: ciphertext from another vault, or records that
+    // failed to decrypt. Every other write path carries them through untouched
+    // (see saveAccounts); this one used to be the sole exception and erased them.
+    const held = [...quarantined];
+
+    const encrypted = await encryptVerified(currentAccounts);
+    const records: StoredAccount[] = [...encrypted, ...held];
+
     // The exact bytes currently on disk, captured before anything is
     // overwritten. Rolling back the metadata alone is not enough: once the
     // ciphertext has landed, the only key that opens it lives in vault_meta, so
@@ -744,9 +878,22 @@ export async function prepareVault(password: string): Promise<PreparedVault> {
 
     const rollback = async (): Promise<void> => {
       if (previousRecords !== undefined) {
-        await retryOperation(() => chrome.storage.local.set({ [STORAGE_KEY]: previousRecords }))
-          .catch(err => console.error('Vault rollback could not restore local accounts:', err));
-        await pushToSync(previousRecords).catch(() => {});
+        // The metadata may only be cleared once the cleartext is provably back.
+        // Clearing it unconditionally — which is what happened when this restore
+        // was a bare `.catch(console.error)` — turns a failed write into
+        // ciphertext on disk with its key deleted: zero accounts, nothing left
+        // to open them, and no second copy for anyone who has sync switched off.
+        try {
+          await retryOperation(() => chrome.storage.local.set({ [STORAGE_KEY]: previousRecords }));
+        } catch (err) {
+          console.error(
+            'Vault rollback could not restore local accounts; keeping vault_meta so the ' +
+              'encrypted records stay openable:',
+            err
+          );
+          return;
+        }
+        await pushToSync(previousRecords, { force: true }).catch(() => {});
       }
       await clearVaultMeta().catch(() => {});
     };
@@ -758,14 +905,14 @@ export async function prepareVault(password: string): Promise<PreparedVault> {
     await saveVaultMeta(meta);
 
     try {
-      await retryOperation(() => chrome.storage.local.set({ [STORAGE_KEY]: encrypted }));
+      await retryOperation(() => chrome.storage.local.set({ [STORAGE_KEY]: records }));
 
       // Awaited, unlike a plain best-effort push: if the encrypted copy cannot
       // reach sync we must remove the cleartext that is sitting there, or the
       // vault is decorative and a second device merges the cleartext straight
       // back into local.
       try {
-        await pushToSync(encrypted);
+        await pushToSync(records, { force: true });
       } catch {
         await chrome.storage.sync.remove(await syncKeysInUse()).catch(() => {});
       }
@@ -789,7 +936,7 @@ export async function prepareVault(password: string): Promise<PreparedVault> {
     // a full disk); leaving cleartext snapshots behind is a real weakness, but
     // it is a far smaller one than tearing down a working vault over it.
     try {
-      await replaceAllBackups(encrypted);
+      await replaceAllBackups(records);
     } catch (error) {
       console.error('Vault enabled, but the encrypted backup snapshots could not be written:', error);
       // The snapshots still hold cleartext copies of everything the vault was
@@ -844,7 +991,7 @@ export async function disableVault(password: string): Promise<void> {
   // Awaited: leftover ciphertext in sync would be merged back into local by the
   // next read and, with no vault left to open it, would brick every code path.
   try {
-    await pushToSync(unique);
+    await pushToSync(unique, { force: true });
   } catch {
     await chrome.storage.sync.remove(await syncKeysInUse()).catch(() => {});
   }
