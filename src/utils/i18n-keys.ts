@@ -27,14 +27,8 @@ type TranslationKeys = {
   'groups.hint': string;
 
   // Accounts
-  'accounts.noAccounts': string;
   'accounts.noAccountsFound': string;
   'accounts.tryDifferentSearch': string;
-  'accounts.howToAdd': string;
-  'accounts.step1': string;
-  'accounts.step2': string;
-  'accounts.step3': string;
-  'accounts.step4': string;
   'accounts.addAccount': string;
   'accounts.or': string;
   'accounts.importFromBackup': string;
