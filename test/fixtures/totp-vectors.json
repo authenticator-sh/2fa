@@ -1,0 +1,235 @@
+{
+  "note": "Shared between extension/ and site/. Both implementations must reproduce every code below. Regenerate deliberately, in both repositories at once.",
+  "digest": "9588b534bff73de4",
+  "codes": [
+    {
+      "name": "rfc6238 sha1 t=59",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "algorithm": "SHA1",
+      "digits": 8,
+      "period": 30,
+      "atMs": 59000,
+      "code": "94287082"
+    },
+    {
+      "name": "rfc6238 sha1 t=1111111109",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "algorithm": "SHA1",
+      "digits": 8,
+      "period": 30,
+      "atMs": 1111111109000,
+      "code": "07081804"
+    },
+    {
+      "name": "rfc6238 sha256",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZA",
+      "algorithm": "SHA256",
+      "digits": 8,
+      "period": 30,
+      "atMs": 1234567890000,
+      "code": "91819424"
+    },
+    {
+      "name": "rfc6238 sha512",
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "algorithm": "SHA512",
+      "digits": 8,
+      "period": 30,
+      "atMs": 2000000000000,
+      "code": "51091467"
+    },
+    {
+      "name": "six digits",
+      "secret": "JBSWY3DPEHPK3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30,
+      "atMs": 1700000000000,
+      "code": "324550"
+    },
+    {
+      "name": "seven digits",
+      "secret": "JBSWY3DPEHPK3PXP",
+      "algorithm": "SHA1",
+      "digits": 7,
+      "period": 30,
+      "atMs": 1700000000000,
+      "code": "2324550"
+    },
+    {
+      "name": "sixty second period",
+      "secret": "KRSXG5CTMVRXEZLU",
+      "algorithm": "SHA256",
+      "digits": 8,
+      "period": 60,
+      "atMs": 1700000045000,
+      "code": "68007395"
+    },
+    {
+      "name": "fifteen second period",
+      "secret": "KRSXG5CTMVRXEZLU",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 15,
+      "atMs": 1700000045000,
+      "code": "177045"
+    },
+    {
+      "name": "lowercase secret",
+      "secret": "jbswy3dpehpk3pxp",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30,
+      "atMs": 1700000000000,
+      "code": "324550"
+    },
+    {
+      "name": "spaced secret",
+      "secret": "JBSW Y3DP EHPK 3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30,
+      "atMs": 1700000000000,
+      "code": "324550"
+    },
+    {
+      "name": "dashed secret",
+      "secret": "JBSW-Y3DP-EHPK-3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30,
+      "atMs": 1700000000000,
+      "code": "324550"
+    },
+    {
+      "name": "padded secret",
+      "secret": "MZXW6YTBOI======",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30,
+      "atMs": 1700000000000,
+      "code": "227623"
+    },
+    {
+      "name": "two character secret",
+      "secret": "MZ",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30,
+      "atMs": 1700000000000,
+      "code": "457655"
+    },
+    {
+      "name": "thirty two character secret",
+      "secret": "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30,
+      "atMs": 1700000000000,
+      "code": "406058"
+    },
+    {
+      "name": "period zero falls back to thirty",
+      "secret": "JBSWY3DPEHPK3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 0,
+      "atMs": 1700000000000,
+      "code": "324550"
+    },
+    {
+      "name": "boundary just before a step",
+      "secret": "JBSWY3DPEHPK3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30,
+      "atMs": 1700000009999,
+      "code": "324550"
+    },
+    {
+      "name": "boundary at a step",
+      "secret": "JBSWY3DPEHPK3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30,
+      "atMs": 1700000010000,
+      "code": "367665"
+    }
+  ],
+  "uris": [
+    {
+      "name": "issuer in the path",
+      "uri": "otpauth://totp/GitHub:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=GitHub",
+      "accepted": true,
+      "secret": "JBSWY3DPEHPK3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30
+    },
+    {
+      "name": "uppercase scheme and type",
+      "uri": "OTPAUTH://TOTP/GitHub:alice@example.com?secret=JBSWY3DPEHPK3PXP",
+      "accepted": true,
+      "secret": "JBSWY3DPEHPK3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30
+    },
+    {
+      "name": "no slash before the query",
+      "uri": "otpauth://totp?secret=JBSWY3DPEHPK3PXP",
+      "accepted": true,
+      "secret": "JBSWY3DPEHPK3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30
+    },
+    {
+      "name": "all parameters spelled out",
+      "uri": "otpauth://totp/Acme:bob@example.com?secret=KRSXG5CTMVRXEZLU&algorithm=SHA256&digits=8&period=60",
+      "accepted": true,
+      "secret": "KRSXG5CTMVRXEZLU",
+      "algorithm": "SHA256",
+      "digits": 8,
+      "period": 60
+    },
+    {
+      "name": "dashed algorithm spelling",
+      "uri": "otpauth://totp/Acme?secret=JBSWY3DPEHPK3PXP&algorithm=SHA-256",
+      "accepted": true,
+      "secret": "JBSWY3DPEHPK3PXP",
+      "algorithm": "SHA256",
+      "digits": 6,
+      "period": 30
+    },
+    {
+      "name": "label with more than one colon",
+      "uri": "otpauth://totp/Acme:a:b@example.com?secret=JBSWY3DPEHPK3PXP",
+      "accepted": true,
+      "secret": "JBSWY3DPEHPK3PXP",
+      "algorithm": "SHA1",
+      "digits": 6,
+      "period": 30
+    },
+    {
+      "name": "no secret at all",
+      "uri": "otpauth://totp/Acme",
+      "accepted": false
+    },
+    {
+      "name": "empty secret",
+      "uri": "otpauth://totp/Acme?secret=",
+      "accepted": false
+    },
+    {
+      "name": "counter based",
+      "uri": "otpauth://hotp/Acme?secret=JBSWY3DPEHPK3PXP&counter=1",
+      "accepted": false
+    },
+    {
+      "name": "not a uri at all",
+      "uri": "JBSWY3DPEHPK3PXP",
+      "accepted": false
+    }
+  ]
+}

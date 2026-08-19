@@ -4,6 +4,7 @@ import type { Account } from '@/types';
 import { useTOTP } from '@/hooks/useTOTP';
 import { createT, type Language } from '@/utils/i18n';
 import { recordAccountUsage } from '@/utils/suggestions';
+import { takePickPrompt } from '@/utils/quick-fill';
 import { ProgressRing } from './ProgressRing';
 
 export type ViewMode = 'normal' | 'compact' | 'hidden';
@@ -57,7 +58,14 @@ export function AccountCard({
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
     if (currentDomain) {
-      recordAccountUsage(currentDomain, account.id).catch(() => {});
+      // What this copy is worth depends on why the popup is open. Opened by
+      // quick fill because it could not tell which account this site wants,
+      // the answer names the site. Opened from the toolbar, the code may
+      // equally be going into a desktop VPN client or an SSH prompt, and the
+      // site behind the popup is a coincidence.
+      takePickPrompt(currentDomain)
+        .then(answeredPrompt => recordAccountUsage(currentDomain, account.id, answeredPrompt ? 'site' : 'copy'))
+        .catch(() => {});
     }
   };
 

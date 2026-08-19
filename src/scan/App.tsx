@@ -16,7 +16,7 @@ import type jsQRType from 'jsqr';
 import { Logo } from '@/components/Logo';
 import { FeedbackHost } from '@/components/FeedbackHost';
 import { SupportFooter } from '@/components/SupportFooter';
-import { applyDocumentLanguage, createT, loadLanguage, type Language } from '@/utils/i18n';
+import { applyDocumentLanguage, createT, detectLanguage, loadLanguage, type Language } from '@/utils/i18n';
 import { addMultipleAccounts } from '@/utils/storage';
 import { readActiveGroup } from '@/utils/active-group';
 import { VaultLockedError } from '@/utils/vault';
@@ -62,7 +62,11 @@ export default function App() {
   useEffect(() => {
     chrome.storage.local.get(['language', 'darkMode'], result => {
       if (result.darkMode) setDarkMode(true);
-      if (result.language) loadLanguage(result.language).then(() => setLanguage(result.language));
+      // Same rule as the popup: a stored choice wins, otherwise the browser's
+      // own language decides. This page opens in its own tab, where landing in
+      // English is even more jarring than in a 360px popup.
+      const language: Language = result.language || detectLanguage();
+      if (language !== 'en') loadLanguage(language).then(() => setLanguage(language));
     });
   }, []);
 

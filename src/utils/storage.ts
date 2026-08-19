@@ -1,5 +1,6 @@
 import type { Account, EncryptedAccount, StoredAccount } from '@/types';
 import { isEncryptedAccount } from '@/types';
+import { ageOf } from './clock';
 import { decryptJson, encryptJson, fingerprintSecret } from './crypto';
 import {
   clearVaultMeta,
@@ -154,13 +155,34 @@ const SYNC_PENDING_KEY = 'syncPushPending';
  */
 const SYNC_SETTLE_MS = 2 * 60 * 1000;
 
-async function noteSyncRead(recordCount: number): Promise<void> {
+async function noteSyncRead(recordCount: number, localCount: number): Promise<void> {
   if (recordCount > 0) {
     await chrome.storage.local.set({ [SYNC_OBSERVED_KEY]: true }).catch(() => {});
     return;
   }
-  const stored = await chrome.storage.local.get(SYNC_FIRST_READ_KEY).catch(() => ({}) as never);
-  if (typeof stored?.[SYNC_FIRST_READ_KEY] !== 'number') {
+
+  const stored = await chrome.storage.local
+    .get([SYNC_OBSERVED_KEY, SYNC_FIRST_READ_KEY])
+    .catch(() => ({}) as never);
+
+  // Sync has gone empty on a profile that used to have content up there, while
+  // this device still holds records. Signing out of Chrome, switching Google
+  // account, and a reset sync area all look exactly like this from here — and
+  // the latch, once set, could never be cleared, so the next write replaced the
+  // cloud copy with whatever this device happened to have. Re-arm the window
+  // instead: the same two minutes a fresh install gets, then the push proceeds.
+  // Only reachable once per transition, because it clears the latch it tests.
+  if (stored?.[SYNC_OBSERVED_KEY] === true && localCount > 0) {
+    await chrome.storage.local
+      .set({ [SYNC_OBSERVED_KEY]: false, [SYNC_FIRST_READ_KEY]: Date.now() })
+      .catch(() => {});
+    console.warn('Sync read empty on a profile that had content — holding pushes until it settles');
+    return;
+  }
+  // Re-stamp anything unusable, including a stamp in the future left by a fast
+  // clock. Left alone it made the settle window unreachable forever, and a
+  // profile that never pushes to sync has no offsite copy at all.
+  if (ageOf(stored?.[SYNC_FIRST_READ_KEY]) === null) {
     await chrome.storage.local.set({ [SYNC_FIRST_READ_KEY]: Date.now() }).catch(() => {});
   }
 }
@@ -169,8 +191,8 @@ async function isSyncTrustworthy(): Promise<boolean> {
   try {
     const stored = await chrome.storage.local.get([SYNC_OBSERVED_KEY, SYNC_FIRST_READ_KEY]);
     if (stored[SYNC_OBSERVED_KEY] === true) return true;
-    const firstRead = stored[SYNC_FIRST_READ_KEY];
-    return typeof firstRead === 'number' && Date.now() - firstRead >= SYNC_SETTLE_MS;
+    const age = ageOf(stored[SYNC_FIRST_READ_KEY]);
+    return age !== null && age >= SYNC_SETTLE_MS;
   } catch {
     // Cannot tell — treat as untrustworthy. Skipping a push is recoverable.
     return false;
@@ -485,7 +507,7 @@ export async function getStoredAccounts(): Promise<StoredAccount[]> {
     // Only a read that actually succeeded says anything about whether the area
     // is populated; a thrown read says nothing and must not start the clock.
     if (syncReadable) {
-      await noteSyncRead(syncAccounts.length);
+      await noteSyncRead(syncAccounts.length, localAccounts.length);
       await replayHeldSyncPush(localAccounts);
     }
 

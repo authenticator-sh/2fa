@@ -34,3 +34,7 @@ coverage/
 # Release artifacts (upload to GitHub Releases, not committed)
 SHA256SUMS-*.txt
 authenticator-*.zip
+authenticator-*.crx
+
+# CRX signing key — NEVER commit
+*.pem

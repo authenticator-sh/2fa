@@ -7,6 +7,8 @@
 // looking. So we wait until the user has enough accounts that the value is
 // obvious, then offer once, quietly, and take "later" for an answer.
 
+import { deadlinePending } from './clock';
+
 const STORAGE_KEY = 'vaultPrompt';
 
 const MIN_ACCOUNTS = 2;
@@ -40,7 +42,7 @@ export async function shouldShowVaultPrompt(accountCount: number, vaultEnabled: 
   const state = await getState();
   if (state.dismissedForever) return false;
   if (state.timesShown >= MAX_PROMPTS) return false;
-  if (state.snoozedUntil && Date.now() < state.snoozedUntil) return false;
+  if (deadlinePending(state.snoozedUntil, SNOOZE_MS)) return false;
 
   return true;
 }

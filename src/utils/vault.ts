@@ -16,6 +16,7 @@
 
 import {
   deriveKeyFromPassword,
+  deriveKeyFromPrf,
   encryptJson,
   fromBase64,
   generateRecoveryCode,
@@ -29,16 +30,43 @@ import {
   unwrapMasterKey,
   wrapMasterKey,
 } from './crypto';
+import { ageOf } from './clock';
 import { isSyncEnabled } from './sync-preference';
 
 const VAULT_META_KEY = 'vault_meta';
 const SESSION_KEY = 'vault_session';
 const AUTO_LOCK_KEY = 'vault_autolock_minutes';
+const HANDOFF_KEY = 'vault_handoff';
+/** A ceremony is a few seconds of biometrics; two minutes is generous. */
+const HANDOFF_TTL_MS = 120_000;
 
 /** 0 = require the password every time the popup opens. */
 export const AUTO_LOCK_OPTIONS = [0, 5, 15, 60, -1] as const;
 /** -1 = stay unlocked until the browser is closed. */
 export const DEFAULT_AUTO_LOCK_MINUTES = 15;
+
+/**
+ * A third way to unwrap the master key, alongside the password and the recovery
+ * code: the output of a passkey's PRF extension.
+ *
+ * Deliberately additive and never exclusive. The password and recovery wrappers
+ * are always kept, so losing the passkey — a wiped phone, a reset laptop, a
+ * password manager that dropped it — costs convenience and nothing else. A
+ * design where the passkey were the only wrapper would create a brand-new way
+ * to destroy every 2FA seed, which is the objection this whole feature would
+ * fail on.
+ */
+export interface VaultPasskey {
+  /** Base64 raw credential id, for allowCredentials on unlock. Not secret. */
+  credentialId: string;
+  /** Base64 PRF input. Not secret; it only has to be stable per vault. */
+  prfSalt: string;
+  /** The master key, wrapped under the PRF-derived key. */
+  wrapped: string;
+  /** What the user called this passkey, shown in settings. */
+  label: string;
+  addedAt: number;
+}
 
 export interface VaultMeta {
   v: 1;
@@ -59,10 +87,54 @@ export interface VaultMeta {
    * same master key — a live backdoor on every other device.
    */
   updatedAt?: number;
+  /**
+   * Write counter, incremented on every save from the highest revision this
+   * device can see — local or synced.
+   *
+   * `updatedAt` alone could not order two devices: it is a raw wall clock, so a
+   * machine whose clock ran a year fast outranked every later change made
+   * anywhere else, permanently. On that machine the user's new password was
+   * rejected and the old one went on working, which is precisely the backdoor
+   * `updatedAt` was added to close.
+   *
+   * Optional because metadata written before 1.12.0 has none. A missing
+   * revision counts as zero, and equal revisions fall back to the clock — which
+   * is exactly the old behaviour, so a device still running an older version
+   * keeps ordering writes the way it always did.
+   */
+  rev?: number;
+  /**
+   * Optional passkey wrapper. Absent on every vault created before 1.12.0 and
+   * on every vault whose owner never turned it on, which is the default.
+   */
+  passkey?: VaultPasskey;
 }
 
 function metaVersion(meta: VaultMeta): number {
   return meta.updatedAt ?? meta.createdAt;
+}
+
+function metaRevision(meta: VaultMeta | undefined): number {
+  return typeof meta?.rev === 'number' && Number.isFinite(meta.rev) ? meta.rev : 0;
+}
+
+/** Whether `candidate` supersedes `current`, for two copies of the same vault. */
+function supersedes(candidate: VaultMeta, current: VaultMeta): boolean {
+  const a = metaRevision(candidate);
+  const b = metaRevision(current);
+
+  // Both counters present — both copies were written by a version that keeps
+  // one, so they are the authority and the clock only breaks ties.
+  if (a > 0 && b > 0) {
+    return a !== b ? a > b : metaVersion(candidate) > metaVersion(current);
+  }
+
+  // One side has no counter, because a version that does not write one touched
+  // it last. A counter cannot order that pair, so either signal claiming to be
+  // newer is enough. Refusing here is what would hurt: a password change made
+  // from an older device would be ignored forever, and its old password would
+  // go on opening this vault — the backdoor the counter exists to close.
+  return a > b || metaVersion(candidate) > metaVersion(current);
 }
 
 interface SessionState {
@@ -125,6 +197,90 @@ async function writeSession(state: SessionState | null): Promise<void> {
   }
 }
 
+// --- one-shot key hand-off between extension contexts ---------------------
+//
+// The passkey ceremony has to run in a page of its own (the popup is destroyed
+// when the authenticator prompt takes focus), and a page is a separate JS
+// context: the module-scoped `memoryFallback` above is not shared with it.
+//
+// In every auto-lock mode but one that does not matter, because the session
+// entry in chrome.storage.session is visible to both. With auto-lock set to
+// "every open" (0) it matters completely: writeSession deliberately refuses to
+// persist, so the key exists only in whichever context unlocked it. Without a
+// hand-off, on that setting registering a passkey is impossible (the ceremony
+// page cannot read the master key) and unlocking with one silently does nothing
+// (the popup opens still locked). Both were verified before this was added.
+//
+// So the key crosses once, explicitly, and is consumed on first read. That
+// preserves what auto-lock 0 actually promises — the key does not outlive the
+// popup that used it — while letting a ceremony in another window count as the
+// authentication event for exactly one popup. It lives in session storage,
+// which is memory-only, cleared when the browser closes and unreachable from
+// content scripts, and it expires.
+
+/** Hand the unlocked master key to the next context that asks, once. */
+export async function stageKeyHandoff(masterKeyBytes: Uint8Array): Promise<void> {
+  if (!hasSessionStorage()) return;
+  try {
+    await chrome.storage.session.set({
+      [HANDOFF_KEY]: { mk: toBase64(masterKeyBytes), stagedAt: Date.now() },
+    });
+  } catch {
+    // Nothing to fall back to, and nothing is lost: the caller either still
+    // holds the key or the user repeats the ceremony.
+  }
+}
+
+/**
+ * Take a staged key, if one is waiting, and adopt it as this context's session.
+ * Single use: the staged copy is removed whether or not it turned out valid.
+ */
+export async function consumeKeyHandoff(): Promise<Uint8Array | null> {
+  if (!hasSessionStorage()) return null;
+
+  let staged: { mk?: unknown; stagedAt?: unknown } | undefined;
+  try {
+    staged = (await chrome.storage.session.get(HANDOFF_KEY))[HANDOFF_KEY];
+  } catch {
+    return null;
+  }
+  if (!staged || typeof staged.mk !== 'string') return null;
+
+  // Removed before use, and best-effort: a copy that cannot be deleted is worth
+  // far less than an unlock that fails, and session storage dies with the
+  // browser regardless.
+  chrome.storage.session.remove(HANDOFF_KEY).catch(() => {});
+
+  // An unreadable or wound-back clock reads as expired. The failure direction
+  // here has to be "make them do it again", never "accept an old key".
+  const age = ageOf(typeof staged.stagedAt === 'number' ? staged.stagedAt : 0) ?? Infinity;
+  if (age > HANDOFF_TTL_MS) return null;
+
+  const masterKeyBytes = fromBase64(staged.mk);
+  await writeSession({ mk: staged.mk, lastActivity: Date.now() });
+  return masterKeyBytes;
+}
+
+/**
+ * Whether a storage change event means this context's lock state may have moved.
+ *
+ * Extracted rather than inlined in the hook so it can be tested: the popup's only
+ * way of learning that a ceremony in another window unlocked the vault is one of
+ * these events. Before this existed the popup sat on the lock screen until it was
+ * closed and reopened, which is what a user actually reported.
+ */
+export function affectsVaultSession(
+  areaName: string,
+  changes: Record<string, unknown>
+): boolean {
+  return areaName === 'session' && (HANDOFF_KEY in changes || SESSION_KEY in changes);
+}
+
+export async function clearKeyHandoff(): Promise<void> {
+  if (!hasSessionStorage()) return;
+  await chrome.storage.session.remove(HANDOFF_KEY).catch(() => {});
+}
+
 // --- vault metadata -------------------------------------------------------
 
 export async function getVaultMeta(): Promise<VaultMeta | null> {
@@ -155,7 +311,7 @@ export async function getVaultMeta(): Promise<VaultMeta | null> {
   // user's new password is rejected here forever while the old one keeps
   // working, which is a live backdoor on every device that missed the change.
   if (syncedMeta.vaultId === localMeta.vaultId) {
-    if (metaVersion(syncedMeta) > metaVersion(localMeta)) {
+    if (supersedes(syncedMeta, localMeta)) {
       await chrome.storage.local.set({ [VAULT_META_KEY]: syncedMeta });
       return syncedMeta;
     }
@@ -183,7 +339,24 @@ export async function isVaultEnabled(): Promise<boolean> {
 }
 
 export async function saveVaultMeta(meta: VaultMeta): Promise<void> {
-  meta = { ...meta, updatedAt: Date.now() };
+  // One past the highest revision anywhere in reach, so this write outranks
+  // both copies no matter what either machine's clock says.
+  let seen = metaRevision(meta);
+  try {
+    const local = (await chrome.storage.local.get(VAULT_META_KEY))[VAULT_META_KEY] as VaultMeta | undefined;
+    seen = Math.max(seen, metaRevision(local));
+  } catch {
+    // Unreadable — the counter can only be too low, never wrong in a way that
+    // loses a change: a later write on any device will pass it.
+  }
+  try {
+    const synced = (await chrome.storage.sync.get(VAULT_META_KEY))[VAULT_META_KEY] as VaultMeta | undefined;
+    seen = Math.max(seen, metaRevision(synced));
+  } catch {
+    // Sync unavailable — same reasoning.
+  }
+
+  meta = { ...meta, rev: seen + 1, updatedAt: Date.now() };
   await chrome.storage.local.set({ [VAULT_META_KEY]: meta });
   // Metadata is a few hundred bytes — it fits sync's per-item limit even when
   // the account list does not, so cross-device unlock keeps working. It must
@@ -279,6 +452,82 @@ export async function unlockWithRecoveryCode(code: string): Promise<Uint8Array> 
 export async function lock(): Promise<void> {
   clearKeyCache();
   await writeSession(null);
+  // A staged hand-off is an unlocked key by another name. Leaving one behind
+  // would mean "lock now" did not lock.
+  await clearKeyHandoff();
+}
+
+// --- passkey unlock -------------------------------------------------------
+
+export async function getVaultPasskey(): Promise<VaultPasskey | null> {
+  return (await getVaultMeta())?.passkey ?? null;
+}
+
+/**
+ * Wrap the master key under a passkey's PRF output and store the wrapper.
+ *
+ * Order is not stylistic. The wrapper is built and then unwrapped again in
+ * memory, and only a byte-for-byte match with the key we started from is
+ * allowed to reach storage. Writing first and verifying later is how a vault
+ * ends up holding a wrapper that opens nothing — and on a platform where PRF
+ * quietly returns a different value on the next assertion, an unverified write
+ * would look fine today and fail on the one day it is needed.
+ */
+export async function attachPasskey(
+  masterKeyBytes: Uint8Array,
+  credentialId: string,
+  prfSalt: string,
+  prfOutput: Uint8Array,
+  label: string
+): Promise<void> {
+  const meta = await getVaultMeta();
+  if (!meta) throw new Error('No vault configured');
+
+  const wrappingKey = await deriveKeyFromPrf(prfOutput);
+  const wrapped = await wrapMasterKey(masterKeyBytes, wrappingKey);
+
+  const check = await unwrapMasterKey(wrapped, await deriveKeyFromPrf(prfOutput));
+  const matches =
+    check.length === masterKeyBytes.length && check.every((byte, i) => byte === masterKeyBytes[i]);
+  if (!matches) {
+    throw new Error('Passkey wrapper did not round-trip; nothing was saved');
+  }
+
+  await saveVaultMeta({
+    ...meta,
+    passkey: { credentialId, prfSalt, wrapped, label, addedAt: Date.now() },
+  });
+}
+
+export async function unlockWithPasskey(prfOutput: Uint8Array): Promise<Uint8Array> {
+  const meta = await getVaultMeta();
+  if (!meta) throw new Error('No vault configured');
+  if (!meta.passkey) throw new Error('No passkey is registered for this vault');
+
+  let masterKeyBytes: Uint8Array;
+  try {
+    masterKeyBytes = await unwrapMasterKey(meta.passkey.wrapped, await deriveKeyFromPrf(prfOutput));
+  } catch {
+    // Same reasoning as the password path: a GCM authentication failure is the
+    // only signal, and it means this passkey is not the one that wrapped this
+    // vault — most often because the vault was rebuilt on another device.
+    throw new WrongPasswordError();
+  }
+
+  await writeSession({ mk: toBase64(masterKeyBytes), lastActivity: Date.now() });
+  return masterKeyBytes;
+}
+
+/**
+ * Forget the passkey wrapper. The password and recovery wrappers are untouched,
+ * so this can never leave the vault unopenable.
+ */
+export async function detachPasskey(): Promise<void> {
+  const meta = await getVaultMeta();
+  if (!meta || !meta.passkey) return;
+
+  const { passkey: _removed, ...withoutPasskey } = meta;
+  await saveVaultMeta(withoutPasskey as VaultMeta);
 }
 
 export async function getAutoLockMinutes(): Promise<number> {
@@ -308,7 +557,11 @@ export async function getMasterKeyBytes(): Promise<Uint8Array | null> {
   // us); 0 never persisted it in the first place. Only positive values need an
   // idle deadline checked here.
   if (autoLockMinutes > 0) {
-    const idleMs = Date.now() - session.lastActivity;
+    // A stamp we cannot trust — clock wound back, or a malformed session — is
+    // treated as infinitely idle. This check is the only thing enforcing the
+    // deadline the user chose, so its failure direction has to be "lock", not
+    // "keep handing out the master key".
+    const idleMs = ageOf(session.lastActivity) ?? Infinity;
     if (idleMs > autoLockMinutes * 60_000) {
       await lock();
       return null;

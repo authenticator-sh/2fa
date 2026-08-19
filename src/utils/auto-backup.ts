@@ -1,4 +1,5 @@
 import type { StoredAccount } from '@/types';
+import { ageOf } from './clock';
 
 const DB_NAME = 'AuthenticatorBackupDB';
 const DB_VERSION = 1;
@@ -43,9 +44,10 @@ export async function saveBackup(accounts: StoredAccount[]): Promise<void> {
     const transaction = db.transaction([STORE_NAME], 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
 
+    const at = Date.now();
     const backup: Backup = {
-      id: `backup_${Date.now()}`,
-      timestamp: Date.now(),
+      id: `backup_${at}`,
+      timestamp: at,
       accounts,
       version: chrome.runtime.getManifest().version,
       accountCount: accounts.length
@@ -77,7 +79,14 @@ export async function getAllBackups(): Promise<Backup[]> {
       const request = store.getAll();
       request.onsuccess = () => {
         const backups = request.result as Backup[];
-        resolve(backups.sort((a, b) => b.timestamp - a.timestamp));
+        // Youngest first, with a stamp from the future sinking to the bottom
+        // rather than becoming a permanent "latest" that freezes the daily
+        // backup and pins recovery to a stale snapshot. MAX_SAFE_INTEGER rather
+        // than Infinity because Infinity - Infinity is NaN, and a NaN
+        // comparator silently leaves the array in insertion order — which put
+        // the OLDEST row first exactly when every stamp was untrustworthy.
+        const age = (stamp: number) => ageOf(stamp) ?? Number.MAX_SAFE_INTEGER;
+        resolve(backups.sort((a, b) => age(a.timestamp) - age(b.timestamp)));
       };
       request.onerror = () => reject(request.error);
     });
@@ -180,11 +189,12 @@ export async function wipeAllBackups(): Promise<void> {
 export async function autoBackup(accounts: StoredAccount[]): Promise<void> {
   try {
     const latestBackup = await getLatestBackup();
-    const now = Date.now();
     const ONE_DAY = 24 * 60 * 60 * 1000;
 
-    // Create backup if no backup exists or last backup is older than 24 hours
-    if (!latestBackup || (now - latestBackup.timestamp) > ONE_DAY) {
+    // Create backup if no backup exists or the last one is older than 24 hours.
+    // An unusable stamp counts as old: skipping a backup because of a clock
+    // glitch is how a backup system dies quietly.
+    if (!latestBackup || (ageOf(latestBackup.timestamp) ?? Infinity) > ONE_DAY) {
       await saveBackup(accounts);
       console.log('Auto backup created successfully');
     }
@@ -225,7 +235,10 @@ export async function checkBackupHealth(): Promise<{
 
   return {
     hasBackups: backups.length > 0,
-    lastBackupAge: latestBackup ? Date.now() - latestBackup.timestamp : 0,
+    // Infinity, not a negative number, when the newest stamp cannot be trusted:
+    // callers ask "how long since the last backup" to decide whether to nudge,
+    // and a bare subtraction answers "less than none" on a clock that moved.
+    lastBackupAge: latestBackup ? (ageOf(latestBackup.timestamp) ?? Infinity) : Infinity,
     backupCount: backups.length
   };
 }

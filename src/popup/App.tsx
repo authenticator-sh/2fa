@@ -22,8 +22,8 @@ import { EmptyStateGuide } from '@/components/EmptyStateGuide';
 import { AccountsUnavailable } from '@/components/AccountsUnavailable';
 import { GroupFilter } from '@/components/GroupFilter';
 import { SupportFooter } from '@/components/SupportFooter';
-import { getTimeSyncNotice, dismissTimeNotice } from '@/utils/time-sync';
-import { applyDocumentLanguage, createT, loadLanguage, type Language } from '@/utils/i18n';
+import { getTimeSyncNotice, dismissTimeNotice, getClockStatus, recheckClock, type ClockStatus } from '@/utils/time-sync';
+import { applyDocumentLanguage, createT, detectLanguage, loadLanguage, type Language } from '@/utils/i18n';
 import { addMultipleAccounts, getAccounts } from '@/utils/storage';
 import { shouldShowBackupReminder, markBackupDone } from '@/utils/backup-reminder';
 import { shouldShowVaultPrompt, markVaultPromptShown } from '@/utils/vault-prompt';
@@ -38,6 +38,7 @@ import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/uti
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, loadTimeOffset } from '@/utils/totp';
 import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
+import { isQuickFillEnabled, setQuickFillEnabled } from '@/utils/quick-fill';
 import { isSyncEnabled, setSyncEnabled, hasSyncOverflowed } from '@/utils/storage';
 import { WHATS_NEW } from '@/utils/update-notes';
 import {
@@ -68,6 +69,11 @@ function App() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [timeOffsetSec, setTimeOffsetSec] = useState<number | null>(null);
+  // Separate from the banner's state on purpose: the banner appears only for a
+  // measured, uncorrected-looking clock, while this carries all three outcomes
+  // — including "we could not check", which has nowhere else to be seen.
+  const [clockStatus, setClockStatus] = useState<ClockStatus | null>(null);
+  const [clockChecking, setClockChecking] = useState(false);
   const [language, setLanguage] = useState<Language>('en');
   const [darkMode, setDarkMode] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -76,6 +82,7 @@ function App() {
   const [showVaultPrompt, setShowVaultPrompt] = useState(false);
   const [showVaultSetup, setShowVaultSetup] = useState(false);
   const [suggestionsOn, setSuggestionsOn] = useState(true);
+  const [quickFillOn, setQuickFillOn] = useState(true);
   const [syncOn, setSyncOn] = useState(true);
   const [syncOverflow, setSyncOverflow] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
@@ -96,10 +103,15 @@ function App() {
   // Load saved preferences
   useEffect(() => {
     chrome.storage.local.get(['language', 'darkMode', 'viewMode', 'popupSize'], (result) => {
-      if (result.language) {
+      // A stored language is a choice the user made and outranks everything.
+      // Without one, follow the browser: twenty translated interfaces were
+      // reachable only from a dropdown, so every install began in English no
+      // matter who installed it.
+      const language: Language = result.language || detectLanguage();
+      if (language !== 'en') {
         // Switch only once the chunk is in memory, otherwise the first paint
         // would be English and then visibly flip.
-        loadLanguage(result.language).then(() => setLanguage(result.language));
+        loadLanguage(language).then(() => setLanguage(language));
       }
       if (result.darkMode) {
         setDarkMode(true);
@@ -134,6 +146,7 @@ function App() {
 
   useEffect(() => {
     areSuggestionsEnabled().then(setSuggestionsOn);
+    isQuickFillEnabled().then(setQuickFillOn);
     isSyncEnabled().then(setSyncOn);
     hasSyncOverflowed().then(setSyncOverflow);
   }, []);
@@ -143,6 +156,14 @@ function App() {
     setSyncOn(next);
     await setSyncEnabled(next);
     toast('success', t('vault.settings.saved'));
+  };
+
+  // The service worker watches this key and adds or removes the menu item
+  // itself, so nothing here has to reach into it.
+  const handleQuickFillToggle = async () => {
+    const next = !quickFillOn;
+    setQuickFillOn(next);
+    await setQuickFillEnabled(next);
   };
 
   const handleSuggestionsToggle = async () => {
@@ -546,6 +567,7 @@ function App() {
     // then run the network re-check which refines/clears it and decides the notice.
     loadTimeOffset().then(() => {
       getTimeSyncNotice().then(setTimeOffsetSec);
+      getClockStatus().then(setClockStatus);
     });
   }, []);
 
@@ -692,7 +714,12 @@ function App() {
         <div className="bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 p-3 flex items-start gap-2">
           <AlertTriangle className="text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" size={16} />
           <div className="text-xs text-yellow-800 dark:text-yellow-300 flex-1">
-            <div>{t('warning.clockOff', Math.max(1, Math.round(timeOffsetSec / 60)))}</div>
+            <div>
+              {t(
+                clockStatus && !clockStatus.corrected ? 'warning.clockOffUncorrected' : 'warning.clockOff',
+                Math.max(1, Math.round(timeOffsetSec / 60))
+              )}
+            </div>
             <div className="flex items-center gap-3 mt-1.5">
               <button
                 onClick={() => chrome.tabs.create({ url: helpUrl(language, 'time-sync') })}
@@ -757,11 +784,55 @@ function App() {
             </p>
           )}
 
+          {/* The clock, stated plainly — including when we could not check it.
+              Codes depend on it, and a check that quietly stopped running is
+              indistinguishable from a healthy one without a line like this. */}
+          <div className="mt-3 flex items-start justify-between gap-2">
+            <div className="text-[11px] text-gray-600 dark:text-gray-400">
+              <div className="font-medium text-gray-700 dark:text-gray-300">{t('settings.clock')}</div>
+              <div className={clockStatus?.state === 'off' ? 'text-yellow-700 dark:text-yellow-500' : ''}>
+                {clockChecking
+                  ? t('settings.clockChecking')
+                  : clockStatus === null || clockStatus.state === 'unknown'
+                    ? t('settings.clockUnknown')
+                    : clockStatus.state === 'ok'
+                      ? t('settings.clockOk')
+                      : t(
+                          clockStatus.corrected ? 'settings.clockOff' : 'settings.clockOffUncorrected',
+                          Math.max(1, Math.round(Math.abs(clockStatus.offsetSeconds) / 60))
+                        )}
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                setClockChecking(true);
+                try {
+                  const status = await recheckClock();
+                  setClockStatus(status);
+                  setTimeOffsetSec(await getTimeSyncNotice());
+                } finally {
+                  setClockChecking(false);
+                }
+              }}
+              disabled={clockChecking}
+              className="flex-shrink-0 text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+            >
+              {t('settings.clockRecheck')}
+            </button>
+          </div>
+
           <SettingToggle
             label={t('settings.suggested')}
             hint={t('settings.suggestedHint')}
             checked={suggestionsOn}
             onChange={handleSuggestionsToggle}
+          />
+
+          <SettingToggle
+            label={t('settings.quickFill')}
+            hint={t('settings.quickFillHint')}
+            checked={quickFillOn}
+            onChange={handleQuickFillToggle}
           />
 
           <div className="mt-4 flex items-center justify-between">

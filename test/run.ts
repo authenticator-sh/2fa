@@ -14,9 +14,19 @@ const suites = [
   ['vault', () => import('./vault.test')],
   ['data-loss', () => import('./dataloss.test')],
   ['suggestions', () => import('./suggestions.test')],
+  ['quick fill', () => import('./quick-fill.test')],
+  ['quick fill in the page', () => import('./quick-fill-page.test')],
   ['groups', () => import('./groups.test')],
   ['recovery', () => import('./recovery.test')],
   ['review prompt', () => import('./review-prompt.test')],
+  ['time sync', () => import('./time-sync.test')],
+  ['wrong clocks', () => import('./clock.test')],
+  ['upgrade from 1.11.0', () => import('./upgrade.test')],
+  ['vault metadata', () => import('./vault-meta.test')],
+  ['passkey unlock', () => import('./passkey.test')],
+  ['credential exchange format', () => import('./cxf.test')],
+  ['shared vectors', () => import('./parity.test')],
+  ['language detection', () => import('./i18n.test')],
 ] as const;
 
 for (const [name, load] of suites) {

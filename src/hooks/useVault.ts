@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  affectsVaultSession,
+  consumeKeyHandoff,
   DEFAULT_AUTO_LOCK_MINUTES,
   getAutoLockMinutes,
   getVaultMeta,
@@ -30,6 +32,13 @@ export function useVault() {
       setState({ enabled: false, locked: false, autoLockMinutes: await getAutoLockMinutes() });
       return;
     }
+    // A passkey ceremony runs in a window of its own and cannot write this
+    // context's session directly. If it left a key staged, adopt it here —
+    // once — before deciding whether to show the lock screen. This is the only
+    // place that consumes a hand-off, deliberately: getMasterKeyBytes enforces
+    // auto-lock and must not grow a second way to say "unlocked".
+    await consumeKeyHandoff();
+
     setState({
       enabled: true,
       locked: !(await isUnlocked()),
@@ -39,6 +48,20 @@ export function useVault() {
 
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  // The passkey ceremony unlocks the vault from a window of its own. Without
+  // this the popup only learned about it by being closed and reopened — it sat
+  // on the lock screen with the vault already open behind it.
+  useEffect(() => {
+    if (!chrome.storage?.onChanged?.addListener) return;
+
+    const onChanged = (changes: Record<string, unknown>, areaName: string) => {
+      if (affectsVaultSession(areaName, changes)) refresh();
+    };
+
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
   }, [refresh]);
 
   const unlock = useCallback(

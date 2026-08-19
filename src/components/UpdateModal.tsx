@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Sparkles, ExternalLink, Lightbulb } from 'lucide-react';
+import { Sparkles, Lightbulb, ArrowRight } from 'lucide-react';
 import { createT, type Language } from '@/utils/i18n';
 import { WHATS_NEW } from '@/utils/update-notes';
-import { FEATURE_REQUEST_URL } from '@/utils/links';
+import { FEATURE_REQUEST_URL, whatsNewUrl } from '@/utils/links';
+import { RatingStars } from './RatingStars';
 
 interface UpdateModalProps {
   version: string;
@@ -62,6 +63,19 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
             ))}
           </ul>
 
+          {/* One line per change is all this modal has room for, and the
+              change people will have a question about — something that types
+              into their pages — deserves more than a line. The full answer,
+              with the safety model spelled out, is on the site. */}
+          <button
+            type="button"
+            onClick={() => openAndClose(whatsNewUrl(language, version))}
+            className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[#4285F4] hover:underline"
+          >
+            <ArrowRight size={13} className="rtl:rotate-180" />
+            {t('update.learnMore')}
+          </button>
+
           {/* Reading what just shipped is when someone is most likely to think
               "and what about…". Kept inside the scroll area so it can never
               push the rating block out of view. */}
@@ -84,18 +98,16 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
               <p className="text-xs leading-snug text-gray-600 dark:text-gray-400">
                 {t('review.pitch')}
               </p>
-              {/* One button, one destination, and no stars on it: collecting a
-                  score here and forwarding only the high ones would be review
-                  gating, and a row of filled stars next to "rate" names the
-                  answer we want. The label says where the click leads. */}
-              <button
-                type="button"
-                onClick={onRate}
-                className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-white py-2 text-xs font-medium text-[#4285F4] transition-colors hover:bg-blue-50 dark:border-blue-900/40 dark:bg-dark-800 dark:hover:bg-dark-700"
-              >
-                {t('review.cta')}
-                <ExternalLink size={13} />
-              </button>
+              {/* The same stars as the standalone card, from the same
+                  component — these two blocks were separate copies of the same
+                  markup, and the first change to one of them left the other
+                  showing the old design. Nothing is scored here: every star
+                  opens the same listing, and none of them tells us anything —
+                  collecting a rating and forwarding only the good ones is
+                  review gating. */}
+              <div className="mt-2.5">
+                <RatingStars language={language} onRate={onRate} />
+              </div>
               <button
                 type="button"
                 onClick={handleLater}

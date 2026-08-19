@@ -1,3 +1,5 @@
+import { ageOf } from './clock';
+
 export const PROMO_URL = 'https://chromewebstore.google.com/detail/password-manager/afdkmocgccmemgiblaemcfhhgmjoabkl?utm_source=2fa';
 
 const STORAGE_KEY = 'crossPromo';
@@ -37,5 +39,7 @@ export async function dismissPromoBanner(): Promise<void> {
 export async function shouldShowPromoBanner(): Promise<boolean> {
   const state = await getState();
   if (state.dismissed || !state.firstOpenDate) return false;
-  return Date.now() - state.firstOpenDate >= ONE_WEEK;
+  // An unusable stamp holds the banner back: unlike a backup reminder, showing
+  // this one early costs goodwill and buys nothing.
+  return (ageOf(state.firstOpenDate) ?? 0) >= ONE_WEEK;
 }

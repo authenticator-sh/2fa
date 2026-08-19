@@ -40,6 +40,56 @@ export const languages: { code: Language; label: string; flag: string }[] = [
   { code: 'sv', label: 'Svenska', flag: '🇸🇪' },
 ];
 
+const SUPPORTED: ReadonlySet<string> = new Set(languages.map((entry) => entry.code));
+
+/**
+ * Codes Chrome can still report that no longer match the tag we ship under.
+ * `in` is the pre-1989 code for Indonesian and Chrome inherits it from Java's
+ * locale table; without this, an Indonesian browser silently gets English.
+ */
+const LEGACY_CODES: Readonly<Record<string, Language>> = { in: 'id' };
+
+/**
+ * The best of our twenty languages for a BCP-47 tag, or English.
+ *
+ * Only the primary subtag is considered, because the region almost never
+ * changes which of our files is right: `pt-BR` and `pt-PT` both want `pt`, and
+ * every `es-419` variant wants `es`. The one place this is a genuine compromise
+ * is Chinese — we ship Simplified only, so `zh-TW` and `zh-HK` are answered
+ * with Simplified rather than with English, on the grounds that a reader of
+ * Traditional can read it and a reader of English-by-default cannot.
+ */
+export function matchLanguage(tag: string | null | undefined): Language {
+  if (!tag) return 'en';
+
+  const primary = tag.toLowerCase().split(/[-_]/)[0];
+  const code = LEGACY_CODES[primary] ?? primary;
+  return SUPPORTED.has(code) ? (code as Language) : 'en';
+}
+
+/**
+ * Which language to open in when the user has never picked one.
+ *
+ * Twenty translated interfaces were reachable only from a dropdown nobody had
+ * a reason to open: every install started in English, including for the people
+ * least able to read it. The browser already knows, and `chrome.i18n` needs no
+ * permission to ask.
+ *
+ * Deliberately not persisted. A stored `language` means "the user chose this"
+ * and always wins; its absence means "follow the browser", so someone who
+ * changes their browser language — or an install that gains a translation in a
+ * later release — is followed rather than frozen.
+ */
+export function detectLanguage(): Language {
+  try {
+    return matchLanguage(chrome?.i18n?.getUILanguage?.());
+  } catch {
+    // No chrome.i18n in this context (tests, a stripped build) — English is a
+    // fine answer and this must never be the thing that stops the popup.
+    return 'en';
+  }
+}
+
 /**
  * Languages written right to left.
  *

@@ -1,5 +1,5 @@
-import { ExternalLink } from 'lucide-react';
 import { createT, type Language } from '@/utils/i18n';
+import { RatingStars } from './RatingStars';
 
 interface ReviewPromptProps {
   language: Language;
@@ -26,17 +26,9 @@ export function ReviewPrompt({ language, onRate, onSnooze }: ReviewPromptProps) 
           names the product twice in adjacent lines of a 320px card. */}
       <p className="text-xs leading-snug text-gray-600 dark:text-gray-400">{t('review.pitch')}</p>
 
-      {/* No row of stars on the button: five filled ones next to "rate" reads as
-          us naming the answer we want. The icon says the click leaves the popup,
-          which is the only thing the user needs to know here. */}
-      <button
-        type="button"
-        onClick={onRate}
-        className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-white py-2 text-xs font-medium text-[#4285F4] transition-colors hover:bg-blue-50 dark:border-blue-900/40 dark:bg-dark-800 dark:hover:bg-dark-700"
-      >
-        {t('review.cta')}
-        <ExternalLink size={13} />
-      </button>
+      <div className="mt-2.5">
+        <RatingStars language={language} onRate={onRate} />
+      </div>
 
       <button
         type="button"

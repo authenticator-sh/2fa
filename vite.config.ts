@@ -26,6 +26,11 @@ function copyFilesPlugin() {
       );
       writeFileSync(resolve(__dirname, 'dist/scan.html'), scanHtml);
 
+      const passkeyHtml = rewriteAbsoluteAssets(
+        readFileSync(resolve(__dirname, 'dist/src/passkey/index.html'), 'utf-8')
+      );
+      writeFileSync(resolve(__dirname, 'dist/passkey.html'), passkeyHtml);
+
       // The generated HTML has been rewritten and moved to the dist root; the
       // nested copy would otherwise ship as dead weight inside the package.
       rmSync(resolve(__dirname, 'dist/src'), { recursive: true, force: true });
@@ -96,6 +101,11 @@ export default defineConfig({
       input: {
         popup: resolve(__dirname, 'src/popup/index.html'),
         scan: resolve(__dirname, 'src/scan/index.html'),
+        // Keyed 'passkey-page' rather than 'passkey': the chunk name comes from
+        // this key, and 'passkey' collides with src/utils/passkey.ts — rollup
+        // resolves it by renaming one of them to passkey2.js, which works only
+        // as long as the entry happens to win the name.
+        'passkey-page': resolve(__dirname, 'src/passkey/index.html'),
         'background/service-worker': resolve(__dirname, 'src/background/service-worker.ts'),
       },
       output: {

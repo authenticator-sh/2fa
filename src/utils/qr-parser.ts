@@ -67,26 +67,39 @@ export function parseOTPAuthURL(url: string): ParsedOTPAuth | null {
   // Never log the URL itself — it carries ?secret=.
   const trimmedUrl = url.trim();
 
-  if (!trimmedUrl.startsWith('otpauth://')) {
+  // Matched through URL rather than by string prefix. RFC 3986 makes the scheme
+  // and authority case-insensitive, and exporters do write `OTPAUTH://TOTP/…`;
+  // prefix matching rejected those as "invalid QR code", and rejected
+  // `otpauth://totp?secret=…` — no slash before the query — along with them.
+  let urlObj: URL;
+  try {
+    urlObj = new URL(trimmedUrl);
+  } catch {
+    console.error('Not a URL');
+    return null;
+  }
+
+  if (urlObj.protocol !== 'otpauth:') {
     console.error('URL does not start with otpauth://');
     return null;
   }
+
+  const kind = urlObj.hostname.toLowerCase();
 
   // HOTP is parsed far enough to recognise it, then refused. Storing it as TOTP
   // — which is what "treat hotp as totp" did here — produced an account that
   // looked healthy, ticked over every 30 seconds, and was never once valid,
   // because the counter it actually depends on has nowhere to live.
-  if (trimmedUrl.startsWith('otpauth://hotp/')) {
+  if (kind === 'hotp') {
     throw new UnsupportedOTPTypeError();
   }
 
-  if (!trimmedUrl.startsWith('otpauth://totp/')) {
+  if (kind !== 'totp') {
     console.error('URL is not a totp URL');
     return null;
   }
 
   try {
-    const urlObj = new URL(trimmedUrl);
     const params = urlObj.searchParams;
 
     const secret = params.get('secret');
@@ -102,11 +115,14 @@ export function parseOTPAuthURL(url: string): ParsedOTPAuth | null {
       return null;
     }
 
-    // Parse the path: can be "Issuer:Account" or just "Account"
-    const pathParts = decodeURIComponent(urlObj.pathname.substring(1)).split(':');
-    const issuer = params.get('issuer') || (pathParts.length > 1 ? pathParts[0] : 'Unknown');
+    // Parse the path: can be "Issuer:Account" or just "Account". Everything
+    // after the FIRST colon is the account — splitting on every colon dropped
+    // the tail of labels like "Acme:a:b@example.com", silently storing "a".
+    const path = decodeURIComponent(urlObj.pathname.replace(/^\//, ''));
+    const separator = path.indexOf(':');
+    const issuer = params.get('issuer') || (separator >= 0 ? path.slice(0, separator) : 'Unknown');
     // Google writes "Issuer: Account" with a space after the colon.
-    const name = (pathParts.length > 1 ? pathParts[1] : pathParts[0] || 'Account').trim();
+    const name = (separator >= 0 ? path.slice(separator + 1) : path || 'Account').trim();
 
     const algorithm = parseAlgorithm(params.get('algorithm'));
     const digits = parseDigits(params.get('digits'));
@@ -134,9 +150,15 @@ export function parseOTPAuthURL(url: string): ParsedOTPAuth | null {
  */
 export function parseQRCode(url: string): ParsedQRResult | null {
   const trimmedUrl = url.trim();
+  // The scheme is case-insensitive per RFC 3986 and exporters do write it in
+  // capitals. This is the function every caller actually uses — scanning,
+  // uploading, pasting and importing all arrive here — so a case-sensitive
+  // prefix test refused those QR codes as invalid no matter how tolerant
+  // parseOTPAuthURL below became.
+  const scheme = trimmedUrl.toLowerCase();
 
   // Check if it's a migration URL
-  if (trimmedUrl.startsWith('otpauth-migration://')) {
+  if (scheme.startsWith('otpauth-migration://')) {
     console.log('Detected migration URL');
     const payload = parseMigrationURL(trimmedUrl);
 
@@ -186,7 +208,7 @@ export function parseQRCode(url: string): ParsedQRResult | null {
   }
 
   // Try parsing as standard otpauth:// URL
-  if (trimmedUrl.startsWith('otpauth://')) {
+  if (scheme.startsWith('otpauth://')) {
     console.log('Detected standard otpauth URL');
     const parsed = parseOTPAuthURL(trimmedUrl);
 

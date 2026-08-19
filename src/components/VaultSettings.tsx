@@ -1,8 +1,17 @@
-import { useState } from 'react';
-import { Lock, ShieldCheck, ShieldOff } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Fingerprint, Lock, ShieldCheck, ShieldOff } from 'lucide-react';
 import { createT, type Language } from '@/utils/i18n';
 import { MIN_PASSWORD_LENGTH } from '@/utils/crypto';
-import { AUTO_LOCK_OPTIONS, changePassword } from '@/utils/vault';
+import {
+  AUTO_LOCK_OPTIONS,
+  changePassword,
+  detachPasskey,
+  getMasterKeyBytes,
+  getVaultPasskey,
+  stageKeyHandoff,
+  type VaultPasskey,
+} from '@/utils/vault';
+import { isPasskeyApiAvailable, openPasskeyCeremony } from '@/utils/passkey';
 import { disableVault } from '@/utils/storage';
 import { confirmDialog, promptDialog, toast } from '@/utils/ui-feedback';
 
@@ -32,6 +41,73 @@ export function VaultSettings({
   const [newPassword, setNewPassword] = useState('');
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [passkey, setPasskey] = useState<VaultPasskey | null>(null);
+
+  // Read on every mount rather than held in the parent: the registration
+  // ceremony happens in a separate tab, so the popup that opened it is long
+  // gone by the time a passkey exists.
+  useEffect(() => {
+    let cancelled = false;
+
+    const read = async () => {
+      const registered = enabled ? await getVaultPasskey() : null;
+      if (!cancelled) setPasskey(registered);
+    };
+    read();
+
+    // The wrapper is written to vault_meta by a ceremony in another window, so
+    // without this the panel kept saying "add a passkey" after one was added,
+    // until the popup was closed and reopened.
+    if (!chrome.storage?.onChanged?.addListener) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const onChanged = (changes: Record<string, unknown>, areaName: string) => {
+      if (areaName === 'local' && 'vault_meta' in changes) read();
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+
+    return () => {
+      cancelled = true;
+      chrome.storage.onChanged.removeListener(onChanged);
+    };
+  }, [enabled]);
+
+  const handleAddPasskey = async () => {
+    // The ceremony page needs the master key to wrap it, and it is a separate
+    // context. With auto-lock on "every open" the key is never in session
+    // storage, so hand it over explicitly — otherwise registration is
+    // impossible on exactly that setting.
+    const masterKey = await getMasterKeyBytes();
+    if (!masterKey) {
+      toast('error', t('vault.passkey.needsUnlock'));
+      return;
+    }
+    await stageKeyHandoff(masterKey);
+
+    // Its own window, not this popup: the authenticator prompt takes focus and
+    // Chrome destroys the popup the moment that happens.
+    openPasskeyCeremony('register');
+  };
+
+  const handleRemovePasskey = async () => {
+    const confirmed = await confirmDialog({
+      title: t('vault.passkey.remove'),
+      body: t('vault.passkey.hint'),
+      confirmLabel: t('vault.passkey.remove'),
+      cancelLabel: t('common.cancel'),
+      danger: true,
+    });
+    if (!confirmed) return;
+
+    // No password needed, and deliberately so: this removes a convenience, not
+    // a way in. The password and recovery wrappers are untouched.
+    await detachPasskey();
+    setPasskey(null);
+    toast('success', t('vault.settings.saved'));
+    onChanged();
+  };
 
   const autoLockLabel = (minutes: number) => {
     if (minutes === 0) return t('vault.settings.autoLockEveryOpen');
@@ -134,6 +210,26 @@ export function VaultSettings({
               ))}
             </select>
           </div>
+
+          {isPasskeyApiAvailable() && (
+            <div className="bg-gray-100 dark:bg-dark-900 rounded-lg p-2.5 mb-2">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Fingerprint className="text-[#4285F4]" size={14} />
+                <span className="text-xs font-medium text-gray-900 dark:text-gray-100">
+                  {t('vault.passkey.title')}
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-2">
+                {passkey ? t('vault.passkey.on', passkey.label) : t('vault.passkey.hint')}
+              </p>
+              <button
+                onClick={passkey ? handleRemovePasskey : handleAddPasskey}
+                className="w-full text-xs font-medium py-1.5 rounded-md border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors"
+              >
+                {passkey ? t('vault.passkey.remove') : t('vault.passkey.add')}
+              </button>
+            </div>
+          )}
 
           <div className="flex gap-2 mb-2">
             <button

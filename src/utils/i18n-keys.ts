@@ -67,8 +67,17 @@ type TranslationKeys = {
   'settings.sync': string;
   'settings.syncHint': string;
   'settings.syncOverflow': string;
+  'settings.clock': string;
+  'settings.clockOk': string;
+  'settings.clockOff': string;
+  'settings.clockOffUncorrected': string;
+  'settings.clockUnknown': string;
+  'settings.clockRecheck': string;
+  'settings.clockChecking': string;
   'settings.suggested': string;
   'settings.suggestedHint': string;
+  'settings.quickFill': string;
+  'settings.quickFillHint': string;
   'settings.viewMode': string;
   'settings.viewNormal': string;
   'settings.viewCompact': string;
@@ -130,6 +139,7 @@ type TranslationKeys = {
   'warning.timeSync': string;
   'warning.howToFix': string;
   'warning.clockOff': string;
+  'warning.clockOffUncorrected': string;
   'warning.dismiss': string;
 
   // Delete confirmation
@@ -139,7 +149,7 @@ type TranslationKeys = {
 
   // Review prompt
   'review.pitch': string;
-  'review.cta': string;
+  'review.rateStars': string;
   'review.later': string;
 
   // Theme
@@ -152,10 +162,23 @@ type TranslationKeys = {
   'update.feature.suggestedAccount': string;
   'update.feature.qrScanning': string;
   'update.feature.timeSync': string;
+  'update.feature.autoLanguage': string;
+  'update.feature.clockSources': string;
   'update.feature.groups': string;
   'update.feature.appearance': string;
+  'update.feature.quickFill': string;
+  'update.feature.passkeyUnlock': string;
+  'update.feature.cxfExport': string;
+  'update.learnMore': string;
+
   'promo.text': string;
   'promo.cta': string;
+
+  // Right-click fill
+  'quickFill.menu': string;
+  'quickFill.copied': string;
+  'quickFill.manual': string;
+  'quickFill.openApp': string;
 
   // Edit account
   'edit.title': string;
@@ -214,6 +237,20 @@ type VaultTranslationKeys = {
   'vault.lock.unlock': string;
   'vault.lock.wrong': string;
   'vault.lock.forgot': string;
+  'vault.passkey.title': string;
+  'vault.passkey.hint': string;
+  'vault.passkey.add': string;
+  'vault.passkey.remove': string;
+  'vault.passkey.on': string;
+  'vault.passkey.unlockButton': string;
+  'vault.passkey.unsupported': string;
+  'vault.passkey.failed': string;
+  'vault.passkey.cancelled': string;
+  'vault.passkey.confirmRegister': string;
+  'vault.passkey.confirmUnlock': string;
+  'vault.passkey.done': string;
+  'vault.passkey.labelDefault': string;
+  'vault.passkey.needsUnlock': string;
 
   'vault.recover.title': string;
   'vault.recover.text': string;
@@ -245,6 +282,8 @@ type VaultTranslationKeys = {
   'export.encryptedHint': string;
   'export.plain': string;
   'export.plainHint': string;
+  'export.cxf': string;
+  'export.cxfHint': string;
   'export.password': string;
   'export.encryptedDone': string;
 

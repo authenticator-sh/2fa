@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Download, Lock, Unlock, Upload } from 'lucide-react';
+import { Download, Lock, Share2, Unlock, Upload } from 'lucide-react';
 import {
   exportAccounts,
   importAccounts,
@@ -24,6 +24,7 @@ import {
   isEncryptedBackupFile,
   readEncryptedBackupFile,
 } from '@/utils/backup-file';
+import { buildCxfFile, cxfFileName, isCxfFile, readCxfFile } from '@/utils/cxf';
 import type { Account } from '@/types';
 
 interface ExportImportProps {
@@ -44,6 +45,14 @@ export async function importBackupText(
   text: string,
   promptForPassword: () => Promise<string | null> | string | null
 ): Promise<ImportResult | null> {
+  // Checked before our own plain format because a CXF document is also just
+  // JSON: importAccounts would find no `accounts` array, throw "invalid
+  // format", and tell someone migrating from another vendor that their file is
+  // broken when it is the one file we most want to accept.
+  if (isCxfFile(text)) {
+    return await importAccountList(readCxfFile(text));
+  }
+
   if (!isEncryptedBackupFile(text)) {
     return await importAccounts(text);
   }
@@ -70,7 +79,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
   const [exportError, setExportError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const runExport = async (encrypted: boolean) => {
+  const runExport = async (format: 'encrypted' | 'plain' | 'cxf') => {
     setBusy(true);
     setExportError(null);
     try {
@@ -89,17 +98,28 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
         if (!proceed) return;
       }
 
-      const contents = encrypted
-        ? await buildEncryptedBackupFile(accounts, exportPassword)
-        : buildPlainBackupFile(accounts);
+      const contents =
+        format === 'encrypted'
+          ? await buildEncryptedBackupFile(accounts, exportPassword)
+          : format === 'cxf'
+            ? buildCxfFile(accounts)
+            : buildPlainBackupFile(accounts);
 
-      downloadBackupFile(contents, backupFileName(encrypted));
+      downloadBackupFile(
+        contents,
+        format === 'cxf' ? cxfFileName() : backupFileName(format === 'encrypted')
+      );
 
       await markBackupDone(accounts.length);
       onExportComplete?.();
       setShowExportChoice(false);
       setExportPassword('');
-      toast('success', encrypted ? t('export.encryptedDone', accounts.length) : t('export.success', accounts.length));
+      toast(
+        'success',
+        format === 'encrypted'
+          ? t('export.encryptedDone', accounts.length)
+          : t('export.success', accounts.length)
+      );
     } catch (error) {
       console.error('Export failed:', error);
       setExportError(t('export.failed'));
@@ -113,7 +133,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
       setExportError(t('vault.setup.tooShort'));
       return;
     }
-    runExport(true);
+    runExport('encrypted');
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -264,7 +284,24 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
               </div>
               <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-2">{t('export.plainHint')}</p>
               <button
-                onClick={() => runExport(false)}
+                onClick={() => runExport('plain')}
+                disabled={busy}
+                className="w-full text-xs font-medium py-1.5 rounded-md border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors disabled:opacity-50"
+              >
+                {t('settings.export')}
+              </button>
+            </div>
+
+            <div className="border border-gray-200 dark:border-dark-600 rounded-lg p-3 mb-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Share2 className="text-gray-400" size={14} />
+                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {t('export.cxf')}
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-2">{t('export.cxfHint')}</p>
+              <button
+                onClick={() => runExport('cxf')}
                 disabled={busy}
                 className="w-full text-xs font-medium py-1.5 rounded-md border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors disabled:opacity-50"
               >

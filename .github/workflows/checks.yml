@@ -1,0 +1,50 @@
+# The checks that reading code cannot do.
+#
+# `check:deps` exists because a time source this extension depends on went dead
+# and nothing noticed for months: the code was correct, the world had changed.
+# It talks to the real hosts with the extension's own parsers, so it fails both
+# when one dies and when one quietly changes its response shape.
+#
+# The schedule is the point. A dependency does not break when you happen to be
+# editing it, and a release cadence measured in weeks is far too slow to be the
+# thing that catches this.
+
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Mondays, 07:00 UTC.
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      # tsconfig.test.json covers test/ and scripts/ as well as src/ — the build's
+      # own tsconfig deliberately stops at src/, which left the test suite and the
+      # release scripts unchecked.
+      - run: npm run typecheck
+      - run: npm test
+
+  deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      # Network-dependent by design: a red run here means users are affected
+      # right now, not that someone wrote bad code.
+      - run: npm run check:deps

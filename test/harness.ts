@@ -39,6 +39,27 @@ export function resetFaults(): void {
 // chrome.storage accepts either a callback or returns a promise, and the source
 // uses both styles depending on the module. A mock that only honours one of
 // them leaves the other caller awaiting forever.
+/**
+ * Listeners registered through chrome.storage.onChanged.
+ *
+ * Real Chrome fires these on every write, and the popup now depends on them: a
+ * passkey ceremony runs in another context, so the only way a live popup learns
+ * it was unlocked is a change event. Without emission here that wiring would be
+ * untestable, which is how it shipped broken the first time.
+ */
+type ChangeListener = (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, areaName: string) => void;
+const changeListeners: ChangeListener[] = [];
+
+function emitChanges(
+  name: 'local' | 'sync' | 'session',
+  changes: Record<string, { oldValue?: unknown; newValue?: unknown }>
+): void {
+  if (Object.keys(changes).length === 0) return;
+  for (const listener of [...changeListeners]) {
+    setTimeout(() => listener(changes, name), 0);
+  }
+}
+
 function makeArea(store: Store, name: 'local' | 'sync' | 'session') {
   const settle = <T>(value: T, callback?: (value: T) => void): Promise<T> => {
     if (callback) {
@@ -82,11 +103,21 @@ function makeArea(store: Store, name: 'local' | 'sync' | 'session') {
     set(obj: Store, callback?: () => void) {
       const rejection = rejectionFor(obj);
       if (rejection) return Promise.reject(rejection);
+      const changes: Record<string, { oldValue?: unknown; newValue?: unknown }> = {};
+      for (const key of Object.keys(obj)) {
+        changes[key] = { oldValue: store[key], newValue: obj[key] };
+      }
       Object.assign(store, obj);
+      emitChanges(name, changes);
       return settle(undefined as void, callback);
     },
     remove(keys: string | string[], callback?: () => void) {
-      for (const key of Array.isArray(keys) ? keys : [keys]) delete store[key];
+      const changes: Record<string, { oldValue?: unknown; newValue?: unknown }> = {};
+      for (const key of Array.isArray(keys) ? keys : [keys]) {
+        if (key in store) changes[key] = { oldValue: store[key], newValue: undefined };
+        delete store[key];
+      }
+      emitChanges(name, changes);
       return settle(undefined as void, callback);
     },
   };
@@ -100,6 +131,15 @@ export function installMocks(): void {
       local: makeArea(areas.local, 'local'),
       sync: makeArea(areas.sync, 'sync'),
       session: makeArea(areas.session, 'session'),
+      onChanged: {
+        addListener(listener: ChangeListener) {
+          changeListeners.push(listener);
+        },
+        removeListener(listener: ChangeListener) {
+          const at = changeListeners.indexOf(listener);
+          if (at >= 0) changeListeners.splice(at, 1);
+        },
+      },
     },
     runtime: { getManifest: () => ({ version: 'test' }) },
   };

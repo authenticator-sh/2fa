@@ -122,6 +122,38 @@ export async function fingerprintSecret(fingerprintKey: CryptoKey, secret: strin
   return toBase64(mac);
 }
 
+/**
+ * Turn a WebAuthn PRF output into a key-encryption key.
+ *
+ * PRF hands back 32 bytes that are deterministic for one passkey and one salt.
+ * Those bytes are not used directly: they go through HKDF with an info string,
+ * exactly like the fingerprint subkey above, so the value that wraps the master
+ * key is domain-separated from the raw authenticator output and from any other
+ * use of the same passkey.
+ *
+ * There is no iteration count here and none is needed — the input is 32 bytes of
+ * authenticator-held entropy, not a human-chosen password, so stretching it
+ * would only cost time.
+ */
+export async function deriveKeyFromPrf(prfOutput: Uint8Array): Promise<CryptoKey> {
+  const hkdfKey = await crypto.subtle.importKey('raw', prfOutput as BufferSource, 'HKDF', false, [
+    'deriveKey',
+  ]);
+
+  return crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: new Uint8Array(0),
+      info: new TextEncoder().encode('authenticator-vault-passkey-v1'),
+    },
+    hkdfKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
 export async function encryptJson(value: unknown, key: CryptoKey): Promise<EncryptedPayload> {
   const iv = randomBytes(IV_BYTES);
   const plaintext = new TextEncoder().encode(JSON.stringify(value));

@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { AlertTriangle, Download, Eye, EyeOff, Lock } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AlertTriangle, Download, Eye, EyeOff, Fingerprint, Lock } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { createT, type Language } from '@/utils/i18n';
 import { MIN_PASSWORD_LENGTH } from '@/utils/crypto';
-import { resetPasswordWithRecoveryCode } from '@/utils/vault';
+import { getVaultPasskey, resetPasswordWithRecoveryCode } from '@/utils/vault';
+import { isPasskeyApiAvailable, openPasskeyCeremony } from '@/utils/passkey';
 import { downloadBackupFile } from '@/utils/backup-file';
 import { normalizeRecoveryCode } from '@/utils/crypto';
 
@@ -25,6 +26,22 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
   const [typedRecovery, setTypedRecovery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [hasPasskey, setHasPasskey] = useState(false);
+
+  // Only offered when a passkey was actually linked to this vault. Showing the
+  // button unconditionally would send someone off to a tab that can only tell
+  // them there is nothing to unlock with — from a locked screen, that reads as
+  // the extension having lost their codes.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const registered = isPasskeyApiAvailable() ? await getVaultPasskey() : null;
+      if (!cancelled) setHasPasskey(registered !== null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleUnlock = async () => {
     if (!password) return;
@@ -169,6 +186,16 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
             >
               {t('vault.lock.unlock')}
             </button>
+
+            {hasPasskey && (
+              <button
+                onClick={() => openPasskeyCeremony('unlock')}
+                className="w-full flex items-center justify-center gap-1.5 text-xs font-medium py-2 rounded-lg border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors mb-3"
+              >
+                <Fingerprint size={14} />
+                {t('vault.passkey.unlockButton')}
+              </button>
+            )}
 
             <button
               onClick={() => {

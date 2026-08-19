@@ -1,7 +1,26 @@
 import * as OTPAuth from 'otpauth';
 import type { Account, TOTPCode } from '@/types';
+import { ageOf } from './clock';
 
 const OFFSET_STORAGE_KEY = 'timeOffsetMs';
+
+/**
+ * A correction is a patch over a clock we measured once. It is stored WITH the
+ * moment we measured it, because a stale patch is worse than none: a user who
+ * sees our warning and fixes their clock would otherwise keep generating codes
+ * shifted by the old drift, forever, with nothing able to notice or clear it.
+ *
+ * Older versions stored a bare number with no timestamp. Those are of unknown
+ * age by construction, so they are discarded rather than trusted.
+ */
+interface StoredOffset {
+  ms: number;
+  at: number; // Date.now() at the moment of the measurement
+}
+
+// Beyond this, a correction has to be re-earned by a fresh measurement. Long
+// enough to survive a weekend offline, short enough that a fixed clock heals.
+const OFFSET_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 
 const DEFAULT_PERIOD = 30;
 const DEFAULT_DIGITS = 6;
@@ -29,12 +48,50 @@ export function getTimeOffsetMs(): number {
 export async function loadTimeOffset(): Promise<void> {
   try {
     const stored = await chrome.storage.local.get(OFFSET_STORAGE_KEY);
-    const ms = stored[OFFSET_STORAGE_KEY];
-    if (typeof ms === 'number' && Number.isFinite(ms)) {
-      timeOffsetMs = ms;
+    const record: unknown = stored[OFFSET_STORAGE_KEY];
+
+    if (
+      typeof record === 'object' &&
+      record !== null &&
+      Number.isFinite((record as StoredOffset).ms) &&
+      Number.isFinite((record as StoredOffset).at)
+    ) {
+      const { ms, at } = record as StoredOffset;
+      // A stamp from the future means the clock moved since we measured, which
+      // invalidates the measurement as surely as an expired one does.
+      const age = ageOf(at) ?? Infinity;
+      if (age <= OFFSET_MAX_AGE_MS) {
+        timeOffsetMs = ms;
+        return;
+      }
+    }
+
+    // Stale, malformed, or a bare number from an older version: trust the local
+    // clock again and drop the record so it cannot be resurrected.
+    timeOffsetMs = 0;
+    if (record !== undefined) {
+      await chrome.storage.local.remove(OFFSET_STORAGE_KEY).catch(() => {});
     }
   } catch {
     // best-effort — fall back to the local clock
+  }
+}
+
+/**
+ * Persist a correction (or 0 to clear one). Owned here rather than by the
+ * caller so the record shape and the storage key live in exactly one place.
+ */
+export async function persistTimeOffset(ms: number): Promise<void> {
+  try {
+    if (ms === 0) {
+      await chrome.storage.local.remove(OFFSET_STORAGE_KEY);
+      return;
+    }
+    await chrome.storage.local.set({
+      [OFFSET_STORAGE_KEY]: { ms, at: Date.now() } satisfies StoredOffset,
+    });
+  } catch {
+    // best-effort — the in-memory correction still applies for this session
   }
 }
 
@@ -95,7 +152,15 @@ export function cleanSecret(secret: string): string {
 export function isUsableSecret(secret: unknown): boolean {
   if (typeof secret !== 'string') return false;
   const cleaned = cleanSecret(secret);
-  return cleaned.length > 0 && BASE32.test(cleaned);
+  // Two characters is the shortest base32 that carries a whole byte. One
+  // character decodes to NOTHING, and otpauth will happily HMAC that empty key
+  // and hand back a confident six-digit code no service will ever accept.
+  //
+  // It is a floor, not a validity check: HMAC zero-pads, so a two-character
+  // secret still produces a plausible code from one byte of key. Anything that
+  // short is already broken — the point here is only that a record which cannot
+  // carry a key at all fails visibly instead of generating digits.
+  return cleaned.length >= 2 && BASE32.test(cleaned);
 }
 
 export function validateSecret(secret: string): boolean {
