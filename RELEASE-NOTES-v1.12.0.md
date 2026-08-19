@@ -1,3 +1,48 @@
+## Your code, without opening anything
+
+Right-click the field asking for your 2FA code and choose **Insert 2FA code**,
+or press ⌘⇧Y / Ctrl+Shift+Y. The code goes into the field. No popup, no
+copy-paste, nothing typed by hand.
+
+Which account it uses is decided from what the site has already taught it: the
+account you have used on that domain before, or — the first time — the one whose
+name matches the domain, and only when exactly one does. When neither holds it
+does not guess. The popup opens with the question still attached, so the account
+you pick there is recorded as an answer about this site rather than as the
+incidental copy an ordinary popup visit produces, and the next right-click on
+that domain fills it directly.
+
+**Nothing of ours runs in a page until you ask it to.** There is no content
+script and no host permission in the manifest. What fills the field is injected
+for that one invocation, under the `activeTab` grant your own click provides,
+and it leaves nothing behind when it returns: no listener, no global, nothing
+that survives the navigation. Between two uses this extension has no presence in
+any page at all. The menu item shows up only on editable fields on http(s)
+pages, and turning the feature off in Settings removes the item entirely.
+
+**It fills the box you were looking at.** Right-clicking a field focuses it, so
+the caret is usually the whole answer. The keyboard shortcut can be pressed with
+focus anywhere, so it falls back to scoring the fields that are actually there —
+`autocomplete="one-time-code"` first, then the names, ids and placeholders that
+mean "code" — and it treats the row of six single-digit boxes some sites use as
+the one field it is. If nothing plausible is on the page, the code goes to the
+clipboard and says so. If even the clipboard is refused, the code is shown for
+you to type. Three outcomes, each of them visible; what it will not do is put a
+code somewhere you did not see it go.
+
+**A code with less than two seconds left is not the one you want.** It waits for
+the next one instead. Most servers accept the previous window, but not all do,
+and a form that submits itself on the last digit gives you no chance to notice.
+A sign-in rejected that way looks exactly like an authenticator generating wrong
+codes, which is the most common complaint made about every one of them.
+
+A locked vault sends you to the popup to type your password. An extension asking
+for that password inside a web page is precisely the shape of the attack
+password protection exists to defend against, and it is not a habit worth
+teaching anyone. A record whose secret cannot generate a code goes the same way,
+because the popup names that account and offers the fix, and a notice in the
+page could only repeat it with less to go on.
+
 ## Your codes, when the clock is wrong
 
 The extension has checked your device clock since 1.9.0 and quietly adjusted
