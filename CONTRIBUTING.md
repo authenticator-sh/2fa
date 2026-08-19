@@ -45,6 +45,10 @@ Then load `dist/` as an unpacked extension in `chrome://extensions` with Develop
 
 ## Releasing
 
+[`docs/releasing.md`](docs/releasing.md) carries the whole order — build,
+package, tag, site, store, release — and why each step sits where it does. The
+short version:
+
 ```bash
 npm run verify               # must pass, including the live dependency probe
 npm run build
@@ -54,7 +58,9 @@ npm run checksums -- --check # re-verify dist/ against that file
 
 The sums file ships with the GitHub release. The README and the website both
 promise it for *every* release, so a release without one makes a published
-claim false — do not skip this step.
+claim false — do not skip this step. And nothing may be rebuilt after those
+commands: the tag, the sums file and the zip uploaded to the Web Store all have
+to describe one build.
 
 ## Translations
 
