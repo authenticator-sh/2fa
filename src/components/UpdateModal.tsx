@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Sparkles, Lightbulb, ArrowRight } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Sparkles, Lightbulb, ArrowRight, X } from 'lucide-react';
 import { createT, type Language } from '@/utils/i18n';
 import { WHATS_NEW } from '@/utils/update-notes';
 import { FEATURE_REQUEST_URL, whatsNewUrl } from '@/utils/links';
@@ -23,16 +23,29 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
   const showRatingPrompt = !reviewDismissed && !laterClicked;
 
   /**
-   * Anything that navigates away closes the popup, and the modal is re-armed
-   * from storage on the next open. Without recording the dismissal first, taking
-   * either of the links below means the changelog is waiting again the next time
-   * the user comes for a code — and again after that, until they happen to press
-   * "Got it".
+   * Opening a tab tears the popup down, and the modal is re-armed from storage
+   * on the next open — deliberately, without recording a dismissal here.
+   *
+   * It used to record one, so that following a link did not leave the changelog
+   * waiting on the next visit. That had the trade backwards: the rating block
+   * lives inside this modal, so the reader who cared enough to click through
+   * and read the release page was the one person guaranteed never to be asked.
+   * Nothing but "Got it" or an actual rating counts as an answer now.
    */
-  const openAndClose = (url: string) => {
-    onClose();
+  const openInTab = (url: string) => {
     chrome.tabs.create({ url });
   };
+
+  // Escape closes it, as it does every other dialog here. It counts as an
+  // explicit dismissal for the same reason the corner button does: nothing
+  // reaches this handler without the user asking for it.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const handleLater = () => {
     setLaterClicked(true);
@@ -50,6 +63,13 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
             <Sparkles className="text-[#4285F4]" size={20} />
             <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{t('update.title')}</h2>
             <span className="ms-auto text-xs font-medium text-gray-400 dark:text-gray-500">v{version}</span>
+            <button
+              onClick={onClose}
+              aria-label={t('update.gotIt')}
+              className="-me-1.5 flex-shrink-0 rounded p-1 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+            >
+              <X size={16} />
+            </button>
           </div>
         </div>
 
@@ -69,7 +89,7 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
               with the safety model spelled out, is on the site. */}
           <button
             type="button"
-            onClick={() => openAndClose(whatsNewUrl(language, version))}
+            onClick={() => openInTab(whatsNewUrl(language, version))}
             className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[#4285F4] hover:underline"
           >
             <ArrowRight size={13} className="rtl:rotate-180" />
@@ -81,7 +101,7 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
               push the rating block out of view. */}
           <button
             type="button"
-            onClick={() => openAndClose(FEATURE_REQUEST_URL)}
+            onClick={() => openInTab(FEATURE_REQUEST_URL)}
             className="mb-3 flex items-center gap-1.5 text-xs font-medium text-[#4285F4] hover:underline"
           >
             <Lightbulb size={13} />

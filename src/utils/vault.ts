@@ -161,24 +161,34 @@ export class WrongPasswordError extends Error {
 // a module-scoped variable: the vault still works, it just re-prompts on every
 // popup open rather than breaking outright.
 let memoryFallback: SessionState | null = null;
+/**
+ * Whether the module-scoped copy is the only copy there is — auto-lock 0 never
+ * persists the key, and a refused session write leaves nothing else to read.
+ *
+ * Otherwise session storage is the source of truth, and deliberately so: the
+ * app now runs in windows that live for hours, side by side. Reading the local
+ * copy first meant "Lock now" in one of them, or the idle deadline expiring
+ * there, left every other one open until it was closed and reopened.
+ */
+let memoryIsAuthoritative = false;
 
 function hasSessionStorage(): boolean {
   return typeof chrome !== 'undefined' && !!chrome.storage && !!chrome.storage.session;
 }
 
 async function readSession(): Promise<SessionState | null> {
-  if (memoryFallback) return memoryFallback;
-  if (!hasSessionStorage()) return null;
+  if (memoryIsAuthoritative || !hasSessionStorage()) return memoryFallback;
   try {
     const result = await chrome.storage.session.get(SESSION_KEY);
     return (result[SESSION_KEY] as SessionState) || null;
   } catch {
-    return null;
+    return memoryFallback;
   }
 }
 
 async function writeSession(state: SessionState | null): Promise<void> {
   memoryFallback = state;
+  memoryIsAuthoritative = false;
   if (!hasSessionStorage()) return;
 
   // With auto-lock set to 0 the key must not outlive the current popup, so it
@@ -191,9 +201,11 @@ async function writeSession(state: SessionState | null): Promise<void> {
       await chrome.storage.session.set({ [SESSION_KEY]: state });
     } else {
       await chrome.storage.session.remove(SESSION_KEY);
+      memoryIsAuthoritative = state !== null;
     }
   } catch {
     // Memory fallback already holds the value.
+    memoryIsAuthoritative = state !== null;
   }
 }
 
@@ -273,7 +285,18 @@ export function affectsVaultSession(
   areaName: string,
   changes: Record<string, unknown>
 ): boolean {
-  return areaName === 'session' && (HANDOFF_KEY in changes || SESSION_KEY in changes);
+  if (areaName !== 'session') return false;
+  if (HANDOFF_KEY in changes) return true;
+
+  const session = changes[SESSION_KEY] as { oldValue?: SessionState; newValue?: SessionState } | undefined;
+  if (!session) return false;
+
+  // Every key read refreshes the activity stamp, so the entry is rewritten by
+  // the very re-read this event triggers. Reacting to that too made the popup
+  // spin — refresh, stamp, event, refresh — hundreds of times a second for as
+  // long as it was open, and each turn pushed the idle deadline out again.
+  // Only the key appearing, disappearing or changing is a lock or unlock.
+  return session.oldValue?.mk !== session.newValue?.mk;
 }
 
 export async function clearKeyHandoff(): Promise<void> {
@@ -551,25 +574,56 @@ export async function getMasterKeyBytes(): Promise<Uint8Array | null> {
   const session = await readSession();
   if (!session) return null;
 
+  if (await pastIdleDeadline(session)) {
+    await lock();
+    return null;
+  }
+
+  await writeSession({ ...session, lastActivity: Date.now() });
+  return fromBase64(session.mk);
+}
+
+async function pastIdleDeadline(session: SessionState): Promise<boolean> {
   const autoLockMinutes = await getAutoLockMinutes();
 
   // -1 keeps the key until the browser closes (session storage does that for
   // us); 0 never persisted it in the first place. Only positive values need an
   // idle deadline checked here.
-  if (autoLockMinutes > 0) {
-    // A stamp we cannot trust — clock wound back, or a malformed session — is
-    // treated as infinitely idle. This check is the only thing enforcing the
-    // deadline the user chose, so its failure direction has to be "lock", not
-    // "keep handing out the master key".
-    const idleMs = ageOf(session.lastActivity) ?? Infinity;
-    if (idleMs > autoLockMinutes * 60_000) {
-      await lock();
-      return null;
-    }
-  }
+  if (autoLockMinutes <= 0) return false;
 
-  await writeSession({ ...session, lastActivity: Date.now() });
-  return fromBase64(session.mk);
+  // A stamp we cannot trust — clock wound back, or a malformed session — is
+  // treated as infinitely idle. This check is the only thing enforcing the
+  // deadline the user chose, so its failure direction has to be "lock", not
+  // "keep handing out the master key".
+  const idleMs = ageOf(session.lastActivity) ?? Infinity;
+  return idleMs > autoLockMinutes * 60_000;
+}
+
+/**
+ * Lock if the idle deadline has passed. True when the vault is locked afterwards.
+ *
+ * The deadline is otherwise only checked when the key is read, which happens
+ * when the accounts load — once per popup open, and never again in a window
+ * that stays open all day. A page that outlives the deadline polls this; unlike
+ * getMasterKeyBytes it does not count as activity, so polling cannot keep the
+ * vault open by itself.
+ */
+export async function enforceAutoLock(): Promise<boolean> {
+  const session = await readSession();
+  if (!session) return true;
+  if (!(await pastIdleDeadline(session))) return false;
+  await lock();
+  return true;
+}
+
+/**
+ * Push the idle deadline out: the user did something.
+ *
+ * Goes through the key read on purpose, so activity that arrives after the
+ * deadline locks the vault rather than extending it.
+ */
+export async function noteVaultActivity(): Promise<void> {
+  await getMasterKeyBytes();
 }
 
 export async function isUnlocked(): Promise<boolean> {
@@ -618,6 +672,15 @@ export async function changePassword(currentPassword: string, newPassword: strin
   await saveVaultMeta({
     ...meta,
     salt: toBase64(salt),
+    // The wrapper was just built at PBKDF2_ITERATIONS, and unwrapWith derives
+    // at whatever meta.iterations says. Spreading the old count forward left
+    // the two describing different keys the moment the constant differed from
+    // what this vault was created with — and then neither the new password nor
+    // the old one opens it, on every device, with the user holding a password
+    // they set thirty seconds ago. Nothing has shipped but 600 000, so this has
+    // never fired; a one-line bump of the constant, or metadata arriving by
+    // sync from a build with a different one, is all it would take.
+    iterations: PBKDF2_ITERATIONS,
     wrappedByPassword: await wrapMasterKey(masterKeyBytes, passwordKey),
   });
 
@@ -652,6 +715,9 @@ export async function resetPasswordWithRecoveryCode(
   await saveVaultMeta({
     ...meta,
     salt: toBase64(salt),
+    // Both wrappers are new, so the count that describes them must be too —
+    // see changePassword.
+    iterations: PBKDF2_ITERATIONS,
     wrappedByPassword: await wrapMasterKey(masterKeyBytes, passwordKey),
     recoverySalt: toBase64(recoverySalt),
     wrappedByRecovery: await wrapMasterKey(masterKeyBytes, recoveryKey),

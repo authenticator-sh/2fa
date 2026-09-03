@@ -19,6 +19,12 @@ A privacy-focused TOTP authenticator for Chrome. We operate no servers, collect 
 - **Passkey unlock** — open a password-protected vault with Touch ID, Windows
   Hello or your phone through the WebAuthn PRF extension, with no new permission
   (see [Unlocking with a passkey](#unlocking-with-a-passkey))
+- **Share an account's codes by link**, for five minutes to an hour — the link
+  carries pre-computed codes, never the secret, and there is no server behind
+  it (see [Sharing codes by link](#sharing-codes-by-link))
+- **Open where you need it** — the toolbar icon can open the popup, a floating
+  window, or Chrome's side panel; the last two stay put while you switch tabs,
+  which a popup cannot do because it closes as soon as it loses focus
 - **Password-protected backup files** on export
 - Automatic local backups in IndexedDB with rotation (7 latest)
 - Export and import for cross-device migration, including
@@ -37,6 +43,7 @@ The extension requests the **minimum permissions** required for its functionalit
 | `activeTab`  | Read the current tab's hostname to highlight the matching account, capture the tab for QR scanning, and — only when you pick the right-click item — insert a code into that tab |
 | `contextMenus` | Add the single "Insert 2FA code" item to the right-click menu on text fields |
 | `scripting`  | Run the insert routine in the tab, for that one invocation, under the `activeTab` grant the click provides |
+| `sidePanel`  | Open the app in Chrome's side panel, when you pick that in Settings → Open as. It grants the extension nothing about the browser or its tabs: it is what lets an extension page be docked beside them |
 
 Camera scanning needs no manifest permission: it uses the browser's standard
 camera prompt on an extension page, granted per extension origin and revocable
@@ -211,6 +218,35 @@ CXP, the protocol half of the standard, is deliberately not implemented: it
 negotiates provider-to-provider transfer through the operating system, which an
 extension cannot do. Implementation: [`src/utils/cxf.ts`](src/utils/cxf.ts).
 
+## Sharing codes by link
+
+A link that shows another person a live code for one account, for a limited
+time, in any browser and with nothing to install. Implementation:
+[`src/utils/share.ts`](src/utils/share.ts); the page that opens it lives in the
+site repository at `authenticator.sh/s`.
+
+- **The secret never leaves the device.** TOTP is deterministic, so the codes
+  for the next hour can be computed now and handed over on their own. The link
+  holds that run — one code per period — and nothing that could produce a code
+  after it. The time limit is not a rule the page enforces; it is the absence
+  of any further codes.
+- **An hour is the maximum**, and the page refuses longer runs. An hour of
+  six-digit codes is about 550 characters: readable as a QR code from a screen,
+  which is the one way to pass a link that leaves no copy in a messenger's
+  cloud, and short enough for email clients that wrap at 998 characters.
+- **There is no server.** The whole payload travels in the URL fragment, which
+  browsers never send to a host. Nothing is uploaded when a link is made and
+  nothing is stored when it is opened, so there is no database of shared codes
+  to breach and no revocation that would be theatre.
+- **Optional password.** Without one, the sixteen random bytes in the link are
+  the key (HKDF-SHA256). With one, the key is PBKDF2 of the password salted
+  with those bytes — the same stretching as the vault — so the link alone and
+  the password alone are each useless. The two-byte header that says "ask for a
+  password" is authenticated with the body, so it cannot be flipped in transit.
+- **The two sides share a fixture, not code.** The extension seals links and
+  the site opens them; `test/fixtures/share-vectors.json` pins the exact bytes
+  for six cases and both repositories assert against it.
+
 ## Building from Source
 
 ### Prerequisites
@@ -263,7 +299,7 @@ To verify that the version published on the Chrome Web Store was built from this
 
 1. Download the `.crx` for the published version from the Chrome Web Store
 2. Unzip it to a directory
-3. Check out this repository at the matching git tag (e.g. `v1.11.0`)
+3. Check out this repository at the matching git tag (e.g. `v1.13.0`)
 4. Run `npm ci && npm run build` using **Node 20 LTS**
 5. Compare the `dist/` directory contents with the unzipped `.crx`
 
@@ -274,7 +310,7 @@ Differences should only exist in:
 For each release we publish `SHA256SUMS-v<version>.txt` — a SHA-256 for every file in the produced `dist/` — in [GitHub Releases](https://github.com/authenticator-sh/2fa/releases). It is in `sha256sum` format, so you can check your own build against it directly:
 
 ```bash
-cd dist && sha256sum -c ../SHA256SUMS-v1.12.0.txt   # shasum -a 256 -c on macOS
+cd dist && sha256sum -c ../SHA256SUMS-v1.13.0.txt   # shasum -a 256 -c on macOS
 ```
 
 ## Architecture

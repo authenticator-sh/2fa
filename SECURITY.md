@@ -21,6 +21,7 @@ If you do not receive a response within 72 hours, please follow up — your mess
 
 **In scope:**
 - The browser extension code (manifest, popup, service worker, utilities)
+- The share page at `authenticator.sh/s` and the link format it reads
 - Build and release pipeline of the extension
 - Storage and handling of TOTP secrets, account metadata, and backups
 - Cryptographic implementation choices
@@ -32,6 +33,37 @@ If you do not receive a response within 72 hours, please follow up — your mess
 - Social engineering of extension users
 - Physical access attacks
 - Denial of service
+
+## Share Links
+
+Sharing an account's codes produces a link of the form `authenticator.sh/s#…`.
+Its security rests on properties that are invariants of the design, not
+conveniences — a change that breaks one of them is a vulnerability, and a
+report that one is already broken is exactly the kind of report we want:
+
+- **No secret is transmitted.** A link carries pre-computed TOTP codes for a
+  bounded window (one hour at most), never the account's secret key.
+- **Nothing is uploaded or stored.** The payload lives in the URL fragment,
+  which browsers do not send to a server. There is no database of shares; the
+  page is static and receives nothing.
+- **The page runs no third-party code.** `/s` is hand-written HTML, CSS and
+  JavaScript served from our own origin under
+  `Content-Security-Policy: default-src 'none'` with `script-src 'self'`, and
+  it is deliberately not part of the site's React application. Its only network
+  request is to our own `/api/time`, which sends nothing about the caller. Any
+  script on that page that could read `location.hash` is a vulnerability.
+- **The fragment leaves the address bar immediately.** It is moved into
+  `sessionStorage` (tab-scoped, not synced) before anything else happens, so it
+  is not carried into synced browsing history. One slot per link, named by a
+  random id kept in that history entry's state, so several links opened in one
+  tab do not read each other.
+- **A password is a second factor, not a second lock.** With one, the
+  decryption key is derived from the password together with random bytes
+  carried in the link (PBKDF2-HMAC-SHA256, 600 000 iterations); neither the
+  link alone nor the password alone can open it.
+- **Expiry is not enforced by us.** A link stops working because it contains no
+  further codes. Accordingly there is no revocation, and we make no claim of
+  any.
 
 ## Supported Versions
 

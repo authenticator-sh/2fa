@@ -10,9 +10,11 @@
 import type { Account } from '@/types';
 import { getAccounts } from '@/utils/storage';
 import { VaultLockedError } from '@/utils/vault';
-import { getFillCandidate, recordAccountUsage } from '@/utils/suggestions';
+import { getFillCandidate, hostnameOf, recordAccountUsage } from '@/utils/suggestions';
 import { loadTimeOffset, tryGenerateTOTP } from '@/utils/totp';
 import { isQuickFillEnabled, notePickPrompt } from '@/utils/quick-fill';
+import { getOpenMode } from '@/utils/open-mode';
+import { openAppFor } from './open-mode';
 import {
   createT,
   detectLanguage,
@@ -232,6 +234,13 @@ async function handOver(invocation: Invocation, t: Translate): Promise<void> {
   const hostname = hostnameOf(invocation.pageUrl);
   if (hostname) await notePickPrompt(hostname);
 
+  // Wherever the icon would have opened the app is where the question goes.
+  // With the popup unset, openPopup below has nothing to open.
+  const mode = await getOpenMode();
+  if (mode !== 'popup') {
+    if (await openAppFor(mode, { url: invocation.pageUrl, windowId: invocation.windowId })) return;
+  }
+
   try {
     // Chrome 127 and later. Older versions throw, and so does a window that
     // cannot host the popup.
@@ -255,14 +264,4 @@ async function handOver(invocation: Invocation, t: Translate): Promise<void> {
       noticeText: t('quickFill.openApp'),
     }
   ).catch(() => null);
-}
-
-function hostnameOf(url: string | undefined): string | null {
-  if (!url) return null;
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.hostname : null;
-  } catch {
-    return null;
-  }
 }

@@ -17,6 +17,13 @@ type TranslationKeys = {
   'settings.sizeMedium': string;
   'settings.sizeLarge': string;
 
+  // Where the icon opens the app: popup, floating window or side panel
+  'settings.openIn': string;
+  'settings.openInPopup': string;
+  'settings.openInWindow': string;
+  'settings.openInSidePanel': string;
+  'settings.openInHint': string;
+
   // Groups
   'groups.all': string;
   'groups.ungrouped': string;
@@ -50,15 +57,18 @@ type TranslationKeys = {
   'accounts.suggested': string;
   'onboarding.title': string;
   'onboarding.question': string;
-  'onboarding.back': string;
   'onboarding.ga.label': string;
   'onboarding.ga.steps': string;
+  'onboarding.ga.more': string;
   'onboarding.new.label': string;
   'onboarding.new.steps': string;
+  'onboarding.new.more': string;
   'onboarding.other.label': string;
   'onboarding.other.steps': string;
+  'onboarding.other.more': string;
   'onboarding.key.label': string;
   'onboarding.key.steps': string;
+  'onboarding.key.more': string;
 
   // Settings
   'settings.backupRestore': string;
@@ -88,6 +98,7 @@ type TranslationKeys = {
   'addAccount.errorInvalidSecret': string;
   'addAccount.errorInvalidQR': string;
   'addAccount.errorHotp': string;
+  'addAccount.pastedMigration': string;
   'addAccount.errorScanFailed': string;
   'addAccount.errorNoQr': string;
   'addAccount.errorScreenHint': string;
@@ -98,6 +109,7 @@ type TranslationKeys = {
   'addAccount.tipCantScan': string;
   'addAccount.tipKeyExample': string;
   'addAccount.tipKeyLength': string;
+  'addAccount.tipPasteLink': string;
   'addAccount.chooseImage': string;
   'addAccount.tipLabel': string;
   'addAccount.tipScanInfo': string;
@@ -167,6 +179,9 @@ type TranslationKeys = {
   'update.feature.groups': string;
   'update.feature.appearance': string;
   'update.feature.quickFill': string;
+  'update.feature.pasteLinks': string;
+  'update.feature.uriExport': string;
+  'update.feature.accountInitials': string;
   'update.feature.passkeyUnlock': string;
   'update.feature.cxfExport': string;
   'update.learnMore': string;
@@ -284,6 +299,21 @@ type VaultTranslationKeys = {
   'export.plainHint': string;
   'export.cxf': string;
   'export.cxfHint': string;
+  'settings.avatars': string;
+  'settings.avatarsHint': string;
+  'settings.version': string;
+  'settings.rateUs': string;
+  'export.uri': string;
+  'export.uriHint': string;
+  'export.uriSkipped': string;
+  'import.paste': string;
+  'import.pasteTitle': string;
+  'import.pasteBody': string;
+  'import.uriUnreadable': string;
+  'import.uriHotp': string;
+  'import.uriBatchSkipped': string;
+  'import.uriCapped': string;
+  'import.uriNothing': string;
   'export.password': string;
   'export.encryptedDone': string;
 
@@ -292,6 +322,7 @@ type VaultTranslationKeys = {
   'import.wrongPassword': string;
 
   'common.cancel': string;
+  'common.back': string;
   'common.support': string;
   'common.requestFeature': string;
 
@@ -326,11 +357,40 @@ type VaultTranslationKeys = {
   'scan.lockedTitle': string;
   'scan.lockedBody': string;
   'scan.errorTitle': string;
+  'scan.selectCamera': string;
+  'scan.uploadHint': string;
   'accounts.emptyGroup': string;
   'accounts.clearFilters': string;
   'edit.nameRequired': string;
   'addAccount.errorInvalidPeriod': string;
+  /** A save that failed after the form was filled in — see AddAccountModal. */
+  'addAccount.errorSaveFailed': string;
   'import.successUnreadable': string;
+
+  // Sharing codes by link. `share.title` is also the card button's tooltip.
+  'share.title': string;
+  /** {0} — the chosen duration, from share.minutes or share.hour */
+  'share.intro': string;
+  'share.label': string;
+  'share.duration': string;
+  /** "{0} min" */
+  'share.minutes': string;
+  'share.hour': string;
+  'share.password': string;
+  'share.passwordHint': string;
+  'share.create': string;
+  'share.creating': string;
+  'share.scan': string;
+  'share.copy': string;
+  'share.copied': string;
+  /** "Works until {0}" — a clock time */
+  'share.validUntil': string;
+  'share.passwordReminder': string;
+  'share.caution': string;
+  'share.failed': string;
+  'share.done': string;
+  'update.feature.shareCodes': string;
+  'update.feature.openIn': string;
 };
 
 /** A complete set of strings for one language. */

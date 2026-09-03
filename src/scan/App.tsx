@@ -11,7 +11,7 @@
 // and "activeTab".
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Camera, CameraOff, Check, Loader2, Lock } from 'lucide-react';
+import { AlertTriangle, CameraOff, Check, Loader2, Lock, Upload } from 'lucide-react';
 import type jsQRType from 'jsqr';
 import { Logo } from '@/components/Logo';
 import { FeedbackHost } from '@/components/FeedbackHost';
@@ -21,6 +21,8 @@ import { addMultipleAccounts } from '@/utils/storage';
 import { readActiveGroup } from '@/utils/active-group';
 import { VaultLockedError } from '@/utils/vault';
 import { generateRandomColor, parseQRCode, UnsupportedOTPTypeError } from '@/utils/qr-parser';
+import { decodeQrFromImage } from '@/utils/qr-decode';
+import { toast } from '@/utils/ui-feedback';
 import { cleanSecret } from '@/utils/totp';
 import type { Account } from '@/types';
 import { describeImport, type ImportOutcome } from '@/utils/import-message';
@@ -40,6 +42,11 @@ export default function App() {
   const [language, setLanguage] = useState<Language>('en');
   const [darkMode, setDarkMode] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: 'starting' });
+  /** Every video input, listed once a grant makes the labels readable. */
+  const [cameras, setCameras] = useState<{ id: string; label: string }[]>([]);
+  /** The device the live stream is actually using, so the picker shows it. */
+  const [cameraId, setCameraId] = useState('');
+  const [decodingImage, setDecodingImage] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -52,6 +59,12 @@ export default function App() {
   // this the same account gets submitted a dozen times before the first write
   // lands.
   const handledRef = useRef(false);
+  /** Which `start()` run owns the camera; see the comment in start(). */
+  const startGenerationRef = useRef(0);
+  /** The camera the user explicitly picked; null means the browser's choice. */
+  const chosenCameraRef = useRef<string | null>(null);
+  /** A second image while the first is still decoding would race the add. */
+  const decodingImageRef = useRef(false);
 
   const t = createT(language);
 
@@ -157,6 +170,18 @@ export default function App() {
     setStatus({ kind: 'starting' });
     handledRef.current = false;
 
+    // This run's ticket. Everything below happens after at least one await —
+    // getUserMedia alone spans the whole time the permission prompt is up — and
+    // an image pasted or dropped in that window finishes the scan without ever
+    // touching the camera. The stream then arrived with nothing left to attach
+    // it to: the code returned at `if (!video) return` still holding a live
+    // MediaStream, so the camera light stayed on over the "Account added" card
+    // until the tab was closed. Worse when the video was still mounted — the
+    // success card was replaced by a preview that could decode nothing.
+    const generation = ++startGenerationRef.current;
+    /** True once this run has been overtaken by a decode or a newer start. */
+    const superseded = () => handledRef.current || generation !== startGenerationRef.current;
+
     try {
       let decode: typeof jsQRType;
       try {
@@ -169,8 +194,18 @@ export default function App() {
 
       let stream: MediaStream;
       try {
+        // A laptop has no `environment` camera, so the browser falls back to
+        // its default device — which can be a virtual camera (OBS, phone-link)
+        // showing a black or frozen frame. Once the user picks a real one in
+        // the dropdown, ask for it by id. `ideal`, not `exact`: a remembered
+        // camera that got unplugged should fall back, not dead-end the page.
+        const chosen = chosenCameraRef.current;
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: {
+            ...(chosen ? { deviceId: { ideal: chosen } } : { facingMode: 'environment' }),
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
           audio: false,
         });
       } catch (error) {
@@ -185,7 +220,32 @@ export default function App() {
         return;
       }
 
+      // Nothing has been recorded anywhere until this line, so a run that lost
+      // the race has to close its own stream rather than hand it over.
+      if (superseded()) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+
       streamRef.current = stream;
+
+      // Labels are only readable after a grant, which is also the moment a
+      // wrong default camera becomes visible as a wrong preview — list the
+      // alternatives so there is a way out that is not "buy a better webcam".
+      navigator.mediaDevices
+        .enumerateDevices()
+        .then(devices => {
+          const inputs = devices.filter(device => device.kind === 'videoinput');
+          setCameras(
+            inputs.map((device, index) => ({
+              id: device.deviceId,
+              label: device.label || `Camera ${index + 1}`,
+            }))
+          );
+        })
+        .catch(() => {});
+      const activeId = stream.getVideoTracks()[0]?.getSettings?.().deviceId;
+      if (activeId) setCameraId(activeId);
 
       // Most of the "hold it there, keep holding it" is the webcam hunting for
       // focus on a phone screen 30cm away, not the decoder. Asking for
@@ -203,10 +263,20 @@ export default function App() {
       }
 
       const video = videoRef.current;
-      if (!video) return;
+      // Checked again: applying the focus constraint above is another await.
+      if (!video || superseded()) {
+        stopCamera();
+        return;
+      }
 
       video.srcObject = stream;
       await video.play().catch(() => {});
+      // And once more before the status is written — otherwise a scan that has
+      // already succeeded has its confirmation replaced by a live preview.
+      if (superseded()) {
+        stopCamera();
+        return;
+      }
       setStatus({ kind: 'scanning' });
 
       const canvas = canvasRef.current!;
@@ -230,10 +300,17 @@ export default function App() {
 
         // The viewfinder points people at the middle; the edges are background
         // that costs pixels and never holds the code.
+        const frame = frameCount++;
         const side = Math.min(vw, vh) * CROP;
         const sx = (vw - side) / 2;
         const sy = (vh - side) / 2;
-        const size = Math.min(DECODE_SIZE, Math.round(side));
+        // Downscaling to 480 is right for speed but wrong for dense codes: a
+        // full Google Authenticator export runs ~100 modules across, which at
+        // 480px is ~3px per module — the edge of what jsQR resolves, and any
+        // blur pushes it over. About once a second, one frame is decoded at
+        // the crop's native size instead.
+        const size =
+          frame % 30 === 29 ? Math.round(side) : Math.min(DECODE_SIZE, Math.round(side));
 
         // Assigning width resets the whole canvas, so only do it on a change.
         if (canvas.width !== size || canvas.height !== size) {
@@ -250,7 +327,7 @@ export default function App() {
         // Inverted codes barely exist for otpauth, so they get an occasional
         // frame instead of half the budget.
         const found = decode(data, size, size, {
-          inversionAttempts: frameCount++ % 8 === 7 ? 'attemptBoth' : 'dontInvert',
+          inversionAttempts: frame % 8 === 7 ? 'attemptBoth' : 'dontInvert',
         });
 
         if (found?.data) {
@@ -289,12 +366,80 @@ export default function App() {
     }
   }, [handleDecoded, stopCamera]);
 
+  /** The camera's fallback: a picture of the code — chosen, dropped, or pasted. */
+  const handleImageFile = useCallback(
+    async (file: Blob) => {
+      if (decodingImageRef.current) return;
+      decodingImageRef.current = true;
+      setDecodingImage(true);
+      try {
+        const text = await decodeQrFromImage(file);
+        if (!text) {
+          toast('error', t('addAccount.errorNoQr'));
+          return;
+        }
+        // Freeze the camera loop while the add is in flight, exactly like a
+        // camera hit — otherwise a QR still in frame lands twice.
+        handledRef.current = true;
+        await handleDecoded(text);
+        if (!handledRef.current) {
+          // handleDecoded read it, found no otpauth in it, and reset the guard
+          // expecting a live camera loop — which its early return in the
+          // camera path keeps running, but this path froze. Restart it.
+          toast('error', t('addAccount.errorInvalidQR'));
+          start();
+        }
+      } catch (error) {
+        console.error('Could not read the uploaded image:', error);
+        toast('error', t('addAccount.errorNoQr'));
+      } finally {
+        decodingImageRef.current = false;
+        setDecodingImage(false);
+      }
+    },
+    // `t` is deliberately not a dependency, same as in handleDecoded — it is
+    // rebuilt every render and would drag the document listeners with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [handleDecoded, start]
+  );
+
   useEffect(() => {
     start();
     return stopCamera;
     // Intentionally once: restarts go through the retry button.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The whole page accepts a picture of the code — dropped, or pasted with
+  // Ctrl+V. A screenshot lands on the clipboard already; forcing a
+  // save-to-file detour before "Choose image" would be the longest possible
+  // path to the same pixels.
+  useEffect(() => {
+    const onDragOver = (event: DragEvent) => event.preventDefault();
+    const onDrop = (event: DragEvent) => {
+      event.preventDefault();
+      const file = event.dataTransfer?.files?.[0];
+      if (file && file.type.startsWith('image/')) handleImageFile(file);
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      const item = Array.from(event.clipboardData?.items ?? []).find(entry =>
+        entry.type.startsWith('image/')
+      );
+      const file = item?.getAsFile();
+      if (file) {
+        event.preventDefault();
+        handleImageFile(file);
+      }
+    };
+    document.addEventListener('dragover', onDragOver);
+    document.addEventListener('drop', onDrop);
+    document.addEventListener('paste', onPaste);
+    return () => {
+      document.removeEventListener('dragover', onDragOver);
+      document.removeEventListener('drop', onDrop);
+      document.removeEventListener('paste', onPaste);
+    };
+  }, [handleImageFile]);
 
   const message = () => {
     switch (status.kind) {
@@ -312,6 +457,25 @@ export default function App() {
   };
 
   const problem = message();
+
+  const uploadButton = (
+    <label className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-500 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600">
+      <input
+        type="file"
+        accept="image/*"
+        className="hidden"
+        disabled={decodingImage}
+        onChange={event => {
+          const file = event.target.files?.[0];
+          if (file) handleImageFile(file);
+          // Reset so re-picking the same file fires onChange again.
+          event.target.value = '';
+        }}
+      />
+      {decodingImage ? <Loader2 className="animate-spin" size={16} /> : <Upload size={16} />}
+      {t('addAccount.chooseImage')}
+    </label>
+  );
 
   return (
     <div className={darkMode ? 'dark' : ''}>
@@ -412,6 +576,11 @@ export default function App() {
               >
                 {t('scan.retry')}
               </button>
+              {/* The way out that does not depend on the thing that just
+                  failed. Every state on this card — denied, no camera, error —
+                  is one a picture of the code walks straight past. */}
+              <div className="mt-2">{uploadButton}</div>
+              <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">{t('scan.uploadHint')}</p>
             </div>
           ) : (
             <>
@@ -419,7 +588,19 @@ export default function App() {
                 <video ref={videoRef} playsInline muted className="h-full w-full object-cover" />
                 {/* Viewfinder guide */}
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                  <div className="h-48 w-48 rounded-lg border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
+                  {/* Sized to what the decoder actually reads (CROP, an 80%
+                      centre crop): the old fixed 192px square taught people to
+                      hold the code smaller — and so blurrier — than it had to
+                      be. 66% was still teaching it: under object-cover in a 4:3
+                      box the crop lands at 80% of the container height at every
+                      resolution the camera offers, so the guide covered 68% of
+                      the read area by area and the dimming outside it actively
+                      discouraged filling the rest. A dense code — a full Google
+                      Authenticator export runs about a hundred modules across —
+                      held to fill a 66% guide sits right where the cheap
+                      downscaled pass stops resolving, which is the one case
+                      that most needs the camera. */}
+                  <div className="aspect-square h-[80%] rounded-lg border-2 border-white/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
                 </div>
                 {status.kind === 'starting' && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/60">
@@ -428,9 +609,35 @@ export default function App() {
                 )}
               </div>
 
-              <p className="mt-4 flex items-center justify-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                <Camera size={16} />
+              {cameras.length > 1 && (
+                <select
+                  value={cameraId}
+                  onChange={event => {
+                    chosenCameraRef.current = event.target.value;
+                    setCameraId(event.target.value);
+                    start();
+                  }}
+                  aria-label={t('scan.selectCamera')}
+                  className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#4285F4] dark:border-dark-500 dark:bg-dark-700 dark:text-gray-200"
+                >
+                  {cameras.map(camera => (
+                    <option key={camera.id} value={camera.id}>
+                      {camera.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {/* Plain text on purpose: with an icon in front it read as a
+                  third button — same layout as the two real ones below it —
+                  and it did nothing when clicked. */}
+              <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
                 {status.kind === 'starting' ? t('scan.starting') : t('scan.hint')}
+              </p>
+
+              <div className="mt-3">{uploadButton}</div>
+              <p className="mt-2 text-center text-xs text-gray-400 dark:text-gray-500">
+                {t('scan.uploadHint')}
               </p>
             </>
           )}

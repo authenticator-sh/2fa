@@ -23,10 +23,16 @@ const suites = [
   ['wrong clocks', () => import('./clock.test')],
   ['upgrade from 1.11.0', () => import('./upgrade.test')],
   ['vault metadata', () => import('./vault-meta.test')],
+  ['vault half-completed changes', () => import('./vault-safety.test')],
   ['passkey unlock', () => import('./passkey.test')],
   ['credential exchange format', () => import('./cxf.test')],
+  ['import paths', () => import('./import-paths.test')],
+  ['writing from two surfaces at once', () => import('./concurrency.test')],
   ['shared vectors', () => import('./parity.test')],
+  ['sharing codes by link', () => import('./share.test')],
+  ['where the app opens', () => import('./open-mode.test')],
   ['language detection', () => import('./i18n.test')],
+  ['the store listing against the manifest', () => import('./listing.test')],
 ] as const;
 
 for (const [name, load] of suites) {

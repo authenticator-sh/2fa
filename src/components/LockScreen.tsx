@@ -87,7 +87,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
       normalizeRecoveryCode(typedRecovery) === normalizeRecoveryCode(newRecoveryCode);
 
     return (
-      <div className="flex-1 flex flex-col justify-center p-6 bg-gray-50 dark:bg-dark-900">
+      <div className="flex-1 overflow-y-auto flex flex-col justify-center p-6 bg-gray-50 dark:bg-dark-900">
         <div className="flex items-center gap-2 mb-3">
           <Logo size={26} />
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
@@ -139,7 +139,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
   }
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 bg-gray-50 dark:bg-dark-900">
+    <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center p-6 bg-gray-50 dark:bg-dark-900">
       <div className="w-full max-w-xs">
         {mode === 'password' ? (
           <>

@@ -1,11 +1,11 @@
-import { useState } from 'react';
-import { Download, Lock, Share2, Unlock, Upload } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ClipboardPaste, Download, Link2, Lock, Share2, Unlock, Upload } from 'lucide-react';
 import {
   exportAccounts,
   importAccounts,
   importAccountList,
   addMultipleAccounts,
-  getAccounts,
+  quarantinedCount,
   type ImportResult,
 } from '@/utils/storage';
 import { markBackupDone } from '@/utils/backup-reminder';
@@ -15,11 +15,14 @@ import { cleanSecret } from '@/utils/totp';
 import { createT, type Language } from '@/utils/i18n';
 import { MIN_PASSWORD_LENGTH } from '@/utils/crypto';
 import { describeImport } from '@/utils/import-message';
+import { importURIList, looksLikeURIList } from '@/utils/uri-import';
 import { confirmDialog, promptDialog, toast } from '@/utils/ui-feedback';
 import {
   backupFileName,
   buildEncryptedBackupFile,
   buildPlainBackupFile,
+  buildURIBackupFile,
+  uriBackupFileName,
   downloadBackupFile,
   isEncryptedBackupFile,
   readEncryptedBackupFile,
@@ -79,18 +82,43 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
   const [exportError, setExportError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const runExport = async (format: 'encrypted' | 'plain' | 'cxf') => {
+  const runExport = async (format: 'encrypted' | 'plain' | 'cxf' | 'uri') => {
     setBusy(true);
     setExportError(null);
     try {
       const accounts: Account[] = JSON.parse(await exportAccounts());
-      const currentAccounts = await getAccounts();
+      // What is on disk, not what a second call to the same function returns.
+      // The guard used to compare exportAccounts() against getAccounts() — and
+      // exportAccounts() *is* getAccounts(), stringified, so the two sides
+      // could only ever differ on a race. Records the vault is holding back
+      // (see quarantinedCount) are exactly the ones a backup must not omit
+      // silently, and they were invisible to it: the popup showed the amber
+      // "held" banner while Export cheerfully said "Exported 3 accounts" for a
+      // profile holding four. Someone who then wipes the profile has lost one.
+      const heldBack = quarantinedCount();
 
-      // Existing safety net: never let a partial export masquerade as a full one.
-      if (accounts.length !== currentAccounts.length) {
+      // Never let a partial export masquerade as a full one.
+      if (heldBack > 0) {
         const proceed = await confirmDialog({
           title: t('export.plainConfirmTitle'),
-          body: t('export.warningPartial', accounts.length, currentAccounts.length),
+          body: t('export.warningPartial', accounts.length, accounts.length + heldBack),
+          confirmLabel: t('common.confirm'),
+          cancelLabel: t('common.cancel'),
+          danger: true,
+        });
+        if (!proceed) return;
+      }
+
+      // Built before anything is written: it is the only format that can
+      // legitimately leave an account out, and "your backup is incomplete" is
+      // a question, not a notification delivered once the plaintext file is
+      // already on disk.
+      const uri = format === 'uri' ? buildURIBackupFile(accounts) : null;
+
+      if (uri && uri.skipped > 0) {
+        const proceed = await confirmDialog({
+          title: t('export.plainConfirmTitle'),
+          body: t('export.warningPartial', accounts.length - uri.skipped, accounts.length),
           confirmLabel: t('common.confirm'),
           cancelLabel: t('common.cancel'),
           danger: true,
@@ -103,23 +131,32 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
           ? await buildEncryptedBackupFile(accounts, exportPassword)
           : format === 'cxf'
             ? buildCxfFile(accounts)
-            : buildPlainBackupFile(accounts);
+            : uri
+              ? uri.text
+              : buildPlainBackupFile(accounts);
 
       downloadBackupFile(
         contents,
-        format === 'cxf' ? cxfFileName() : backupFileName(format === 'encrypted')
+        format === 'cxf' ? cxfFileName() : uri ? uriBackupFileName() : backupFileName(format === 'encrypted'),
+        uri ? 'text/plain' : 'application/json'
       );
 
       await markBackupDone(accounts.length);
       onExportComplete?.();
       setShowExportChoice(false);
       setExportPassword('');
-      toast(
-        'success',
-        format === 'encrypted'
-          ? t('export.encryptedDone', accounts.length)
-          : t('export.success', accounts.length)
-      );
+      if (uri && uri.skipped > 0) {
+        // Said again after the fact, so the count survives into the toast the
+        // user can still read once the dialog is gone.
+        toast('info', t('export.uriSkipped', accounts.length - uri.skipped, uri.skipped));
+      } else {
+        toast(
+          'success',
+          format === 'encrypted'
+            ? t('export.encryptedDone', accounts.length)
+            : t('export.success', accounts.length)
+        );
+      }
     } catch (error) {
       console.error('Export failed:', error);
       setExportError(t('export.failed'));
@@ -127,6 +164,24 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
       setBusy(false);
     }
   };
+
+  const closeExportChoice = () => {
+    setShowExportChoice(false);
+    setExportPassword('');
+    setExportError(null);
+  };
+
+  // Escape closes it, as it does every other dialog in the app (see
+  // FeedbackHost). Without this the only exit was a button that could be off
+  // screen.
+  useEffect(() => {
+    if (!showExportChoice) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeExportChoice();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [showExportChoice]);
 
   const handleEncryptedExport = () => {
     if (exportPassword.length < MIN_PASSWORD_LENGTH) {
@@ -136,15 +191,50 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
     runExport('encrypted');
   };
 
+  /**
+   * A list of otpauth:// URIs — pasted, or read out of a .txt.
+   *
+   * The report is assembled clause by clause rather than rounded to "import
+   * successful": a run that added twelve accounts, could not read two lines and
+   * refused one counter-based token has to say all three, and line numbers are
+   * the most that can be said about a line holding a live secret.
+   */
+  // Thin: the work lives in uri-import so the other file input gets the same
+  // behaviour instead of a second copy that drifts.
+  const runURIImport = async (text: string): Promise<void> => {
+    const outcome = await importURIList(text, language);
+    if (outcome.added !== undefined) {
+      await markBackupDone(0);
+      onImportComplete();
+    }
+    toast(outcome.kind, outcome.message);
+  };
+
+  const handlePasteImport = async () => {
+    const text = await promptDialog({
+      title: t('import.pasteTitle'),
+      body: t('import.pasteBody'),
+      placeholder: 'otpauth://totp/…',
+      multiline: true,
+      confirmLabel: t('settings.import'),
+      cancelLabel: t('common.cancel'),
+    });
+    if (!text || !text.trim()) return;
+    await runURIImport(text);
+  };
+
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    let text = '';
 
     try {
       if (file.type.startsWith('image/')) {
         await handleQRImport(file);
+      } else if (((text = await file.text()), looksLikeURIList(text))) {
+        await runURIImport(text);
       } else {
-        const imported = await importBackupText(await file.text(), () =>
+        const imported = await importBackupText(text, () =>
           promptDialog({
             title: t('import.passwordTitle'),
             body: t('import.passwordText'),
@@ -235,16 +325,37 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
           {t('settings.import')}
           <input
             type="file"
-            accept="application/json,image/*"
+            accept="application/json,text/plain,image/*"
             onChange={handleImport}
             className="hidden"
           />
         </label>
       </div>
 
+      {/* Third input, and the one the other two could not cover: a link that
+          arrived as text. Until now it had to be taken apart by hand. */}
+      <button
+        onClick={handlePasteImport}
+        className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 py-1.5 transition-colors"
+      >
+        <ClipboardPaste size={14} />
+        {t('import.paste')}
+      </button>
+
       {showExportChoice && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 max-w-sm w-full shadow-xl p-5">
+        <div
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          onClick={closeExportChoice}
+        >
+          {/* max-h-full + overflow-y-auto, and a way out that is not the button:
+              a fourth format card took this past 600px, which is the tallest a
+              Chrome popup can be. Centred flex overflows in both directions at
+              once, so the title and Cancel both left the screen and neither
+              could be scrolled to. */}
+          <div
+            onClick={event => event.stopPropagation()}
+            className="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 max-w-sm w-full max-h-full overflow-y-auto shadow-xl p-5"
+          >
             <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-3">
               {t('export.chooseTitle')}
             </h2>
@@ -294,6 +405,23 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
 
             <div className="border border-gray-200 dark:border-dark-600 rounded-lg p-3 mb-3">
               <div className="flex items-center gap-1.5 mb-1">
+                <Link2 className="text-gray-400" size={14} />
+                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {t('export.uri')}
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-2">{t('export.uriHint')}</p>
+              <button
+                onClick={() => runExport('uri')}
+                disabled={busy}
+                className="w-full text-xs font-medium py-1.5 rounded-md border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors disabled:opacity-50"
+              >
+                {t('settings.export')}
+              </button>
+            </div>
+
+            <div className="border border-gray-200 dark:border-dark-600 rounded-lg p-3 mb-3">
+              <div className="flex items-center gap-1.5 mb-1">
                 <Share2 className="text-gray-400" size={14} />
                 <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                   {t('export.cxf')}
@@ -312,11 +440,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
             {exportError && <p className="text-xs text-red-600 dark:text-red-400 mb-2">{exportError}</p>}
 
             <button
-              onClick={() => {
-                setShowExportChoice(false);
-                setExportPassword('');
-                setExportError(null);
-              }}
+              onClick={closeExportChoice}
               className="w-full text-xs text-gray-500 dark:text-gray-400 hover:underline py-1"
             >
               {t('common.cancel')}

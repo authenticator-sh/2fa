@@ -119,4 +119,52 @@ export async function run(): Promise<void> {
   check('accounts are readable again', (await storage.getAccounts()).length === 2);
   check('local holds cleartext once more', typeof areas.local.authenticator_accounts[0].secret === 'string');
   check('snapshots are readable again', backupRows.length > 0 && !backupRows[backupRows.length - 1].accounts[0].enc);
+
+  // --- surfaces that outlive the popup -----------------------------------
+  // The popup was the whole lifetime of a page: the idle deadline was checked
+  // when the accounts loaded, which was once per open. The floating window and
+  // the side panel stay open for hours, so "lock after 5 minutes" quietly meant
+  // "never" there until enforceAutoLock existed.
+  scenario('Auto-lock in a page that stays open');
+  await resetState();
+  await storage.saveAccounts(ACCOUNTS);
+  await (await storage.prepareVault(PASSWORD)).commit();
+  await vault.setAutoLockMinutes(5);
+  await flush();
+  check('the vault is open to begin with', await vault.isUnlocked());
+  check('and enforcing the deadline early is a no-op', (await vault.enforceAutoLock()) === false);
+
+  // Six minutes idle, written the way a real session ages.
+  const stale = areas.session.vault_session;
+  areas.session.vault_session = { ...stale, lastActivity: Date.now() - 6 * 60_000 };
+  check('past the deadline it locks', (await vault.enforceAutoLock()) === true);
+  check('and the key is actually gone', !(await vault.isUnlocked()));
+
+  scenario('Polling the deadline cannot hold the vault open by itself');
+  await vault.unlockWithPassword(PASSWORD);
+  await vault.setAutoLockMinutes(5);
+  const beforePolling = (areas.session.vault_session as any).lastActivity;
+  await new Promise(resolve => setTimeout(resolve, 5));
+  await vault.enforceAutoLock();
+  check('checking does not count as activity',
+    (areas.session.vault_session as any).lastActivity === beforePolling);
+  await vault.noteVaultActivity();
+  check('but the user doing something does',
+    (areas.session.vault_session as any).lastActivity > beforePolling);
+
+  // Two surfaces are open at once now. Locking one must lock them all, and the
+  // in-memory copy this context holds must not answer "still unlocked".
+  scenario('A lock in one surface is seen by the others');
+  await vault.unlockWithPassword(PASSWORD);
+  check('unlocked in this context', await vault.isUnlocked());
+  delete areas.session.vault_session; // another surface locked it
+  check('the session store wins over the local copy', !(await vault.isUnlocked()));
+
+  scenario('An account added elsewhere reaches an open list');
+  check('a write to the primary copy is a reason to reload',
+    storage.affectsStoredAccounts('local', { authenticator_accounts: {} }));
+  check('a sync write is not — the next read merges it anyway',
+    !storage.affectsStoredAccounts('sync', { authenticator_accounts: {} }));
+  check('and neither is an unrelated local key',
+    !storage.affectsStoredAccounts('local', { darkMode: {} }));
 }

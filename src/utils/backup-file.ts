@@ -6,6 +6,8 @@
 // derived straight from a password chosen at export time.
 
 import type { Account } from '@/types';
+import { buildOTPAuthURL } from './qr-parser';
+import { isUsableSecret } from './totp';
 import {
   decryptJson,
   deriveKeyFromPassword,
@@ -88,6 +90,30 @@ export async function readEncryptedBackupFile(text: string, password: string): P
   }
 }
 
+/**
+ * Every account as a bare `otpauth://` URI, one per line.
+ *
+ * The plainest thing this app can emit, and the only export format other
+ * authenticators can read without knowing anything about us. Nothing else goes
+ * in the file — no header, no comment, no trailing metadata — because the
+ * importers on the other side, ours included, read it line by line.
+ *
+ * Accounts whose secret cannot produce a code are left out rather than written
+ * as a URI that silently fails wherever it lands; the count comes back so the
+ * caller can say so out loud instead of reporting a clean export.
+ */
+export function buildURIBackupFile(accounts: Account[]): { text: string; skipped: number } {
+  const usable = accounts.filter(account => isUsableSecret(account.secret));
+  return {
+    text: usable.length ? `${usable.map(buildOTPAuthURL).join('\n')}\n` : '',
+    skipped: accounts.length - usable.length,
+  };
+}
+
+export function uriBackupFileName(): string {
+  return `authenticator-uris-${new Date().toISOString().slice(0, 10)}.txt`;
+}
+
 export function backupFileName(encrypted: boolean): string {
   const stamp = new Date().toISOString().slice(0, 10);
   return encrypted
@@ -95,8 +121,8 @@ export function backupFileName(encrypted: boolean): string {
     : `authenticator-backup-${stamp}.json`;
 }
 
-export function downloadBackupFile(contents: string, fileName: string): void {
-  const blob = new Blob([contents], { type: 'application/json' });
+export function downloadBackupFile(contents: string, fileName: string, mime = 'application/json'): void {
+  const blob = new Blob([contents], { type: mime });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;

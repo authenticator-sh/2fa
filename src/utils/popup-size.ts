@@ -5,6 +5,7 @@
 // plain width/height on the root element, and the presets stay inside that cap.
 
 import type { CSSProperties } from 'react';
+import type { AppHost } from './open-mode';
 
 export type PopupSize = 'small' | 'medium' | 'large';
 
@@ -57,4 +58,18 @@ export function readPopupSize(value: unknown): PopupSize | null {
 export function popupSizeStyle(size: PopupSize): CSSProperties {
   const { width, minHeight, maxHeight } = POPUP_SIZES[size];
   return { width, minHeight, maxHeight };
+}
+
+/**
+ * How the root is sized in whichever surface is hosting it.
+ *
+ * The action popup has no window of its own, so its size is the document's and
+ * the preset above is the only way to set it. The floating window and the side
+ * panel are the other way round: the user drags their edges, and a document
+ * still insisting on 400px would paint a narrow column against an empty
+ * background. There they fill whatever they are given.
+ */
+export function rootSizeStyle(host: AppHost, size: PopupSize): CSSProperties {
+  if (host === 'popup') return popupSizeStyle(size);
+  return { width: '100vw', height: '100vh' };
 }

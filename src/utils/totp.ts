@@ -200,22 +200,48 @@ function safeAlgorithm(value: unknown): 'SHA1' | 'SHA256' | 'SHA512' {
   return name === 'SHA256' || name === 'SHA512' ? name : 'SHA1';
 }
 
-export function generateTOTP(account: Account): TOTPCode {
+/**
+ * The generator for an account, with every parameter already repaired.
+ *
+ * Shared by the live code and by sharing, which computes a run of future codes
+ * from the same generator — the two must never disagree about the period or
+ * the digit count, or the recipient of a link would hold codes for slots the
+ * sender's own popup never shows.
+ */
+function buildTOTP(account: Account): OTPAuth.TOTP {
   const secret = cleanSecret(account.secret);
   // otpauth accepts an empty secret and emits a plausible six-digit code from
   // it, so the check has to happen here rather than being left to the library.
   if (!isUsableSecret(secret)) throw new InvalidSecretError();
 
-  const period = safePeriod(account.period);
-
-  const totp = new OTPAuth.TOTP({
+  return new OTPAuth.TOTP({
     issuer: account.issuer,
     label: account.name,
     algorithm: safeAlgorithm(account.algorithm),
     digits: safeDigits(account.digits),
-    period,
+    period: safePeriod(account.period),
     secret,
   });
+}
+
+/** The period and digit count actually used to generate, after repair. */
+export function totpParams(account: Account): { period: number; digits: number } {
+  return { period: safePeriod(account.period), digits: safeDigits(account.digits) };
+}
+
+/**
+ * The code for one moment, given as a Unix timestamp in milliseconds.
+ *
+ * No clock correction is applied here: the caller names the instant. The
+ * moment-of-now path below applies the measured offset before it calls this.
+ */
+export function generateCodeAt(account: Account, timestampMs: number): string {
+  return buildTOTP(account).generate({ timestamp: timestampMs });
+}
+
+export function generateTOTP(account: Account): TOTPCode {
+  const totp = buildTOTP(account);
+  const { period } = totpParams(account);
 
   const correctedMs = Date.now() + timeOffsetMs;
   const code = totp.generate({ timestamp: correctedMs });

@@ -14,7 +14,12 @@ type UpdateHighlightKey =
   | 'update.feature.cameraScan'
   | 'update.feature.groups'
   | 'update.feature.appearance'
-  | 'update.feature.quickFill';
+  | 'update.feature.quickFill'
+  | 'update.feature.pasteLinks'
+  | 'update.feature.uriExport'
+  | 'update.feature.accountInitials'
+  | 'update.feature.shareCodes'
+  | 'update.feature.openIn';
 
 // Maps an extension version to the changelog bullets shown in the "What's New"
 // modal right after that version is installed. Versions with no entry here
@@ -39,5 +44,18 @@ export const WHATS_NEW: Record<string, UpdateHighlightKey[]> = {
     'update.feature.cxfExport',
     'update.feature.clockSources',
     'update.feature.autoLanguage',
+  ],
+  // Sharing first: it is the one change here that gives the extension a
+  // reason to be mentioned to someone who does not have it. Then moving in
+  // and moving out, then the thing that makes a long list readable.
+  '1.13.0': [
+    'update.feature.shareCodes',
+    'update.feature.pasteLinks',
+    'update.feature.uriExport',
+    // Above the initials because it changes what the extension *is* for the
+    // people it matters to — a window that does not vanish — where a coloured
+    // letter changes how the same list looks.
+    'update.feature.openIn',
+    'update.feature.accountInitials',
   ],
 };

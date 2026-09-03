@@ -1,5 +1,5 @@
 import { parseMigrationURL, type MigrationAccount } from './migration-parser';
-import { isUsableSecret } from './totp';
+import { cleanSecret, isUsableSecret } from './totp';
 
 export interface ParsedOTPAuth {
   name: string;
@@ -128,7 +128,13 @@ export function parseOTPAuthURL(url: string): ParsedOTPAuth | null {
     const digits = parseDigits(params.get('digits'));
     const period = parsePeriod(params.get('period'));
 
-    console.log('Successfully parsed:', { name, issuer, algorithm, digits, period });
+    // Nothing is logged here on purpose. This used to print the name and issuer
+    // of every account it parsed, which was one line per user action back when
+    // a parse meant one scanned image. Bulk import made it one line per
+    // account: pasting a 200-account export wrote the user's entire 2FA
+    // inventory — every service, every username — into the console, where a
+    // screen share or an open inspector puts it on display. That is the exact
+    // metadata the vault exists to keep off disk.
 
     return {
       name,
@@ -142,6 +148,67 @@ export function parseOTPAuthURL(url: string): ParsedOTPAuth | null {
     console.error('Error parsing OTP Auth URL:', error);
     return null;
   }
+}
+
+/**
+ * The inverse of `parseOTPAuthURL`: an account as a shareable `otpauth://` URI.
+ *
+ * Kept in this file deliberately. The two functions are one format read from
+ * both ends, and `parse(build(a)) == a` is the contract that makes plain-text
+ * export worth offering at all — a backup nobody can read back is not a backup.
+ * The round-trip is covered in totp.test.ts; break either side and it fails.
+ *
+ * Never log the return value: it carries the secret.
+ */
+export function buildOTPAuthURL(account: ParsedOTPAuth): string {
+  // Coerced rather than assumed. Every parser in this codebase produces
+  // strings, but a backup file is a text file a person can edit, and one record
+  // whose issuer arrived as null threw out of the .txt export — so the user
+  // asking for a backup got "Export failed" and no way to get ANY account out.
+  // The one bad row must cost its own line, not the whole file.
+  const issuer = String(account.issuer ?? '').trim();
+  const name = String(account.name ?? '').trim();
+
+  // "Issuer:Account" is the label every other authenticator expects to find in
+  // the path, so it is emitted even though `issuer=` below is what this parser
+  // reads first.
+  //
+  // Colons are stripped from the issuer HERE ONLY. The label is split at its
+  // first colon, so an issuer carrying one would hand the remainder of itself
+  // to the account name — "Acme: Inc" + "u@x" reads back as name "Inc:u@x".
+  // The true issuer still travels intact in the query parameter, which both
+  // this parser and the spec prefer, so nothing is actually lost. A colon in
+  // the *name* is safe while an issuer is present: everything after the first
+  // one is the name.
+  //
+  // The two halves are encoded separately so the separator stays a literal
+  // colon. Encoding the joined label would emit %3A, which this parser decodes
+  // correctly but stricter readers elsewhere split on before decoding.
+  //
+  // With no issuer there is no `issuer=` to fall back on, so a colon in the
+  // name is read back as one: `{issuer:"", name:"a:b@x.com"}` returned as
+  // `{issuer:"a", name:"b@x.com"}`. An empty issuer is reachable — the edit
+  // form stores whatever is left when the field is cleared. Emitting the
+  // separator anyway keeps the split where it belongs.
+  const label = issuer
+    ? `${encodeURIComponent(issuer.replace(/:/g, ''))}:${encodeURIComponent(name)}`
+    : name.includes(':')
+      ? `:${encodeURIComponent(name)}`
+      : encodeURIComponent(name);
+
+  const params = new URLSearchParams();
+  params.set('secret', cleanSecret(account.secret));
+  if (issuer) params.set('issuer', issuer);
+  // Written out even at their defaults: an importer that assumes different ones
+  // produces a confidently wrong code, which is the failure with no symptom.
+  params.set('algorithm', account.algorithm);
+  params.set('digits', String(account.digits));
+  params.set('period', String(account.period));
+
+  // URLSearchParams spells a space `+`, which is form encoding rather than RFC
+  // 3986. Readers that follow the RFC take it literally and import an issuer
+  // called "Acme+Inc"; %20 is read as a space by both.
+  return `otpauth://totp/${label}?${params.toString().replace(/\+/g, '%20')}`;
 }
 
 /**
@@ -179,7 +246,12 @@ export function parseQRCode(url: string): ParsedQRResult | null {
     const usable = migrationAccounts.filter(
       (account: MigrationAccount) => account.type !== 'hotp' && isUsableSecret(account.secret)
     );
-    const skipped = migrationAccounts.length - usable.length;
+    // Entries the protobuf parser could not read never reach `migrationAccounts`
+    // at all, so counting only what it returned reported them as nothing at
+    // all: a code holding twelve accounts, two of them damaged, said "10
+    // imported" with no remainder. `unreadable` is what the parser dropped
+    // before this filter ever saw it.
+    const skipped = migrationAccounts.length - usable.length + payload.unreadable;
 
     if (usable.length === 0) {
       if (migrationAccounts.every((account: MigrationAccount) => account.type === 'hotp')) {
@@ -209,8 +281,7 @@ export function parseQRCode(url: string): ParsedQRResult | null {
 
   // Try parsing as standard otpauth:// URL
   if (scheme.startsWith('otpauth://')) {
-    console.log('Detected standard otpauth URL');
-    const parsed = parseOTPAuthURL(trimmedUrl);
+      const parsed = parseOTPAuthURL(trimmedUrl);
 
     if (!parsed) {
       console.error('Failed to parse otpauth URL');
@@ -227,16 +298,35 @@ export function parseQRCode(url: string): ParsedQRResult | null {
   return null;
 }
 
+export const ACCOUNT_COLORS = [
+  '#3b82f6', // blue
+  '#8b5cf6', // violet
+  '#ec4899', // pink
+  '#f59e0b', // amber
+  '#10b981', // emerald
+  '#06b6d4', // cyan
+  '#f97316', // orange
+  '#6366f1', // indigo
+] as const;
+
 export function generateRandomColor(): string {
-  const colors = [
-    '#3b82f6', // blue
-    '#8b5cf6', // violet
-    '#ec4899', // pink
-    '#f59e0b', // amber
-    '#10b981', // emerald
-    '#06b6d4', // cyan
-    '#f97316', // orange
-    '#6366f1', // indigo
-  ];
-  return colors[Math.floor(Math.random() * colors.length)];
+  return ACCOUNT_COLORS[Math.floor(Math.random() * ACCOUNT_COLORS.length)];
+}
+
+/**
+ * A colour for a record that has none, derived from its own text.
+ *
+ * Not every account arrives with one: CXF import builds accounts without the
+ * field, and any backup written before colours existed restores without it.
+ * Falling back to a single grey turned exactly the migration case — a whole
+ * vault imported at once — into a column of identical grey circles, which is
+ * the case the avatar is for. Deriving it costs nothing, needs no migration,
+ * and is stable across reloads, which a random pick at render time would not be.
+ */
+export function colorForKey(key: string): string {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) | 0;
+  }
+  return ACCOUNT_COLORS[Math.abs(hash) % ACCOUNT_COLORS.length];
 }

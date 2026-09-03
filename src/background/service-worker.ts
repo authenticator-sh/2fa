@@ -2,6 +2,7 @@
 // Manifest V3 requires a service worker instead of background scripts
 
 import { COMMAND_ID, MENU_ID, runQuickFill, syncContextMenu } from './quick-fill';
+import { applyOpenMode, registerOpenMode } from './open-mode';
 import { QUICK_FILL_ENABLED_KEY } from '@/utils/quick-fill';
 
 // Hosted rather than bundled so the copy can be updated without shipping a new
@@ -16,6 +17,7 @@ const UNINSTALL_FEEDBACK_URL = 'https://www.authenticator.sh/uninstall';
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.runtime.setUninstallURL(UNINSTALL_FEEDBACK_URL);
   void syncContextMenu();
+  void applyOpenMode();
 
   if (details.reason === 'install') {
     chrome.tabs.create({ url: WELCOME_URL });
@@ -37,12 +39,24 @@ chrome.runtime.onInstalled.addListener((details) => {
 // is ever lost, and what applies a language chosen on another device.
 chrome.runtime.onStartup.addListener(() => {
   void syncContextMenu();
+  void applyOpenMode();
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (QUICK_FILL_ENABLED_KEY in changes || 'language' in changes) void syncContextMenu();
 });
+
+// The "Open as" setting: popup, floating window or side panel. Its listeners
+// are registered at the top level like everything else here, so they survive
+// the worker being evicted and restarted.
+// On every worker start, not only on install and startup: disabling and
+// re-enabling the extension resets the action to the manifest's popup and the
+// panel behaviour to off, while storage still holds the chosen mode — and
+// neither of those events fires, so the icon quietly went back to a popup
+// until the next browser restart.
+void applyOpenMode();
+registerOpenMode();
 
 // Both entry points grant `activeTab` for this one invocation, which is what
 // makes reading the tab's address and injecting into it possible without any

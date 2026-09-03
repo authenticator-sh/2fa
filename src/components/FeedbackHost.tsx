@@ -29,7 +29,7 @@ function ToastRow({ toast }: { toast: Toast }) {
 
 function Dialog({ request }: { request: DialogRequest }) {
   const [value, setValue] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -56,17 +56,55 @@ function Dialog({ request }: { request: DialogRequest }) {
           <p className="mt-1.5 whitespace-pre-line text-xs text-gray-600 dark:text-gray-400">{request.body}</p>
         )}
 
-        {request.kind === 'prompt' && (
-          <input
-            ref={inputRef}
-            type={request.password ? 'password' : 'text'}
-            value={value}
-            placeholder={request.placeholder}
-            onChange={event => setValue(event.target.value)}
-            onKeyDown={event => event.key === 'Enter' && accept()}
-            className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#4285F4] dark:border-dark-500 dark:bg-dark-700 dark:text-gray-100"
-          />
+        {request.kind === 'confirm' && request.warning && (
+          <div className="mt-3 flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/60 dark:bg-amber-900/20">
+            <AlertTriangle
+              size={14}
+              className="mt-px flex-shrink-0 text-amber-600 dark:text-amber-500"
+            />
+            <p className="text-xs leading-relaxed text-amber-900 dark:text-amber-200">
+              {request.warning}
+            </p>
+          </div>
         )}
+
+        {request.kind === 'confirm' && request.note && (
+          <p className="mt-2.5 text-[11px] text-gray-500 dark:text-gray-400">{request.note}</p>
+        )}
+
+        {request.kind === 'prompt' &&
+          (request.multiline ? (
+            // No Enter-to-accept here: Enter is how the user separates one link
+            // from the next, and in a list of a hundred it is pressed by
+            // accident long before the paste is finished.
+            <textarea
+              ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+              value={value}
+              rows={5}
+              // What goes in here is otpauth:// URIs, which are LTR whatever the
+              // interface language is. Left to inherit dir=rtl in Arabic, the
+              // "//", the ":" and the "?a=b&c=d" run reorder on screen and the
+              // caret starts on the wrong side of a link the user is checking.
+              dir="ltr"
+              spellCheck={false}
+              autoComplete="off"
+              autoCapitalize="off"
+              autoCorrect="off"
+              placeholder={request.placeholder}
+              onChange={event => setValue(event.target.value)}
+              className="mt-3 w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#4285F4] dark:border-dark-500 dark:bg-dark-700 dark:text-gray-100"
+            />
+          ) : (
+            <input
+              ref={inputRef as React.RefObject<HTMLInputElement>}
+              type={request.password ? 'password' : 'text'}
+              value={value}
+              placeholder={request.placeholder}
+              onChange={event => setValue(event.target.value)}
+              onKeyDown={event => event.key === 'Enter' && accept()}
+              className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#4285F4] dark:border-dark-500 dark:bg-dark-700 dark:text-gray-100"
+            />
+          ))}
 
         <div className="mt-4 flex gap-2">
           <button

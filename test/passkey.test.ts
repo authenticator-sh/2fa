@@ -179,12 +179,23 @@ export async function run(): Promise<void> {
   scenario('An unlock in another context announces itself');
   check('a staged key is recognised as a session change',
     vault.affectsVaultSession('session', { vault_handoff: {} }));
-  check('so is the session entry itself',
-    vault.affectsVaultSession('session', { vault_session: {} }));
+  check('so is the key appearing in the session entry',
+    vault.affectsVaultSession('session', { vault_session: { newValue: { mk: 'a', lastActivity: 1 } } }));
+  check('and the key disappearing — that is a lock in another surface',
+    vault.affectsVaultSession('session', { vault_session: { oldValue: { mk: 'a', lastActivity: 1 } } }));
   check('an unrelated session key is ignored',
     !vault.affectsVaultSession('session', { something_else: {} }));
   check('and so is the same key in another area — local writes are not unlocks',
     !vault.affectsVaultSession('local', { vault_handoff: {} }));
+
+  // Every key read stamps lastActivity, so the entry is rewritten by the very
+  // re-read the event triggers. Treating that as a lock change made the popup
+  // spin — refresh, stamp, event, refresh — and each turn pushed the idle
+  // deadline out, so a vault set to lock after five minutes never locked.
+  check('a refreshed activity stamp is not a lock change',
+    !vault.affectsVaultSession('session', {
+      vault_session: { oldValue: { mk: 'a', lastActivity: 1 }, newValue: { mk: 'a', lastActivity: 2 } },
+    }));
 
   const seen: string[] = [];
   const listener = (changes: Record<string, unknown>, areaName: string) => {

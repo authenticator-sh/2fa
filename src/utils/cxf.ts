@@ -148,7 +148,11 @@ function normalizeDigits(value: unknown): number {
 
 function normalizePeriod(value: unknown): number {
   const period = Number(value);
-  return Number.isInteger(period) && period > 0 && period <= 300 ? period : 30;
+  // The ceiling matches parsePeriod and safePeriod (3600). It used to be 300,
+  // which is below what the rest of the codebase accepts — so an account with a
+  // 600-second period, written by our own CXF export, was read back at 30 and
+  // produced a confidently wrong code. Our export, our importer, no warning.
+  return Number.isInteger(period) && period > 0 && period <= 3600 ? period : 30;
 }
 
 function asText(value: unknown): string {

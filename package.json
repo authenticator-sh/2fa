@@ -1,6 +1,6 @@
 {
   "name": "authenticator-extension",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "description": "Modern Google Authenticator Chrome Extension",
   "type": "module",
   "scripts": {
@@ -19,6 +19,7 @@
     "jsqr": "^1.4.0",
     "lucide-react": "^0.300.0",
     "otpauth": "^9.2.3",
+    "qrcode-generator": "^2.0.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "zustand": "^4.4.7"

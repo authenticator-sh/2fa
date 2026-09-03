@@ -68,6 +68,20 @@ export function getBaseDomain(hostname: string): string {
   return parts.slice(-2).join('.');
 }
 
+/**
+ * The hostname a suggestion can be made for, or null for anything that is not
+ * a web page — chrome://, file://, the extension's own pages, no URL at all.
+ */
+export function hostnameOf(url: string | undefined | null): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.hostname : null;
+  } catch {
+    return null;
+  }
+}
+
 function hasSessionStorage(): boolean {
   return typeof chrome !== 'undefined' && !!chrome.storage && !!chrome.storage.session;
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Account } from '@/types';
 import {
+  affectsStoredAccounts,
   getAccounts,
   getStoredAccounts,
   decodeAccounts,
@@ -29,8 +30,11 @@ export function useAccounts(vaultLocked: boolean) {
    */
   const [heldCount, setHeldCount] = useState(0);
 
-  const loadAccounts = useCallback(async () => {
-    setLoading(true);
+  const loadAccounts = useCallback(async (options: { quiet?: boolean } = {}) => {
+    // A reload prompted by storage changing underneath us swaps the list in
+    // place: putting a spinner over forty live codes because the scan page
+    // added a forty-first would be the change announcing itself too loudly.
+    if (!options.quiet) setLoading(true);
     try {
       const data = await getAccounts();
       setAccounts(data);
@@ -91,6 +95,20 @@ export function useAccounts(vaultLocked: boolean) {
       return;
     }
     loadAccounts();
+  }, [vaultLocked, loadAccounts]);
+
+  // Follow the store while the page is open. Our own writes fire this too,
+  // which costs one extra read after each — the merge on read is idempotent,
+  // so it cannot cascade.
+  useEffect(() => {
+    if (vaultLocked || !chrome.storage?.onChanged?.addListener) return;
+
+    const onChanged = (changes: Record<string, unknown>, areaName: string) => {
+      if (affectsStoredAccounts(areaName, changes)) void loadAccounts({ quiet: true });
+    };
+
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
   }, [vaultLocked, loadAccounts]);
 
   const addAccount = async (account: Account) => {

@@ -18,6 +18,18 @@ export interface MigrationPayload {
   batchIndex?: number;
   /** How many QR codes the export was split into. */
   batchSize?: number;
+  /**
+   * Entries that were in the payload and could not be read.
+   *
+   * A malformed entry used to be dropped with a console warning and nothing
+   * else, so the count the user was shown came out of what the parser
+   * returned — which is the number that survived, not the number that was
+   * there. "10 accounts imported" from a code holding twelve is the shape of
+   * every "I moved my accounts over and some are missing" ticket, and it is
+   * unfalsifiable from the outside: the user has no way to count what they
+   * scanned. Reporting it is the whole point.
+   */
+  unreadable: number;
 }
 
 export interface MigrationAccount {
@@ -276,14 +288,21 @@ export function parseMigrationURL(url: string): MigrationPayload | null {
       return null;
     }
 
+    // Google spells the payload in standard base64, but third-party export
+    // tooling routinely emits base64url — and a `-` or `_` used to fail the
+    // test below and lose the user their entire vault with "that link could
+    // not be read". The two alphabets differ in exactly two characters, so
+    // accepting both costs one substitution.
+    const normalized = dataParam.replace(/-/g, '+').replace(/_/g, '/');
+
     // Reject rather than let atob skip characters it does not recognise.
-    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(dataParam)) {
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)) {
       console.error('Migration data is not valid base64');
       return null;
     }
 
     // Decode base64 data
-    const binaryString = atob(dataParam);
+    const binaryString = atob(normalized);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
@@ -293,46 +312,68 @@ export function parseMigrationURL(url: string): MigrationPayload | null {
 
     // Parse MigrationPayload protobuf message
     const accounts: MigrationAccount[] = [];
+    let unreadable = 0;
     let batchIndex: number | undefined;
     let batchSize: number | undefined;
     let offset = 0;
 
     while (offset < bytes.length) {
-      const { value: tag, offset: tagOffset } = decodeVarint(bytes, offset);
-      const fieldNumber = tag >>> 3;
-      const wireType = tag & 0x7;
+      // Everything inside this try either advances `offset` or gives up on the
+      // rest of the payload. The per-entry catch below covers a bad *account*;
+      // this one covers a bad *frame* — a length that runs past the end, a
+      // group-encoded field (wire types 3 and 4, which skipField refuses), a
+      // varint longer than ten bytes. Those used to throw all the way out to
+      // the catch at the bottom, which returns null and discards every account
+      // already parsed. A migration URL truncated by a chat client is the
+      // common way in, and losing twenty accounts because the twenty-first was
+      // cut in half is the opposite of what the per-entry catch was for.
+      try {
+        const { value: tag, offset: tagOffset } = decodeVarint(bytes, offset);
+        const fieldNumber = tag >>> 3;
+        const wireType = tag & 0x7;
 
-      offset = tagOffset;
+        offset = tagOffset;
 
-      if (fieldNumber === 1 && wireType === WIRE_TYPE_LENGTH_DELIMITED) {
-        // otp_parameters field — one OtpParameters message per repeat
-        const { data, offset: newOffset } = readLengthDelimited(bytes, offset);
-        offset = newOffset;
+        if (fieldNumber === 1 && wireType === WIRE_TYPE_LENGTH_DELIMITED) {
+          // otp_parameters field — one OtpParameters message per repeat
+          const { data, offset: newOffset } = readLengthDelimited(bytes, offset);
+          offset = newOffset;
 
-        try {
-          accounts.push(parseOtpParameters(data));
-        } catch (err) {
-          // One malformed entry must not drop the rest of the batch
-          console.warn('Skipping malformed OtpParameters:', err);
+          try {
+            accounts.push(parseOtpParameters(data));
+          } catch (err) {
+            // One malformed entry must not drop the rest of the batch — but it
+            // must be counted, or the user is told a number that omits it.
+            unreadable++;
+            console.warn('Skipping malformed OtpParameters:', err);
+          }
+        } else if (wireType === WIRE_TYPE_VARINT && (fieldNumber === 3 || fieldNumber === 4)) {
+          // MigrationPayload: 2 = version, 3 = batch_size, 4 = batch_index,
+          // 5 = batch_id. Only the two that describe the split are of use here.
+          const { value, offset: newOffset } = decodeVarint(bytes, offset);
+          offset = newOffset;
+          if (fieldNumber === 3) batchSize = value;
+          else batchIndex = value;
+        } else {
+          // Forward-compatible: skip metadata or unknown fields instead of aborting
+          offset = skipField(bytes, offset, wireType);
         }
-      } else if (wireType === WIRE_TYPE_VARINT && (fieldNumber === 3 || fieldNumber === 4)) {
-        // MigrationPayload: 2 = version, 3 = batch_size, 4 = batch_index,
-        // 5 = batch_id. Only the two that describe the split are of use here.
-        const { value, offset: newOffset } = decodeVarint(bytes, offset);
-        offset = newOffset;
-        if (fieldNumber === 3) batchSize = value;
-        else batchIndex = value;
-      } else {
-        // Forward-compatible: skip metadata or unknown fields instead of aborting
-        offset = skipField(bytes, offset, wireType);
+      } catch (err) {
+        // The remainder is unreadable. Whatever was in it is unknowable — one
+        // entry or fifty — so it counts as one rather than pretending to a
+        // number, and the caller reports "some could not be read".
+        unreadable++;
+        console.warn('Migration payload ends in something unreadable:', err);
+        break;
       }
     }
 
     console.log(
       `Migration parser recovered ${accounts.length} account(s)` +
+        (unreadable ? `, ${unreadable} unreadable` : '') +
         (batchSize ? ` from code ${(batchIndex ?? 0) + 1} of ${batchSize}` : '')
     );
-    return accounts.length > 0 ? { accounts, batchIndex, batchSize } : null;
+    return accounts.length > 0 ? { accounts, batchIndex, batchSize, unreadable } : null;
   } catch (error) {
     console.error('Error parsing migration URL:', error);
     return null;

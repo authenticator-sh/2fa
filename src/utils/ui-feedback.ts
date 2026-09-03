@@ -18,6 +18,18 @@ export interface ConfirmRequest {
   kind: 'confirm';
   title: string;
   body?: string;
+  /**
+   * A caution to show in a box of its own, above the buttons.
+   *
+   * Separate from `body` because it is a different kind of sentence and wants a
+   * different weight. The delete confirmation used to carry its warning inside
+   * `body` as one pre-formatted string, emoji and bullet characters typed into
+   * the translation — which meant every locale shipped its own layout, and the
+   * result rendered as a paragraph pretending to be a list.
+   */
+  warning?: string;
+  /** A closing line in smaller, quieter type — "this cannot be undone". */
+  note?: string;
   confirmLabel: string;
   cancelLabel: string;
   danger?: boolean;
@@ -31,6 +43,13 @@ export interface PromptRequest {
   body?: string;
   placeholder?: string;
   password?: boolean;
+  /**
+   * Render a textarea instead of an input.
+   *
+   * Not cosmetic: a single-line input collapses a multi-line paste, and the
+   * list of otpauth:// URIs it is used for is parsed line by line.
+   */
+  multiline?: boolean;
   confirmLabel: string;
   cancelLabel: string;
   resolve: (value: string | null) => void;

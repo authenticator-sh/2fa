@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Upload, Monitor, Loader2, Camera } from 'lucide-react';
+import { Upload, Monitor, Loader2, Camera, ChevronDown } from 'lucide-react';
 import type { Account } from '@/types';
 import { validateSecret, cleanSecret } from '@/utils/totp';
-import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/utils/qr-parser';
+import { parseQRCode, parseOTPAuthURL, generateRandomColor, UnsupportedOTPTypeError } from '@/utils/qr-parser';
 import { captureCurrentTab } from '@/utils/screen-capture';
 import { decodeQrFromImage } from '@/utils/qr-decode';
+import { ModalHeader } from './ModalHeader';
 import { GroupInput } from './GroupInput';
 import { createT, type Language } from '@/utils/i18n';
+import { looksLikeURIList } from '@/utils/uri-import';
 
 interface AddAccountModalProps {
   onClose: () => void;
@@ -26,6 +28,10 @@ interface AddAccountModalProps {
   defaultGroup?: string;
 }
 
+/** Every text field on this form. */
+const FIELD =
+  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-all placeholder-gray-400 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-100 dark:placeholder-gray-500';
+
 export function AddAccountModal({ onClose, onAdd, language, groups = [], defaultGroup = '' }: AddAccountModalProps) {
   const t = createT(language);
   const [tab, setTab] = useState<'manual' | 'qr'>('qr');
@@ -34,12 +40,19 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
   const [group, setGroup] = useState(defaultGroup);
   const [secret, setSecret] = useState('');
   const [algorithm, setAlgorithm] = useState<'SHA1' | 'SHA256' | 'SHA512'>('SHA1');
-  const [digits, setDigits] = useState<6 | 8>(6);
+  const [digits, setDigits] = useState<number>(6);
   const [period, setPeriod] = useState(30);
   const [error, setError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // Folded away by default. Someone pasting a key they already have does not
+  // need four lines telling them where to get one, and open by default it
+  // pushed the Add button off the bottom of the modal.
+  const [showKeyHelp, setShowKeyHelp] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [scanning, setScanning] = useState(false);
+  /** A save in flight — the form stays open and the button stays busy. */
+  const [saving, setSaving] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -59,8 +72,9 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
   // like the scan silently failed, because they are not in the visible list.
   const filteredGroup = defaultGroup.trim() ? { group: defaultGroup.trim() } : {};
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
     setError('');
 
     if (!name || !secret) {
@@ -94,12 +108,76 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
       ...typedGroup,
     };
 
-    onAdd(account);
-    onClose();
+    // Awaited, and its failure shown.
+    //
+    // This was `onAdd(account); onClose();` — the promise dropped on the floor
+    // and the modal closed regardless. A vault that locked while the form was
+    // open, a storage write refused by quota, a concurrent write: every one of
+    // them ended with the modal gone, no message, and nothing saved. The user
+    // had just typed a seed off an enrolment page that only shows it once. The
+    // QR branch of this same component has always awaited inside a try/catch;
+    // only the hand-typed path did not.
+    setSaving(true);
+    try {
+      await onAdd(account);
+      onClose();
+    } catch (err) {
+      console.error('Could not save the account:', err);
+      setError(t('addAccount.errorSaveFailed'));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleClose = () => {
     onClose();
+  };
+
+  /**
+   * The secret field also accepts a whole otpauth:// link.
+   *
+   * Someone holding one link opens "Add account", and until now the only thing
+   * here was a form asking for the pieces separately — so they took the URL
+   * apart by hand to fill it in. The parser that reads QR codes reads exactly
+   * this string; the field just had to offer it. Anything that is not a link
+   * stays a secret, as before.
+   */
+  const handleSecretChange = (value: string) => {
+    setSecret(value);
+    const trimmed = value.trim();
+    // Same predicate the two file inputs use, imported rather than re-typed:
+    // three copies of "is this a list of links" is how they stop agreeing.
+    if (!looksLikeURIList(trimmed)) return;
+
+    // One form holds one account. A migration link holds however many the user
+    // exported, so saying where they go is more use than failing quietly.
+    if (/^otpauth-migration:\/\//i.test(trimmed)) {
+      setError(t('addAccount.pastedMigration'));
+      return;
+    }
+
+    try {
+      const parsed = parseOTPAuthURL(trimmed);
+      if (!parsed) return;
+      setName(parsed.name);
+      // "Unknown" is what the parser invents for a link with no issuer at all;
+      // it is not a name to put in front of the user as if they had typed it.
+      setIssuer(parsed.issuer === 'Unknown' ? '' : parsed.issuer);
+      setSecret(parsed.secret);
+      setAlgorithm(parsed.algorithm);
+      setDigits(parsed.digits);
+      setPeriod(parsed.period);
+      setError('');
+      // Opened, not applied silently: a link carrying 8 digits or a 60-second
+      // period has just changed settings the user never touched, and finding
+      // that out later — from codes that do not work — is worse than seeing it.
+      if (parsed.algorithm !== 'SHA1' || parsed.digits !== 6 || parsed.period !== 30) {
+        setShowAdvanced(true);
+      }
+    } catch (error) {
+      // Understood and refused, not unreadable: the existing message says so.
+      if (error instanceof UnsupportedOTPTypeError) setError(t('addAccount.errorHotp'));
+    }
   };
 
   const handleTabChange = (newTab: 'manual' | 'qr') => {
@@ -161,11 +239,16 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
         await onAdd(account);
         onClose();
       } else {
+        // The scanned text is never shown. A QR that failed to parse is still
+        // a QR somebody pointed at their secrets: a migration payload that
+        // could not be read is base64 of real seeds, and an otpauth:// link
+        // whose secret we rejected carries that secret in the query string.
+        // Printing the first hundred characters put both on screen, in the one
+        // flow people screen-share and screenshot for support. It also handed
+        // a crafted code a hundred characters of attacker-chosen text inside
+        // the extension's own chrome.
         console.error('Failed to parse QR code (content withheld)');
-        setError(
-          `${t('addAccount.errorInvalidQR')}.\n` +
-          `Scanned: ${result.substring(0, 100)}${result.length > 100 ? '...' : ''}`
-        );
+        setError(t('addAccount.errorInvalidQR'));
       }
     } catch (err) {
       console.error('QR scan error:', err);
@@ -244,43 +327,36 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
 
   return (
     <div
-      className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 z-50 flex flex-col bg-gray-50 dark:bg-dark-800"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('addAccount.title')}
       onDragOver={handleModalDragOver}
       onDrop={handleModalDrop}
     >
-      <div className="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-xl">
-        <div className="sticky top-0 bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600 p-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{t('addAccount.title')}</h2>
-          <button
-            onClick={handleClose}
-            className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors p-1"
-          >
-            <X size={20} />
-          </button>
-        </div>
+      <ModalHeader title={t('addAccount.title')} back={t('common.back')} onBack={handleClose} />
 
-        <div className="p-4">
-          <div className="flex gap-2 mb-4">
-            <button
-              onClick={() => handleTabChange('manual')}
-              className={`flex-1 py-2 px-4 rounded-lg font-medium text-sm transition-all ${
-                tab === 'manual'
-                  ? 'bg-[#4285F4] text-white'
-                  : 'bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-200 dark:hover:bg-dark-600'
-              }`}
-            >
-              {t('addAccount.manual')}
-            </button>
-            <button
-              onClick={() => handleTabChange('qr')}
-              className={`flex-1 py-2 px-4 rounded-lg font-medium text-sm transition-all ${
-                tab === 'qr'
-                  ? 'bg-[#4285F4] text-white'
-                  : 'bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-200 dark:hover:bg-dark-600'
-              }`}
-            >
-              {t('addAccount.qrCode')}
-            </button>
+      {/* max-w-md so the form does not stretch into a wide window or side
+          panel; in the popup it simply fills it. */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-md p-4">
+          {/* The same segmented control Settings uses for view mode and popup
+              size, only full width: a solid blue tab competed with the blue
+              Add button for the eye, and this is a switch, not the action. */}
+          <div className="mb-4 flex rounded-lg bg-gray-200 p-0.5 dark:bg-dark-600">
+            {([['manual', 'addAccount.manual'], ['qr', 'addAccount.qrCode']] as const).map(([id, key]) => (
+              <button
+                key={id}
+                onClick={() => handleTabChange(id)}
+                className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
+                  tab === id
+                    ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-800 dark:text-gray-100'
+                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                }`}
+              >
+                {t(key)}
+              </button>
+            ))}
           </div>
 
           {tab === 'manual' ? (
@@ -294,7 +370,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={t('addAccount.accountNamePlaceholder')}
-                  className="w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500"
+                  className={FIELD}
                 />
               </div>
 
@@ -305,28 +381,54 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                 <input
                   type="text"
                   value={secret}
-                  onChange={(e) => setSecret(e.target.value)}
+                  onChange={(e) => handleSecretChange(e.target.value)}
                   placeholder={t('addAccount.secretKeyPlaceholder')}
-                  className="w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm font-mono rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500"
+                  className={`${FIELD} font-mono placeholder:font-sans`}
                 />
-                <div className="mt-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
-                  <p className="text-xs text-blue-900 dark:text-blue-300 font-medium mb-1">{t('addAccount.whereToFind')}</p>
-                  <ul className="text-xs text-blue-800 dark:text-blue-400 space-y-1 list-disc list-inside">
-                    <li>{t('addAccount.tipCantScan')}</li>
-                    <li>{t('addAccount.tipKeyExample')} <code className="bg-blue-100 dark:bg-blue-900/40 px-1 py-0.5 rounded">JBSWY3DPEHPK3PXP</code></li>
-                    <li>{t('addAccount.tipKeyLength')}</li>
-                  </ul>
-                </div>
+                {/* The heading is the toggle, so the string is reused with its
+                    trailing colon trimmed — in every language, rather than
+                    twenty edited files. */}
+                <button
+                  type="button"
+                  onClick={() => setShowKeyHelp(!showKeyHelp)}
+                  className="mt-2 flex items-center gap-1 text-xs font-medium text-[#4285F4] transition-colors hover:text-[#3367D6]"
+                >
+                  <ChevronDown
+                    size={13}
+                    className={`transition-transform ${showKeyHelp ? 'rotate-180' : ''}`}
+                  />
+                  {t('addAccount.whereToFind').replace(/[:\uff1a]\s*$/, '')}
+                </button>
+                {showKeyHelp && (
+                  <div className="mt-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
+                    <ul className="text-xs text-blue-800 dark:text-blue-400 space-y-1 list-disc list-inside">
+                      <li>{t('addAccount.tipCantScan')}</li>
+                      <li>{t('addAccount.tipKeyExample')} <code className="bg-blue-100 dark:bg-blue-900/40 px-1 py-0.5 rounded">JBSWY3DPEHPK3PXP</code></li>
+                      <li>{t('addAccount.tipKeyLength')}</li>
+                      {/* The field parses a pasted link (handleSecretChange), and
+                          nothing else on the form said so — people were taking
+                          the link apart by hand to fill in the pieces. */}
+                      <li>{t('addAccount.tipPasteLink')}</li>
+                    </ul>
+                  </div>
+                )}
               </div>
 
               {/* Advanced Settings Toggle */}
               <div>
+                {/* The same chevron as the help above it: two disclosures a
+                    line apart drawn in two different ways read as two
+                    different kinds of control. */}
                 <button
                   type="button"
                   onClick={() => setShowAdvanced(!showAdvanced)}
-                  className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 font-medium hover:underline"
+                  className="flex items-center gap-1 text-xs font-medium text-gray-600 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
                 >
-                  {showAdvanced ? `▼ ${t('addAccount.advanced')}` : `▶ ${t('addAccount.advanced')}`}
+                  <ChevronDown
+                    size={13}
+                    className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`}
+                  />
+                  {t('addAccount.advanced')}
                 </button>
               </div>
 
@@ -341,7 +443,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                       value={issuer}
                       onChange={(e) => setIssuer(e.target.value)}
                       placeholder={t('addAccount.issuerPlaceholder')}
-                      className="w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500"
+                      className={FIELD}
                     />
                   </div>
 
@@ -353,7 +455,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                     <select
                       value={algorithm}
                       onChange={(e) => setAlgorithm(e.target.value as any)}
-                      className="w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all"
+                      className={FIELD}
                     >
                       <option value="SHA1">SHA1</option>
                       <option value="SHA256">SHA256</option>
@@ -367,10 +469,11 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                     </label>
                     <select
                       value={digits}
-                      onChange={(e) => setDigits(parseInt(e.target.value) as any)}
-                      className="w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all"
+                      onChange={(e) => setDigits(parseInt(e.target.value))}
+                      className={FIELD}
                     >
                       <option value="6">6</option>
+                      {digits !== 6 && digits !== 8 && <option value={digits}>{digits}</option>}
                       <option value="8">8</option>
                     </select>
                   </div>
@@ -383,7 +486,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                       type="number"
                       value={period}
                       onChange={(e) => setPeriod(parseInt(e.target.value))}
-                      className="w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all"
+                      className={FIELD}
                     />
                   </div>
                   </div>
@@ -409,8 +512,10 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
 
               <button
                 type="submit"
-                className="w-full bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
+                disabled={saving}
+                className="w-full bg-[#4285F4] hover:bg-[#3367D6] disabled:opacity-60 text-white font-medium text-sm py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
               >
+                {saving && <Loader2 size={16} className="animate-spin" />}
                 {t('addAccount.add')}
               </button>
             </form>
@@ -435,17 +540,24 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                 <p className="text-gray-500 dark:text-gray-400 text-xs mb-2.5">
                   {t('addAccount.orClickToUpload')}
                 </p>
-                <label className="inline-block">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleQRUpload}
-                    className="hidden"
-                  />
-                  <span className="inline-block bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-1.5 px-5 rounded-lg cursor-pointer transition-colors">
-                    {t('addAccount.chooseImage')}
-                  </span>
-                </label>
+                {/* A real button, not a styled span in a label: the input it
+                    opens is display:none, so neither the input nor the label
+                    could take focus and the only way to this — the way in for
+                    anyone whose camera cannot read a code — was the mouse. */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleQRUpload}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-block bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-1.5 px-5 rounded-lg transition-colors"
+                >
+                  {t('addAccount.chooseImage')}
+                </button>
               </div>
 
               {/* Scan from screen */}
@@ -453,7 +565,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                 <div className="absolute inset-0 flex items-center">
                   <div className="w-full border-t border-gray-200 dark:border-dark-600"></div>
                 </div>
-                <span className="relative bg-white dark:bg-dark-800 px-3 text-xs text-gray-500 dark:text-gray-400">{t('accounts.or')}</span>
+                <span className="relative bg-gray-50 dark:bg-dark-800 px-3 text-xs text-gray-500 dark:text-gray-400">{t('accounts.or')}</span>
               </div>
 
               <button

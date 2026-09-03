@@ -1,12 +1,15 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
-import { Plus, Settings, AlertTriangle, HelpCircle, Moon, Sun, Sparkles } from 'lucide-react';
+import { Plus, Settings, AlertTriangle, HelpCircle, Moon, Sun, Sparkles, ArrowLeft } from 'lucide-react';
 import { useAccounts } from '@/hooks/useAccounts';
 import { useVault } from '@/hooks/useVault';
 import { AccountCard, type ViewMode } from '@/components/AccountCard';
 import { SearchBar } from '@/components/SearchBar';
 import { AddAccountModal } from '@/components/AddAccountModal';
 import { ExportImport, importBackupText, importResultMessage } from '@/components/ExportImport';
+import { importURIList, looksLikeURIList } from '@/utils/uri-import';
+import { accountLabel } from '@/utils/account-label';
 import { EditAccountModal } from '@/components/EditAccountModal';
+import { ShareModal } from '@/components/ShareModal';
 import { BackupReminder } from '@/components/BackupReminder';
 import { UpdateModal } from '@/components/UpdateModal';
 import { PromoBanner } from '@/components/PromoBanner';
@@ -43,17 +46,66 @@ import { isSyncEnabled, setSyncEnabled, hasSyncOverflowed } from '@/utils/storag
 import { WHATS_NEW } from '@/utils/update-notes';
 import {
   cachedPopupSize,
-  popupSizeStyle,
   readPopupSize,
   rememberPopupSize,
+  rootSizeStyle,
   type PopupSize,
 } from '@/utils/popup-size';
+import {
+  detectHost,
+  getOpenMode,
+  openSidePanelNow,
+  setOpenMode,
+  sidePanelAvailable,
+  type OpenMode,
+} from '@/utils/open-mode';
+import { claimPopoutWindow, isPopoutSiteMessage, openPopoutWindow, siteOfUrl } from '@/utils/popout';
 import type { Account } from '@/types';
 
 // Straight to the Web Store review form: authenticator.sh/rate is a landing
 // page, and every extra hop between the prompt and the review box costs
 // reviews.
 const REVIEW_URL = 'https://chromewebstore.google.com/detail/2fa/ebhcbenbgjmaebpgbldimndmfomjmphd/reviews';
+
+/**
+ * The version, for the line at the foot of Settings.
+ *
+ * Read once at module load and wrapped, because it is rendered inside JSX and
+ * a throw there takes the whole popup down with it — which is exactly how an
+ * unguarded `.trim()` on a numeric field once did. An empty string simply
+ * hides the line.
+ */
+const APP_VERSION = (() => {
+  try {
+    return chrome.runtime.getManifest().version || '';
+  } catch {
+    return '';
+  }
+})();
+
+/**
+ * Which of the three surfaces this document is: the action popup, the floating
+ * window, or the side panel. Fixed for the life of the page — the same file is
+ * served under three names — so it is read once here rather than held in state.
+ */
+const HOST = detectHost();
+
+/**
+ * The site the floating window was opened for, from its URL.
+ *
+ * The popup gets this from `activeTab`, which is granted by the click that
+ * opened it. A window has no such grant and no active tab of its own, so the
+ * service worker passes the hostname it read at click time; reading it here
+ * costs no permission because it is our own URL.
+ */
+const LAUNCH_SITE = (() => {
+  if (HOST !== 'window') return null;
+  try {
+    return new URLSearchParams(location.search).get('site');
+  } catch {
+    return null;
+  }
+})();
 
 function App() {
   const vault = useVault();
@@ -77,6 +129,7 @@ function App() {
   const [language, setLanguage] = useState<Language>('en');
   const [darkMode, setDarkMode] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [sharingAccount, setSharingAccount] = useState<Account | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [showBackupReminder, setShowBackupReminder] = useState(false);
   const [showVaultPrompt, setShowVaultPrompt] = useState(false);
@@ -86,9 +139,16 @@ function App() {
   const [syncOn, setSyncOn] = useState(true);
   const [syncOverflow, setSyncOverflow] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
+  // Off unless asked for. The list is the one screen every user of this
+  // extension already knows by heart, and a coloured circle appearing beside
+  // forty-five rows is a change to it whether or not they wanted one — in the
+  // compact row it also costs the account name 24px of the width this release
+  // just spent getting back.
+  const [showAvatars, setShowAvatars] = useState(false);
   // Seeded from the synchronous mirror so the window opens at the chosen size
   // instead of resizing once chrome.storage answers.
   const [popupSize, setPopupSize] = useState<PopupSize>(cachedPopupSize);
+  const [openMode, setOpenModeState] = useState<OpenMode>('popup');
   const [currentDomain, setCurrentDomain] = useState<string | null>(null);
   const [suggestedAccountId, setSuggestedAccountId] = useState<string | null>(null);
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
@@ -102,7 +162,7 @@ function App() {
 
   // Load saved preferences
   useEffect(() => {
-    chrome.storage.local.get(['language', 'darkMode', 'viewMode', 'popupSize'], (result) => {
+    chrome.storage.local.get(['language', 'darkMode', 'viewMode', 'popupSize', 'showAvatars'], (result) => {
       // A stored language is a choice the user made and outranks everything.
       // Without one, follow the browser: twenty translated interfaces were
       // reachable only from a dropdown, so every install began in English no
@@ -116,6 +176,7 @@ function App() {
       if (result.darkMode) {
         setDarkMode(true);
       }
+      setShowAvatars(result.showAvatars === true);
       if (result.viewMode) {
         setViewMode(result.viewMode);
       }
@@ -136,6 +197,15 @@ function App() {
     applyDocumentLanguage(language);
   }, [language]);
 
+  // The floating window names itself, rather than trusting whoever opened it to
+  // have survived long enough to write the id down. See claimPopoutWindow: the
+  // switch to window mode is usually made from the action popup, which Chrome
+  // destroys the instant the new window takes focus — so the opener's write
+  // never happened and the extension could never find this window again.
+  useEffect(() => {
+    if (HOST === 'window') void claimPopoutWindow();
+  }, []);
+
   // Separate from the preferences read above: where this one lives depends on
   // whether a vault is configured, so it goes through its own module.
   useEffect(() => {
@@ -149,6 +219,7 @@ function App() {
     isQuickFillEnabled().then(setQuickFillOn);
     isSyncEnabled().then(setSyncOn);
     hasSyncOverflowed().then(setSyncOverflow);
+    getOpenMode().then(setOpenModeState);
   }, []);
 
   const handleSyncToggle = async () => {
@@ -173,6 +244,14 @@ function App() {
     if (!next) setSuggestedAccountId(null);
   };
 
+  // The search box is not rendered without accounts, and a query typed before
+  // the last one was deleted would otherwise survive invisibly — the next
+  // account added lands straight into "no accounts found", with no box on
+  // screen to clear.
+  useEffect(() => {
+    if (accounts.length === 0 && searchQuery) setSearchQuery('');
+  }, [accounts.length, searchQuery]);
+
   // Show the "What's New" modal once after an update, if we have copy for it
   useEffect(() => {
     chrome.storage.local.get('pendingWhatsNew', (result) => {
@@ -195,6 +274,36 @@ function App() {
     await loadLanguage(lang);
     setLanguage(lang);
     chrome.storage.local.set({ language: lang });
+  };
+
+  /**
+   * Switching surface takes effect on the next icon click, which is a strange
+   * thing to be told when you just clicked something — so the chosen surface is
+   * opened straight away and the one being left closes itself. The service
+   * worker re-points the toolbar icon on its own; it watches the same key.
+   */
+  const handleOpenModeChange = async (mode: OpenMode) => {
+    if (mode === openMode) return;
+    setOpenModeState(mode);
+    await setOpenMode(mode);
+
+    let opened = true;
+    if (mode === 'window') {
+      await openPopoutWindow(currentDomain ?? undefined);
+    } else if (mode === 'sidepanel') {
+      // Needs Chrome 116 and a user gesture. Both hold here, but a refusal is
+      // survivable: the panel opens on the next click of the icon either way.
+      opened = await openSidePanelNow();
+    }
+
+    // The popup and the window can dismiss themselves once the replacement is
+    // up. The side panel cannot, and does not need to — it is not in the way.
+    //
+    // `opened` is what stops this closing over nothing: on Chrome 114 and 115
+    // the panel exists but cannot be opened from script, so the popup used to
+    // vanish and leave the screen empty. Staying put means the setting is
+    // visibly applied and the next click of the icon opens the panel.
+    if (opened && mode !== HOST && HOST !== 'sidepanel') window.close();
   };
 
   const handlePopupSizeChange = (size: PopupSize) => {
@@ -344,7 +453,9 @@ function App() {
     const account = accounts.find(a => a.id === id);
     const confirmed = await confirmDialog({
       title: t('accounts.deleteAccount'),
-      body: t('accounts.deleteConfirmMsg', account?.issuer || '', account?.name || ''),
+      body: t('accounts.deleteConfirmMsg', account ? accountLabel(account) : ''),
+      warning: t('delete.warning'),
+      note: t('delete.cannotUndo'),
       confirmLabel: t('accounts.deleteAccount'),
       cancelLabel: t('common.cancel'),
       danger: true,
@@ -394,11 +505,23 @@ function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    let text = '';
+
     try {
       if (file.type.startsWith('image/')) {
         await handleQRImport(file);
+      } else if (((text = await file.text()), looksLikeURIList(text))) {
+        // The .txt this extension writes has to come back in through the input
+        // the onboarding points at, not only through the one in Settings.
+        const outcome = await importURIList(text, language);
+        if (outcome.added !== undefined) {
+          await markBackupDone((await getAccounts()).length);
+          setShowBackupReminder(false);
+          reload();
+        }
+        toast(outcome.kind, outcome.message);
       } else {
-        const imported = await importBackupText(await file.text(), () =>
+        const imported = await importBackupText(text, () =>
           promptDialog({
             title: t('import.passwordTitle'),
             body: t('import.passwordText'),
@@ -480,12 +603,36 @@ function App() {
     }
   };
 
+  // Anything that covers the whole app. Two things depend on knowing: the
+  // type-to-search shortcut, which used to send the first letter someone typed
+  // into a search box hidden behind the What's New modal, and `inert`, which
+  // keeps Tab and the mouse out of the list underneath — without it a second
+  // full-screen view could be opened on top of the first from behind it.
+  const overlayOpen = Boolean(
+    showAddModal || editingAccount || sharingAccount || showVaultSetup || whatsNewVersion
+  );
+
+  // Edit and Share each hold a whole decrypted account for as long as they are
+  // open — secret included — and an idle lock in a window or side panel
+  // arrives while one of them is. useAccounts drops its own copies; these are
+  // the two nobody else owns.
+  useEffect(() => {
+    if (vault.enabled === true && vault.locked) {
+      setEditingAccount(null);
+      setSharingAccount(null);
+    }
+  }, [vault.enabled, vault.locked]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       const isInputFocused = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
 
-      if (!isInputFocused && !showAddModal && !showSettings && searchInputRef.current) {
+      // Every full-screen view has to be listed: the search box is mounted
+      // behind them, and typing the first letter of a share label used to move
+      // focus there — the characters landed in a filter the user could not see
+      // and found applied to their list once the view closed.
+      if (!isInputFocused && !overlayOpen && !showSettings && searchInputRef.current) {
         if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
           searchInputRef.current.focus();
         }
@@ -494,7 +641,7 @@ function App() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [showAddModal, showSettings]);
+  }, [overlayOpen, showSettings]);
 
   useEffect(() => {
     chrome.storage.local.get('reviewDismissed', (result) => setReviewDismissed(!!result.reviewDismissed));
@@ -527,7 +674,9 @@ function App() {
     // already left a review.
     await chrome.storage.local.set({ reviewDismissed: true }).catch(() => {});
     // The rating block lives inside the "What's New" modal too, and that modal
-    // is re-armed from storage until it is explicitly closed.
+    // is re-armed from storage until it is explicitly closed — a rating is one
+    // of the two things that count as closing it, the other being "Got it".
+    // Following a link out of the modal is not one of them.
     handleCloseWhatsNew();
     chrome.tabs.create({ url: REVIEW_URL });
   };
@@ -571,16 +720,33 @@ function App() {
     });
   }, []);
 
-  // Read the active tab's site (activeTab permission — granted for this popup invocation)
+  // Which site to suggest an account for, and where that comes from differs by
+  // surface. The popup asks the active tab: `activeTab` is granted by the click
+  // that opened it, which is why this needs no host permission. The floating
+  // window has no such grant and no tab of its own, so the service worker hands
+  // it the hostname — in the URL when the window is created, by message when an
+  // already-open one is raised. The side panel gets neither: it outlives any
+  // one click and reading its window's tab would need the `tabs` permission,
+  // which is a "read your browsing history" warning this feature is not worth.
   useEffect(() => {
+    if (HOST === 'sidepanel') return;
+
+    if (HOST === 'window') {
+      if (LAUNCH_SITE) setCurrentDomain(LAUNCH_SITE);
+      if (!chrome.runtime?.onMessage?.addListener) return;
+      const onMessage = (message: unknown) => {
+        if (isPopoutSiteMessage(message)) setCurrentDomain(message.site);
+      };
+      chrome.runtime.onMessage.addListener(onMessage);
+      return () => chrome.runtime.onMessage.removeListener(onMessage);
+    }
+
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const url = tabs[0]?.url;
-      if (!url) return;
-      try {
-        setCurrentDomain(new URL(url).hostname);
-      } catch {
-        // Non-http(s) tab (e.g. chrome://, file://) — no domain to suggest against.
-      }
+      // siteOfUrl, not `new URL(url).hostname`: a chrome://extensions tab has
+      // the hostname "extensions", which is not a site to suggest against and
+      // used to be handed to the floating window in its URL as one.
+      const site = siteOfUrl(tabs[0]?.url);
+      if (site) setCurrentDomain(site);
     });
   }, []);
 
@@ -597,7 +763,7 @@ function App() {
   // and on a 2FA app the latter reads as "my accounts are gone".
   if (vault.enabled === null) {
     return (
-      <div style={popupSizeStyle(popupSize)} className={`flex items-center justify-center bg-white dark:bg-dark-900 ${darkMode ? 'dark' : ''}`}>
+      <div style={rootSizeStyle(HOST, popupSize)} className={`flex items-center justify-center bg-white dark:bg-dark-900 ${darkMode ? 'dark' : ''}`}>
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 dark:border-dark-600 border-t-gray-900 dark:border-t-gray-300" />
       </div>
     );
@@ -605,18 +771,26 @@ function App() {
 
   // A locked vault replaces the whole UI: no account list, no search, no
   // add button. useAccounts has already dropped the decrypted accounts from
-  // state, so there is nothing here to leak.
+  // state, and the effect above drops the two views that hold one of their
+  // own, so there is nothing here to leak.
   if (vault.enabled === true && vault.locked) {
     return (
-      <div style={popupSizeStyle(popupSize)} className={`overflow-hidden flex flex-col ${darkMode ? 'dark' : ''}`}>
+      <div style={rootSizeStyle(HOST, popupSize)} className={`overflow-hidden flex flex-col ${darkMode ? 'dark' : ''}`}>
         <div className="flex-1 flex flex-col bg-white dark:bg-dark-900 overflow-hidden">
           <div className="bg-white dark:bg-dark-900 border-b border-gray-200 dark:border-dark-700 p-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Logo size={24} />
-                <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t('app.title')}</h1>
+              {/* min-w-0 + truncate + flex-shrink-0, all three: nothing here could
+                  shrink and nothing could ellipsize, so a long title pushed the icon
+                  row past the right edge and the root's overflow-hidden cut the gear
+                  off. At the 320px popup the title has ~124px, which "Authenticator"
+                  fills to 118. Four locales need more, measured: tr 151, ru
+                  146, uk 140, fr 137. The logo is 20px rather than 24 for the same
+                  budget, and because 24px next to 18px text reads as hanging low. */}
+              <div className="flex items-center gap-2 min-w-0">
+                <Logo size={20} className="flex-shrink-0" />
+                <h1 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">{t('app.title')}</h1>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 flex-shrink-0">
                 <button
                   onClick={handleThemeToggle}
                   className="p-1.5 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
@@ -636,20 +810,53 @@ function App() {
     );
   }
 
+  // React 18 does not know the attribute, so it is spread as a string rather
+  // than passed as a boolean it would refuse to render.
+  const behindOverlay = (overlayOpen ? { inert: '' } : {}) as { inert?: string };
+
   return (
-    <div style={popupSizeStyle(popupSize)} className={`overflow-hidden flex flex-col ${darkMode ? 'dark' : ''}`}>
+    <div style={rootSizeStyle(HOST, popupSize)} className={`overflow-hidden flex flex-col ${darkMode ? 'dark' : ''}`}>
       <div className="flex-1 flex flex-col bg-white dark:bg-dark-900 overflow-hidden">
+      {/* display:contents, so this changes nothing about the layout and only
+          carries `inert` for everything a full-screen view covers. It has to
+          close before the views themselves, which are rendered further down
+          inside this same column. */}
+      <div className="contents" {...behindOverlay}>
 
       {/* Header */}
       {/* With the chips up, the header's own bottom padding stacks on the strip's
           top padding — trimmed so search and chips read as one block. */}
       <div className={`flex-shrink-0 bg-white dark:bg-dark-900 p-4 ${showGroupFilter ? 'pb-2' : 'border-b border-gray-200 dark:border-dark-700'}`}>
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Logo size={24} />
-            <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{t('app.title')}</h1>
+          {/* min-w-0 + truncate + flex-shrink-0, all three: nothing here could
+              shrink and nothing could ellipsize, so a long title pushed the icon
+              row past the right edge and the root's overflow-hidden cut the gear
+              off. At the 320px popup the title has ~124px, which "Authenticator"
+              fills to 118. Four locales need more, measured: tr 151, ru
+              146, uk 140, fr 137. The logo is 20px rather than 24 for the same
+              budget, and because 24px next to 18px text reads as hanging low. */}
+          {/* Settings is a screen, not an overlay, so the header says which
+              screen you are on and offers the way back. A gear that stays lit
+              does not read as "press again to leave" — people looked for a
+              back control and there wasn't one. */}
+          <div className="flex items-center gap-2 min-w-0">
+            {showSettings ? (
+              <button
+                onClick={() => setShowSettings(false)}
+                aria-label={t('common.back')}
+                title={t('common.back')}
+                className="-ms-1 -me-1 flex-shrink-0 rounded-lg p-1 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-gray-100"
+              >
+                <ArrowLeft size={20} className="rtl:rotate-180" />
+              </button>
+            ) : (
+              <Logo size={20} className="flex-shrink-0" />
+            )}
+            <h1 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
+              {showSettings ? t('header.settings') : t('app.title')}
+            </h1>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-shrink-0">
             <button
               onClick={handleThemeToggle}
               className="p-1.5 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
@@ -686,7 +893,9 @@ function App() {
           </div>
         </div>
 
-        {!showSettings && <SearchBar ref={searchInputRef} className="mt-3" value={searchQuery} onChange={setSearchQuery} placeholder={t('search.placeholder')} />}
+        {/* Nothing to search until something is stored, and in the empty
+            state the box is 44px of the pane the setup guide needs. */}
+        {!showSettings && accounts.length > 0 && <SearchBar ref={searchInputRef} className="mt-3" value={searchQuery} onChange={setSearchQuery} placeholder={t('search.placeholder')} />}
       </div>
 
       {/* Error/Warning Messages */}
@@ -710,7 +919,7 @@ function App() {
         </div>
       )}
 
-      {timeOffsetSec !== null && !error && (
+      {timeOffsetSec !== null && !error && !showSettings && (
         <div className="bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 p-3 flex items-start gap-2">
           <AlertTriangle className="text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" size={16} />
           <div className="text-xs text-yellow-800 dark:text-yellow-300 flex-1">
@@ -742,7 +951,9 @@ function App() {
       )}
 
       {/* Backup Reminder */}
-      {showBackupReminder && !error && timeOffsetSec === null && (
+      {/* Not over Settings: its own Export button is on that screen, four lines
+          below, and the strip's button only opens the screen you are on. */}
+      {showBackupReminder && !error && timeOffsetSec === null && !showSettings && (
         <BackupReminder
           language={language}
           onExport={handleBackupFromReminder}
@@ -766,7 +977,8 @@ function App() {
           the account list is not rendered underneath it. Codes and settings
           sharing one scroll made the popup read as a single long page. */}
       {showSettings && (
-        <div className="flex-1 overflow-y-auto p-4 bg-gray-50 dark:bg-dark-800">
+        <div className="flex-1 flex flex-col min-h-0 bg-gray-50 dark:bg-dark-800">
+          <div className="flex-1 overflow-y-auto p-4">
           <h3 className="text-gray-900 dark:text-gray-100 font-medium mb-3 text-sm">{t('settings.backupRestore')}</h3>
           <ExportImport onImportComplete={reload} onExportComplete={() => setShowBackupReminder(false)} language={language} />
 
@@ -787,10 +999,16 @@ function App() {
           {/* The clock, stated plainly — including when we could not check it.
               Codes depend on it, and a check that quietly stopped running is
               indistinguishable from a healthy one without a line like this. */}
-          <div className="mt-3 flex items-start justify-between gap-2">
-            <div className="text-[11px] text-gray-600 dark:text-gray-400">
-              <div className="font-medium text-gray-700 dark:text-gray-300">{t('settings.clock')}</div>
-              <div className={clockStatus?.state === 'off' ? 'text-yellow-700 dark:text-yellow-500' : ''}>
+          <div className="mt-4 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <span className="text-sm text-gray-700 dark:text-gray-300">{t('settings.clock')}</span>
+              <p
+                className={`mt-0.5 text-[11px] ${
+                  clockStatus?.state === 'off'
+                    ? 'text-yellow-700 dark:text-yellow-500'
+                    : 'text-gray-500 dark:text-gray-400'
+                }`}
+              >
                 {clockChecking
                   ? t('settings.clockChecking')
                   : clockStatus === null || clockStatus.state === 'unknown'
@@ -801,7 +1019,7 @@ function App() {
                           clockStatus.corrected ? 'settings.clockOff' : 'settings.clockOffUncorrected',
                           Math.max(1, Math.round(Math.abs(clockStatus.offsetSeconds) / 60))
                         )}
-              </div>
+              </p>
             </div>
             <button
               onClick={async () => {
@@ -815,11 +1033,22 @@ function App() {
                 }
               }}
               disabled={clockChecking}
-              className="flex-shrink-0 text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+              className="mt-0.5 flex-shrink-0 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
             >
               {t('settings.clockRecheck')}
             </button>
           </div>
+
+          <SettingToggle
+            label={t('settings.avatars')}
+            hint={t('settings.avatarsHint')}
+            checked={showAvatars}
+            onChange={() => {
+              const next = !showAvatars;
+              setShowAvatars(next);
+              chrome.storage.local.set({ showAvatars: next });
+            }}
+          />
 
           <SettingToggle
             label={t('settings.suggested')}
@@ -852,6 +1081,39 @@ function App() {
             </div>
           </div>
 
+          <div className="mt-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-700 dark:text-gray-300">{t('settings.openIn')}</span>
+              <div className="flex bg-gray-200 dark:bg-dark-600 rounded-lg p-0.5">
+                {(
+                  [
+                    ['popup', 'settings.openInPopup'],
+                    ['window', 'settings.openInWindow'],
+                    // Chrome 114 added the side panel; older browsers are not
+                    // offered a mode that would leave the icon doing nothing.
+                    ...(sidePanelAvailable() ? [['sidepanel', 'settings.openInSidePanel'] as const] : []),
+                  ] as const
+                ).map(([mode, key]) => (
+                  <button
+                    key={mode}
+                    onClick={() => handleOpenModeChange(mode as OpenMode)}
+                    className={`text-xs font-medium px-2.5 py-1 rounded-md transition-colors ${
+                      openMode === mode
+                        ? 'bg-white dark:bg-dark-800 text-gray-900 dark:text-gray-100 shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400'
+                    }`}
+                  >
+                    {t(key)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{t('settings.openInHint')}</p>
+          </div>
+
+          {/* Only the popup is sized by its document; the other two are sized by
+              dragging their edges, so the preset would control nothing there. */}
+          {HOST === 'popup' && (
           <div className="mt-4 flex items-center justify-between">
             <span className="text-sm text-gray-700 dark:text-gray-300">{t('settings.popupSize')}</span>
             <div className="flex bg-gray-200 dark:bg-dark-600 rounded-lg p-0.5">
@@ -868,6 +1130,7 @@ function App() {
               ))}
             </div>
           </div>
+          )}
 
           <VaultSettings
             language={language}
@@ -881,6 +1144,23 @@ function App() {
             onLock={() => vault.lock()}
             onAutoLockChange={vault.setAutoLockMinutes}
           />
+
+          {/* Selectable on purpose: the first thing a support reply asks for is
+              the version, and reading it off chrome://extensions means leaving
+              the popup to answer. */}
+          {APP_VERSION && (
+            <p className="mt-5 select-text text-center text-[11px] text-gray-400 dark:text-gray-500">
+              {t('settings.version', APP_VERSION)}
+              <span aria-hidden="true"> · </span>
+              <button
+                onClick={handleRate}
+                className="underline hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                {t('settings.rateUs')}
+              </button>
+            </p>
+          )}
+          </div>
         </div>
       )}
 
@@ -974,8 +1254,10 @@ function App() {
                     account={suggestedAccount}
                     onDelete={handleDeleteAccount}
                     onEdit={setEditingAccount}
+                    onShare={setSharingAccount}
                     language={language}
                     viewMode={viewMode}
+                    showAvatar={showAvatars}
                     draggable={false}
                     currentDomain={currentDomain}
                     // Same account, same badge: pinned at the top it was the one
@@ -993,8 +1275,10 @@ function App() {
                 account={account}
                 onDelete={handleDeleteAccount}
                 onEdit={setEditingAccount}
+                onShare={setSharingAccount}
                 language={language}
                 viewMode={viewMode}
+                showAvatar={showAvatars}
                 // handleDrop rewrites the order of the full list, so dragging
                 // inside a filtered view would reorder against indices the user
                 // cannot see. Off while filtered, as it already is while searching.
@@ -1048,6 +1332,7 @@ function App() {
           <Plus size={24} />
         </button>
       )}
+      </div>
 
       {/* Add Account Modal */}
       {showAddModal && (
@@ -1068,6 +1353,15 @@ function App() {
           onSave={handleEditAccount}
           language={language}
           groups={groups.map(group => group.name)}
+        />
+      )}
+
+      {/* Share codes by link */}
+      {sharingAccount && (
+        <ShareModal
+          account={sharingAccount}
+          language={language}
+          onClose={() => setSharingAccount(null)}
         />
       )}
 
@@ -1100,7 +1394,7 @@ function App() {
       <input
         ref={importInputRef}
         type="file"
-        accept="application/json,image/*"
+        accept="application/json,text/plain,image/*"
         onChange={handleImportFile}
         className="hidden"
       />

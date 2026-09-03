@@ -154,6 +154,41 @@ promotion or any other purpose. The click on that item is also the user gesture
 that authorises everything the feature then does, which is why this is a menu
 item and not something that happens on its own.
 
+**storage.** Everything the extension holds is the user's own: their TOTP
+accounts and the settings that describe how to show them. `chrome.storage.local`
+is the primary copy; `chrome.storage.session` holds the unlocked vault key for as
+long as the user's auto-lock setting allows, so it never touches disk;
+`chrome.storage.sync` is an optional second copy, off unless the user turns it on
+and removed from Google's servers when they turn it off. Nothing about the pages
+they visit is stored, and nothing is sent anywhere - the extension has no server
+and no analytics. Without this permission the extension cannot remember a single
+account between one click of the toolbar icon and the next, which is the whole
+function.
+
+**activeTab.** Two things, both started by the user's own click on the toolbar
+icon. The hostname of the tab they were on is read so the account for that site
+is offered first instead of making them search a list of a hundred; only the
+hostname is used, and it is not stored or transmitted. And "Scan QR from screen"
+captures that one visible tab, so somebody enrolling in 2FA can scan the code on
+screen without photographing their own monitor. Both are limited to the tab that
+was active when the click happened and to that one invocation - activeTab grants
+nothing before the click and nothing after the tab navigates. The extension
+declares no host permissions, so there is no access to any other tab, and no
+browsing history is readable at all.
+
+**sidePanel.** New in 1.13.0. Settings gained an "Open as" choice: the toolbar
+icon can open the app in the usual popup, in a small floating window, or in
+Chrome's side panel. A popup closes the instant it loses focus, which is wrong
+for reading a code off the screen while typing it into a form on the page behind
+it - the popup is gone before the code has been used. The side panel stays open
+while the user moves between tabs. `chrome.sidePanel` is only used to register
+the extension's own page as the panel's content and to open it on the user's
+click; the panel shows the same account list as the popup and nothing else. It
+reads no page and grants no access to one - the panel deliberately does not even
+suggest the account for the current site, because that would need the `tabs`
+permission. The option is hidden entirely on Chrome versions without a side
+panel.
+
 **scripting.** The same quick-fill feature has to put the generated code into the
 field on the page, and `chrome.scripting.executeScript` is the only way to do
 that. It runs once per user action - the right-click item above or its keyboard

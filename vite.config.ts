@@ -20,6 +20,12 @@ function copyFilesPlugin() {
         readFileSync(resolve(__dirname, 'dist/src/popup/index.html'), 'utf-8')
       );
       writeFileSync(resolve(__dirname, 'dist/popup.html'), popupHtml);
+      // The same document under two more names: the floating window and the
+      // side panel. The page tells which it is from its file name (see
+      // utils/open-mode.ts), so these must stay byte-identical copies rather
+      // than become entries of their own.
+      writeFileSync(resolve(__dirname, 'dist/window.html'), popupHtml);
+      writeFileSync(resolve(__dirname, 'dist/sidepanel.html'), popupHtml);
 
       const scanHtml = rewriteAbsoluteAssets(
         readFileSync(resolve(__dirname, 'dist/src/scan/index.html'), 'utf-8')

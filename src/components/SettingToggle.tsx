@@ -29,9 +29,13 @@ export function SettingToggle({ label, hint, checked, onChange }: SettingToggleP
           checked ? 'bg-[#4285F4]' : 'bg-gray-300 dark:bg-dark-500'
         }`}
       >
+        {/* rtl:-translate-x-4 is not decoration: a CSS transform does not mirror
+            under dir=rtl. In Arabic the flex row starts the knob at the right
+            edge already, so the positive shift pushed it a full 16px — the whole
+            travel of a 36px track — clean out of the track. */}
         <span
           className={`block w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${
-            checked ? 'translate-x-4' : 'translate-x-0'
+            checked ? 'translate-x-4 rtl:-translate-x-4' : 'translate-x-0'
           }`}
         />
       </button>
