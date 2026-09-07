@@ -1,12 +1,32 @@
-# 2FA Authenticator
+<div align="center">
 
-A privacy-focused TOTP authenticator for Chrome. We operate no servers, collect no analytics and receive none of your data. Accounts are stored by the browser, and optionally synced through your own Google account — see [Where your data lives](#where-your-data-lives).
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.png">
+  <img src=".github/assets/banner-light.png" alt="Authenticator" width="360">
+</picture>
 
-- **Chrome Web Store:** [2FA Authenticator](https://chromewebstore.google.com/detail/2fa/ebhcbenbgjmaebpgbldimndmfomjmphd)
-- **Website:** [authenticator.sh](https://authenticator.sh)
-- **Security policy:** [authenticator.sh/security](https://authenticator.sh/security)
-- **Privacy policy:** [authenticator.sh/privacy](https://authenticator.sh/privacy)
-- **Feature requests:** [authenticator.featurebase.app](https://authenticator.featurebase.app)
+**TOTP codes in Chrome. No servers, no analytics, no host permissions.**
+
+[![Chrome Web Store](https://img.shields.io/chrome-web-store/v/ebhcbenbgjmaebpgbldimndmfomjmphd?label=chrome%20web%20store&color=4285f4)](https://chromewebstore.google.com/detail/2FA/ebhcbenbgjmaebpgbldimndmfomjmphd)
+[![Users](https://img.shields.io/chrome-web-store/users/ebhcbenbgjmaebpgbldimndmfomjmphd?label=users&color=4285f4)](https://chromewebstore.google.com/detail/2FA/ebhcbenbgjmaebpgbldimndmfomjmphd)
+[![Rating](https://img.shields.io/chrome-web-store/rating/ebhcbenbgjmaebpgbldimndmfomjmphd?label=rating&color=e37400)](https://chromewebstore.google.com/detail/2FA/ebhcbenbgjmaebpgbldimndmfomjmphd/reviews)
+[![Checks](https://img.shields.io/github/actions/workflow/status/authenticator-sh/2fa/checks.yml?branch=main&label=checks)](https://github.com/authenticator-sh/2fa/actions/workflows/checks.yml)
+[![Host permissions: none](https://img.shields.io/badge/host_permissions-none-34a853)](#permissions)
+[![License: MIT](https://img.shields.io/badge/license-MIT-4285f4)](LICENSE)
+
+[Install](https://chromewebstore.google.com/detail/2FA/ebhcbenbgjmaebpgbldimndmfomjmphd) ·
+[Website](https://authenticator.sh) ·
+[How it works](https://authenticator.sh/how-it-works) ·
+[Security](https://authenticator.sh/security) ·
+[Privacy](https://authenticator.sh/privacy) ·
+[FAQ](https://authenticator.sh/faq) ·
+[Feature requests](https://authenticator.featurebase.app)
+
+<img src=".github/assets/screenshot.png" alt="The extension's popup: a searchable list of accounts, each with its current code and the seconds left on it" width="440">
+
+</div>
+
+A privacy-focused TOTP authenticator for Chrome. We receive none of your data on any path. Accounts are stored by the browser, and optionally synced through your own Google account — see [Where your data lives](#where-your-data-lives).
 
 ## Features
 
@@ -409,7 +429,7 @@ Report security issues to **security@authenticator.sh** — please do **not** op
 
 ## Contributing
 
-Bug reports and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting.
+Bug reports and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting, and the [Code of Conduct](CODE_OF_CONDUCT.md) for how we expect people to treat each other here.
 
 ## Technology
 

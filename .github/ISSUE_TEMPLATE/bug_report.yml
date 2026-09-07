@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in the extension does not work
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A bug that exposes account data or TOTP secrets is a security issue:
+        email **security@authenticator.sh** instead of filing it here. See
+        [SECURITY.md](https://github.com/authenticator-sh/2fa/blob/main/SECURITY.md).
+
+        Never paste a secret key, a QR code, an export file or a recovery code
+        into an issue — everything here is public, and those are the whole
+        account.
+  - type: input
+    id: version
+    attributes:
+      label: Extension version
+      description: Shown at the bottom of Settings, and in `chrome://extensions`.
+      placeholder: "1.13.0"
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: "Chrome 141 on macOS 15.4"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the popup
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behaviour
+      description: What you expected to happen, and what happened instead. Screenshots help — with the codes cropped out.
+    validations:
+      required: true
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: |
+        Optional. Right-click the popup → Inspect, or open the service worker
+        from `chrome://extensions`, and paste anything red.
+      render: text

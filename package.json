@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "generate-icons": "node generate-icons.cjs",
+    "brand-assets": "node scripts/brand-assets.mjs",
     "checksums": "node scripts/checksums.js",
     "test": "tsx test/run.ts",
     "check:deps": "tsx scripts/check-deps.ts",

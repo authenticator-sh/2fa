@@ -1,0 +1,13 @@
+# Blank issues stay on: CONTRIBUTING asks for an issue before any non-trivial
+# pull request, and that conversation does not fit a bug form.
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/authenticator-sh/2fa/blob/main/SECURITY.md
+    about: Do not open a public issue. Email security@authenticator.sh — see the disclosure policy.
+  - name: Feature request
+    url: https://authenticator.featurebase.app
+    about: Ideas and votes live on the public board, where other people can add theirs.
+  - name: Help with the extension
+    url: https://authenticator.sh/support
+    about: Recovery, imports, a code that will not work — support answers by email.
