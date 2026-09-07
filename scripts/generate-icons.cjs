@@ -2,8 +2,8 @@ const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
 
-const svgPath = path.join(__dirname, 'public', 'icons', 'icon.svg');
-const outputDir = path.join(__dirname, 'public', 'icons');
+const svgPath = path.join(__dirname, '..', 'public', 'icons', 'icon.svg');
+const outputDir = path.join(__dirname, '..', 'public', 'icons');
 
 const sizes = [16, 48, 128];
 

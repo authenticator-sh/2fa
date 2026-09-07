@@ -16,7 +16,7 @@ true; the order is not cosmetic.
 - `package.json` and `public/manifest.json` carry the same new version.
   `scripts/checksums.js` refuses to write a file when `dist/` and the source
   disagree, which is how a sums file named after the wrong release is avoided.
-- `RELEASE-NOTES-v<version>.md` exists and covers **everything the update modal
+- `docs/release-notes/v<version>.md` exists and covers **everything the update modal
   announces**. Whoever arrives from GitHub sees only this file — no site page,
   no modal. In 1.12.0 the headline feature was missing from it entirely.
 - `src/utils/update-notes.ts` has an entry for the version: one short line per
@@ -104,7 +104,7 @@ with what the code actually does, because a reviewer checks.
 
 ## 6. GitHub Release
 
-Create it from the tag, body from `RELEASE-NOTES-v<version>.md`, with three
+Create it from the tag, body from `docs/release-notes/v<version>.md`, with three
 assets attached:
 
 - `SHA256SUMS-v<version>.txt`
@@ -118,7 +118,7 @@ pointing at nothing worth reading.
 
 ```bash
 gh release create v<version> --title "v<version>" \
-  --notes-file RELEASE-NOTES-v<version>.md \
+  --notes-file docs/release-notes/v<version>.md \
   SHA256SUMS-v<version>.txt authenticator-v<version>.zip authenticator-v<version>.crx
 ```
 

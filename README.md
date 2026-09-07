@@ -429,7 +429,13 @@ Report security issues to **security@authenticator.sh** — please do **not** op
 
 ## Contributing
 
-Bug reports and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting, and the [Code of Conduct](CODE_OF_CONDUCT.md) for how we expect people to treat each other here.
+Bug reports and pull requests are welcome. Please read [CONTRIBUTING.md](.github/CONTRIBUTING.md) before submitting, and the [Code of Conduct](.github/CODE_OF_CONDUCT.md) for how we expect people to treat each other here.
+
+## Docs
+
+- [Installing from source](docs/install.md)
+- [Release notes](docs/release-notes/) — what changed in each version
+- [Release checklist](docs/releasing.md) and [review checklist](docs/review-checklist.md)
 
 ## Technology
 

@@ -4,7 +4,7 @@ Thanks for your interest in contributing.
 
 ## Security Issues
 
-**Do not open public issues for security vulnerabilities.** See [SECURITY.md](SECURITY.md) and email security@authenticator.sh instead.
+**Do not open public issues for security vulnerabilities.** See [SECURITY.md](../SECURITY.md) and email security@authenticator.sh instead.
 
 ## Bug Reports
 
@@ -45,7 +45,7 @@ Then load `dist/` as an unpacked extension in `chrome://extensions` with Develop
 
 ## Releasing
 
-[`docs/releasing.md`](docs/releasing.md) carries the whole order — build,
+[`docs/releasing.md`](../docs/releasing.md) carries the whole order — build,
 package, tag, site, store, release — and why each step sits where it does. The
 short version:
 
@@ -75,4 +75,4 @@ language.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).
+By contributing, you agree that your contributions will be licensed under the [MIT License](../LICENSE).
