@@ -164,6 +164,11 @@ type TranslationKeys = {
   'review.rateStars': string;
   'review.later': string;
 
+  // Product Hunt launch banner
+  'productHunt.body': string;
+  'productHunt.visit': string;
+  'productHunt.notNow': string;
+
   // Theme
   'theme.toggle': string;
 

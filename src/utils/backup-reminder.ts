@@ -3,7 +3,8 @@ import { ageOf, deadlinePending } from './clock';
 
 const STORAGE_KEY = 'backupReminder';
 
-const SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
+const ONE_DAY = 24 * 60 * 60 * 1000;
+const SNOOZE_MS = 7 * ONE_DAY;
 const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
 
 interface BackupReminderState {
@@ -57,20 +58,30 @@ export async function shouldShowBackupReminder(accountCount: number): Promise<bo
   // Never exported — show
   if (!state.lastManualBackupDate) return true;
 
+  // An export stamped in the future counts as old rather than as "just backed
+  // up": nudging someone to export again costs a click, and the other direction
+  // costs them every account.
+  const exportAge = ageOf(state.lastManualBackupDate) ?? Infinity;
+
   // No automatic snapshots either. That means IndexedDB is unavailable on this
   // profile — blocked site data, a corrupt profile, a full disk — and the
   // silent half of the safety net is simply not there. Nothing surfaced this
   // before: checkBackupHealth existed and had no callers, so the only remaining
   // protection was a manual export the user had no reason to think about.
-  const health = await checkBackupHealth();
-  if (!health.hasBackups) return true;
+  //
+  // Only once the file is more than a day old. The first snapshot is written by
+  // a load nobody awaits, so on a fresh profile — which is where people restore
+  // from a file — this ran before it landed and asked the user to back up the
+  // accounts they had restored from a backup a second earlier. A file from the
+  // last day covers the gap until the first snapshot is due anyway; after that,
+  // no snapshots really does mean there is no IndexedDB to write them to.
+  if (exportAge > ONE_DAY) {
+    const health = await checkBackupHealth();
+    if (!health.hasBackups) return true;
+  }
 
-  // Exported more than 30 days ago AND new accounts added since. An export
-  // stamped in the future counts as old rather than as "just backed up".
-  // An export stamped in the future counts as old rather than as "just backed
-  // up": nudging someone to export again costs a click, and the other direction
-  // costs them every account.
-  const isOld = (ageOf(state.lastManualBackupDate) ?? Infinity) > THIRTY_DAYS;
+  // Exported more than 30 days ago AND new accounts added since.
+  const isOld = exportAge > THIRTY_DAYS;
   const hasNewAccounts = accountCount > state.accountCountAtLastBackup;
 
   return isOld && hasNewAccounts;

@@ -329,6 +329,9 @@ const strings: TranslationStrings = {
   "share.done": "Xong",
   "update.feature.shareCodes": "Chia sẻ mã của một tài khoản qua liên kết — tối đa một giờ, không bao giờ giao khóa bí mật.",
   "update.feature.openIn": "Mã có thể mở trong cửa sổ riêng hoặc bảng bên thay vì popup — chúng không đóng khi bạn chuyển tab, nên mã luôn ở trước mắt.",
+  "productHunt.body": "Hôm nay chúng tôi có mặt trên Product Hunt — trang web nơi mọi người khám phá ứng dụng mới. Nếu Authenticator hữu ích với bạn, một bình luận ngắn ở đó sẽ giúp người khác tìm thấy nó.",
+  "productHunt.visit": "Để lại bình luận",
+  "productHunt.notNow": "Để sau",
 };
 
 export default strings;

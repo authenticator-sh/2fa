@@ -7,6 +7,11 @@
 // can add their vote.
 export const FEATURE_REQUEST_URL = 'https://authenticator.featurebase.app';
 
+// The Product Hunt launch, through the site's own redirect: this address ships
+// inside installed copies we cannot update, and the redirect can be repointed
+// without a release. The tag passes through the redirect to Product Hunt.
+export const PRODUCT_HUNT_URL = 'https://www.authenticator.sh/producthunt?utm_source=extension';
+
 /**
  * The help page, in the reader's own language.
  *

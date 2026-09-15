@@ -329,6 +329,9 @@ const strings: TranslationStrings = {
   "share.done": "Klaar",
   "update.feature.shareCodes": "Deel de codes van een account via een link — tot een uur lang, en de geheime sleutel verlaat nooit je apparaat.",
   "update.feature.openIn": "Codes kunnen nu in een apart venster of het zijpaneel openen in plaats van een pop-up — die blijven open als je van tabblad wisselt, dus de code blijft in beeld.",
+  "productHunt.body": "We staan vandaag op Product Hunt — een site waar mensen nieuwe apps ontdekken. Heb je iets aan Authenticator gehad? Een korte reactie daar helpt anderen het te vinden.",
+  "productHunt.visit": "Reactie plaatsen",
+  "productHunt.notNow": "Niet nu",
 };
 
 export default strings;

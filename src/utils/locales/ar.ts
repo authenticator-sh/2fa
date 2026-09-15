@@ -329,6 +329,9 @@ const strings: TranslationStrings = {
   "share.done": "تم",
   "update.feature.shareCodes": "شارك رموز حساب عبر رابط — لمدة تصل إلى ساعة، والمفتاح السري لا يغادر جهازك أبدًا.",
   "update.feature.openIn": "يمكن الآن فتح الرموز في نافذة منفصلة أو في اللوحة الجانبية بدل النافذة المنبثقة — فكلاهما يبقى مفتوحًا عند تبديل التبويبات، ويبقى الرمز أمامك.",
+  "productHunt.body": "نحن على Product Hunt اليوم — موقع يكتشف فيه الناس تطبيقات جديدة. إذا كان Authenticator مفيدًا لك، فتعليق قصير هناك يساعد الآخرين على العثور عليه.",
+  "productHunt.visit": "اترك تعليقًا",
+  "productHunt.notNow": "ليس الآن",
 };
 
 export default strings;

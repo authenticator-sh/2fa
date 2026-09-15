@@ -329,6 +329,9 @@ const strings: TranslationStrings = {
   "share.done": "Concluído",
   "update.feature.shareCodes": "Compartilhe os códigos de uma conta por link — por até uma hora, e a chave secreta nunca sai do seu dispositivo.",
   "update.feature.openIn": "Os códigos podem abrir numa janela flutuante ou no painel lateral em vez do popup: não fecham ao trocar de aba, então o código continua à vista.",
+  "productHunt.body": "Hoje estamos no Product Hunt — um site onde as pessoas descobrem novos apps. Se o Authenticator foi útil para você, um comentário rápido lá ajuda outras pessoas a encontrá-lo.",
+  "productHunt.visit": "Deixar um comentário",
+  "productHunt.notNow": "Agora não",
 };
 
 export default strings;

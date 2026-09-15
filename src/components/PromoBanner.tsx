@@ -15,6 +15,17 @@ export function PromoBanner({ language, onDismiss }: PromoBannerProps) {
     onDismiss();
   };
 
+  // Following the link is an answer too: whoever has been to the listing does
+  // not need the same offer under their codes on every open after. Dismissed
+  // before the tab opens, because opening a tab tears the popup down and a write
+  // still in flight goes with it — the same order handleRate in App.tsx keeps.
+  const handleOpen = async (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    await dismissPromoBanner();
+    onDismiss();
+    chrome.tabs.create({ url: PROMO_URL });
+  };
+
   return (
     <div className="mx-3 my-3 relative rounded-xl border border-blue-100 dark:border-dark-600 bg-gradient-to-br from-blue-50/80 to-indigo-50/50 dark:from-blue-900/15 dark:to-dark-800 p-3">
       <button
@@ -35,6 +46,7 @@ export function PromoBanner({ language, onDismiss }: PromoBannerProps) {
             href={PROMO_URL}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={handleOpen}
             className="text-xs text-[#4285F4] hover:text-[#3367D6] font-medium hover:underline"
           >
             {t('promo.cta')}

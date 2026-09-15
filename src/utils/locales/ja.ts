@@ -329,6 +329,9 @@ const strings: TranslationStrings = {
   "share.done": "完了",
   "update.feature.shareCodes": "アカウントのコードをリンクで共有できます。最長1時間まで、シークレットキーは端末から一切出ません。",
   "update.feature.openIn": "コードをポップアップではなく、独立したウィンドウや Chrome のサイドパネルで開けるようになりました。タブを切り替えても閉じないので、コードが目の前に残ります。",
+  "productHunt.body": "本日、Product Hunt に掲載されています。新しいアプリが見つかるサイトです。Authenticator がお役に立っているなら、そこに短いコメントを残していただけると、ほかの人が見つけやすくなります。",
+  "productHunt.visit": "コメントを書く",
+  "productHunt.notNow": "今はいいです",
 };
 
 export default strings;

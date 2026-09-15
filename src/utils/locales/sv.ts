@@ -329,6 +329,9 @@ const strings: TranslationStrings = {
   "share.done": "Klar",
   "update.feature.shareCodes": "Dela ett kontos koder via länk – i upp till en timme, utan att någonsin lämna ut den hemliga nyckeln.",
   "update.feature.openIn": "Koderna kan nu öppnas i ett eget fönster eller sidopanelen i stället för en popup — de stängs inte när du byter flik, så koden finns kvar framför dig.",
+  "productHunt.body": "Vi finns på Product Hunt i dag – en sajt där folk hittar nya appar. Om Authenticator har varit till nytta för dig hjälper en kort kommentar där andra att hitta den.",
+  "productHunt.visit": "Skriv en kommentar",
+  "productHunt.notNow": "Inte nu",
 };
 
 export default strings;

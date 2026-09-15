@@ -35,6 +35,9 @@ import { confirmDialog, promptDialog, toast } from '@/utils/ui-feedback';
 import { FeedbackHost } from '@/components/FeedbackHost';
 import { shouldShowPromoBanner, recordFirstOpen } from '@/utils/promo-banner';
 import { recordOpen, shouldShowReviewPrompt, snoozeReviewPrompt } from '@/utils/review-prompt';
+import { clearUpdateBadge } from '@/utils/update-badge';
+import { productHuntDue } from '@/utils/product-hunt';
+import { ProductHuntBanner } from '@/components/ProductHuntBanner';
 import { readActiveGroup, rememberActiveGroup, forgetActiveGroup } from '@/utils/active-group';
 import { helpUrl } from '@/utils/links';
 import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/utils/qr-parser';
@@ -155,6 +158,7 @@ function App() {
   const [showPromoBanner, setShowPromoBanner] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [openCount, setOpenCount] = useState<number | null>(null);
+  const [showProductHunt, setShowProductHunt] = useState(false);
   const [showReviewPrompt, setShowReviewPrompt] = useState(false);
   const draggedIdRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -254,6 +258,9 @@ function App() {
 
   // Show the "What's New" modal once after an update, if we have copy for it
   useEffect(() => {
+    // The dot on the toolbar icon only asked for this open. The modal stays
+    // armed until it is closed; the dot does not need to.
+    clearUpdateBadge().catch(() => {});
     chrome.storage.local.get('pendingWhatsNew', (result) => {
       const version = result.pendingWhatsNew;
       if (version && WHATS_NEW[version]) {
@@ -655,6 +662,14 @@ function App() {
     shouldShowReviewPrompt(openCount, accounts.length).then(setShowReviewPrompt);
   }, [loading, openCount, accounts.length]);
 
+  // The Product Hunt banner — see product-hunt.ts for when and why. Same
+  // readiness as the review ask above: while loading, and behind a locked
+  // vault, the list is empty and says nothing about the person holding it.
+  useEffect(() => {
+    if (loading || openCount === null || accounts.length === 0) return;
+    productHuntDue().then(setShowProductHunt);
+  }, [loading, openCount, accounts.length]);
+
   const handleSnoozeReview = async () => {
     setShowReviewPrompt(false);
     if (openCount !== null) await snoozeReviewPrompt(openCount);
@@ -692,11 +707,22 @@ function App() {
   // protecting — see vault-prompt.ts for the reasoning behind the timing.
   useEffect(() => {
     if (loading || vault.enabled === null) return;
-    shouldShowVaultPrompt(accounts.length, vault.enabled).then(show => {
-      setShowVaultPrompt(show);
-      if (show) markVaultPromptShown();
-    });
+    shouldShowVaultPrompt(accounts.length, vault.enabled).then(setShowVaultPrompt);
   }, [loading, accounts.length, vault.enabled]);
+
+  // The vault offer is the notice up top that gives way to all the others — an
+  // error, the clock warning, the backup reminder, the Product Hunt banner — so
+  // its three showings are counted when it is on screen, not when it is due.
+  // Counted when due, someone with a backup reminder up on every open spent all
+  // three without once seeing the offer.
+  const vaultPromptVisible =
+    showVaultPrompt && !showBackupReminder && !showProductHunt && !error && timeOffsetSec === null && !showSettings;
+  const vaultPromptCounted = useRef(false);
+  useEffect(() => {
+    if (!vaultPromptVisible || vaultPromptCounted.current) return;
+    vaultPromptCounted.current = true;
+    markVaultPromptShown();
+  }, [vaultPromptVisible]);
 
   // Cross-promo banner — only for users active for at least a week
   useEffect(() => {
@@ -950,10 +976,20 @@ function App() {
         </div>
       )}
 
+      {/* The Product Hunt launch, for the day it lasts. Above the codes rather
+          than in a modal: someone opening this mid-login is not stopped, and the
+          ask is still the first thing they see. For that one day it outranks the
+          backup reminder and the vault offer, which are back the day after, and
+          it gives way to an error and the clock warning — those are about the
+          codes being wrong. */}
+      {showProductHunt && !error && timeOffsetSec === null && !showSettings && (
+        <ProductHuntBanner language={language} onDismiss={() => setShowProductHunt(false)} />
+      )}
+
       {/* Backup Reminder */}
       {/* Not over Settings: its own Export button is on that screen, four lines
           below, and the strip's button only opens the screen you are on. */}
-      {showBackupReminder && !error && timeOffsetSec === null && !showSettings && (
+      {showBackupReminder && !showProductHunt && !error && timeOffsetSec === null && !showSettings && (
         <BackupReminder
           language={language}
           onExport={handleBackupFromReminder}
@@ -962,7 +998,7 @@ function App() {
       )}
 
       {/* Offer password protection — never at the same time as another notice */}
-      {showVaultPrompt && !showBackupReminder && !error && timeOffsetSec === null && !showSettings && (
+      {vaultPromptVisible && (
         <VaultPrompt
           language={language}
           onEnable={() => {
@@ -1304,7 +1340,7 @@ function App() {
                 pitch, so the card behind it is the identical ask twice on one
                 screen — and on the 1.11.0 rollout that modal opens for everyone
                 at once. */}
-            {!isFiltered && whatsNewVersion === null &&
+            {!isFiltered && whatsNewVersion === null && !showProductHunt &&
               (showReviewPrompt ? (
                 <ReviewPrompt language={language} onRate={handleRate} onSnooze={handleSnoozeReview} />
               ) : showPromoBanner ? (

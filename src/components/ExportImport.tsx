@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ClipboardPaste, Download, Link2, Lock, Share2, Unlock, Upload } from 'lucide-react';
 import {
   exportAccounts,
+  getAccounts,
   importAccounts,
   importAccountList,
   addMultipleAccounts,
@@ -204,7 +205,13 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
   const runURIImport = async (text: string): Promise<void> => {
     const outcome = await importURIList(text, language);
     if (outcome.added !== undefined) {
-      await markBackupDone(0);
+      // The count after the import, as the popup's own file input records it:
+      // with 0 here, thirty days later every account read as added since the
+      // backup and the reminder asked again for accounts nobody had added.
+      // Best-effort: the accounts are already in. A bookkeeping read that fails
+      // here must not skip the refresh and the report, or turn a finished import
+      // into "Failed to import accounts" in the file path below.
+      await getAccounts().then(list => markBackupDone(list.length)).catch(() => {});
       onImportComplete();
     }
     toast(outcome.kind, outcome.message);
@@ -244,7 +251,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
           })
         );
         if (imported) {
-          await markBackupDone(0); // Mark as backed up to suppress reminder
+          await getAccounts().then(list => markBackupDone(list.length)).catch(() => {});
           onImportComplete();
           toast(
             imported.unreadable > 0 ? 'info' : 'success',

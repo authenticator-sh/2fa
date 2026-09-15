@@ -329,6 +329,9 @@ const strings: TranslationStrings = {
   "share.done": "Selesai",
   "update.feature.shareCodes": "Bagikan kode sebuah akun lewat tautan — hingga satu jam, tanpa pernah menyerahkan kunci rahasianya.",
   "update.feature.openIn": "Kode kini bisa dibuka di jendela terpisah atau panel samping, bukan popup — keduanya tetap terbuka saat berpindah tab, jadi kode tetap terlihat.",
+  "productHunt.body": "Hari ini kami ada di Product Hunt — situs tempat orang menemukan aplikasi baru. Jika Authenticator bermanfaat bagi Anda, komentar singkat di sana membantu orang lain menemukannya.",
+  "productHunt.visit": "Tulis komentar",
+  "productHunt.notNow": "Tidak sekarang",
 };
 
 export default strings;

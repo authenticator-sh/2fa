@@ -329,6 +329,9 @@ const strings: TranslationStrings = {
   "share.done": "완료",
   "update.feature.shareCodes": "계정의 코드를 링크로 공유하세요. 최대 1시간, 비밀 키는 절대 넘기지 않습니다.",
   "update.feature.openIn": "이제 코드를 팝업 대신 별도 창이나 Chrome 사이드 패널에서 열 수 있습니다. 탭을 옮겨도 닫히지 않아 코드가 계속 보입니다.",
+  "productHunt.body": "오늘 Product Hunt에 소개되었습니다. 사람들이 새로운 앱을 발견하는 사이트예요. Authenticator가 도움이 되셨다면, 그곳에 짧은 댓글을 남겨 주시면 다른 분들이 찾는 데 도움이 됩니다.",
+  "productHunt.visit": "댓글 남기기",
+  "productHunt.notNow": "지금은 괜찮아요",
 };
 
 export default strings;

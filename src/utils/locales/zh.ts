@@ -329,6 +329,9 @@ const strings: TranslationStrings = {
   "share.done": "完成",
   "update.feature.shareCodes": "通过链接分享账户的验证码——最长一小时，密钥始终不会离开你的设备。",
   "update.feature.openIn": "验证码现在可以在独立窗口或 Chrome 侧边栏中打开，而不是弹出窗口——切换标签页时它们不会关闭，验证码始终在眼前。",
+  "productHunt.body": "我们今天登上了 Product Hunt——一个人们发现新应用的网站。如果 Authenticator 对您有用，在那里留下一条简短的评论，就能帮助更多人找到它。",
+  "productHunt.visit": "留下评论",
+  "productHunt.notNow": "暂不",
 };
 
 export default strings;
