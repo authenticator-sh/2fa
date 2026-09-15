@@ -6,7 +6,7 @@
 // was written beside. None of these lose a byte on the happy path, and each of
 // them ends with accounts nobody can open.
 
-import { areas, check, faults, flush, resetFaults, resetState, scenario } from './harness';
+import { areas, check, faults, flush, resetFaults, resetState, scenario, throwsNamed } from './harness';
 
 const PASSWORD = 'correct horse battery staple';
 
@@ -136,7 +136,9 @@ export async function run(): Promise<void> {
   await prepared.commit();
   await flush();
 
-  const rotated = await vault.resetPasswordWithRecoveryCode(prepared.recoveryCode, 'password after recovery');
+  const reset = await vault.prepareRecovery(prepared.recoveryCode, 'password after recovery');
+  await reset.commit();
+  const rotated = reset.recoveryCode;
   await flush();
   check(
     'the count is rewritten with the wrappers',
@@ -153,4 +155,136 @@ export async function run(): Promise<void> {
     () => false
   );
   check('and so does the rotated recovery code', codeWorks);
+
+  // "Recovery didn't work", from a store review. The reset used to be saved
+  // before its replacement code was shown. Saving writes the unlocked key to
+  // session storage, the popup's storage listener reads that as an unlock and
+  // swaps the lock screen for the account list — so the new code was on screen
+  // for about 50 ms. The user got in once; the next forgotten password met a
+  // code that had already been spent.
+  //
+  // What keeps the screen up is that preparing emits nothing the listener
+  // accepts. That is what these checks pin down.
+  const opens = (attempt: Promise<unknown>) => attempt.then(() => true, () => false);
+  const heard: string[] = [];
+  const listener = (changes: Record<string, unknown>, areaName: string) => {
+    if (vault.affectsVaultSession(areaName, changes)) heard.push(Object.keys(changes).join(','));
+  };
+
+  scenario('Preparing a recovery writes nothing and unlocks nothing');
+  await resetState();
+  await storage.saveAccounts(ACCOUNTS);
+  await flush();
+  const original = await storage.prepareVault(PASSWORD);
+  await original.commit();
+  await flush();
+  await vault.lock();
+  await flush();
+
+  const localMetaBefore = JSON.stringify(areas.local.vault_meta);
+  const syncedMetaBefore = JSON.stringify(areas.sync.vault_meta);
+  chrome.storage.onChanged.addListener(listener);
+  const pending = await vault.prepareRecovery(original.recoveryCode, 'password after recovery');
+  await flush();
+  chrome.storage.onChanged.removeListener(listener);
+
+  check('the popup hears nothing, so the new code stays on screen', heard.length === 0, JSON.stringify(heard));
+  check('the vault is still locked', !(await vault.isUnlocked()));
+  check('local metadata is byte-for-byte unchanged', JSON.stringify(areas.local.vault_meta) === localMetaBefore);
+  check('and so is the synced copy', JSON.stringify(areas.sync.vault_meta) === syncedMetaBefore);
+  check(
+    'a replacement code is ready to show',
+    pending.recoveryCode !== original.recoveryCode && /^[A-Z2-9]{5}(-[A-Z2-9]{5})+$/.test(pending.recoveryCode),
+    pending.recoveryCode
+  );
+
+  // A popup that loses focus on that screen simply drops `pending`.
+  scenario('Walking away from the new code leaves the old way in working');
+  check('the original password still opens it', await opens(vault.unlockWithPassword(PASSWORD)));
+  await vault.lock();
+  check('and so does the original recovery code', await opens(vault.unlockWithRecoveryCode(original.recoveryCode)));
+  await vault.lock();
+  check(
+    'the code from the abandoned screen opens nothing',
+    await throwsNamed('WrongPasswordError', () => vault.unlockWithRecoveryCode(pending.recoveryCode))
+  );
+
+  scenario('Confirming the new code is what makes the reset real');
+  heard.length = 0;
+  chrome.storage.onChanged.addListener(listener);
+  await pending.commit();
+  await flush();
+  chrome.storage.onChanged.removeListener(listener);
+  check('the commit unlocks, and the popup hears it', heard.length > 0 && (await vault.isUnlocked()), JSON.stringify(heard));
+  check('every account is readable', (await storage.getAccounts()).length === 2);
+  await vault.lock();
+  check('the spent code is refused', await throwsNamed('WrongPasswordError', () => vault.unlockWithRecoveryCode(original.recoveryCode)));
+  check('the forgotten password is refused', await throwsNamed('WrongPasswordError', () => vault.unlockWithPassword(PASSWORD)));
+  check('the new password opens it', await opens(vault.unlockWithPassword('password after recovery')));
+  await vault.lock();
+  check('the code the user typed back opens it', await opens(vault.unlockWithRecoveryCode(pending.recoveryCode)));
+  await vault.lock();
+
+  scenario('A second Finish does not write the reset twice');
+  const revision = (await vault.getVaultMeta())!.rev;
+  await pending.commit();
+  check('the revision did not move', (await vault.getVaultMeta())!.rev === revision, `${revision} -> ${(await vault.getVaultMeta())!.rev}`);
+
+  scenario('A wrong recovery code is refused before anything is built');
+  const metaBeforeWrongCode = JSON.stringify(areas.local.vault_meta);
+  check(
+    'it reads as a wrong code, not as some other failure',
+    await throwsNamed('WrongPasswordError', () => vault.prepareRecovery('AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-FFGGH', 'whatever password'))
+  );
+  check('and writes nothing', JSON.stringify(areas.local.vault_meta) === metaBeforeWrongCode);
+
+  // The new-code screen is one the user lingers on, and another window can
+  // turn protection off, or off and on again, meanwhile. The master key held by
+  // a prepared reset opens only the vault it came from.
+  scenario('A reset prepared against a vault that is gone or rebuilt is refused');
+  const stale = await vault.prepareRecovery(pending.recoveryCode, 'stale reset password');
+  await vault.unlockWithPassword('password after recovery');
+  await storage.disableVault('password after recovery');
+  await flush();
+  let refusedWhileOff = false;
+  try {
+    await stale.commit();
+  } catch {
+    refusedWhileOff = true;
+  }
+  check('refused while protection is off', refusedWhileOff);
+  check('and it did not bring a vault back', areas.local.vault_meta === undefined);
+
+  const rebuilt = await storage.prepareVault('a rebuilt vault password');
+  await rebuilt.commit();
+  await flush();
+  const rebuiltMeta = JSON.stringify(areas.local.vault_meta);
+  let refusedAfterRebuild = false;
+  try {
+    await stale.commit();
+  } catch {
+    refusedAfterRebuild = true;
+  }
+  check('refused again once a different vault exists — a failed commit can be retried, and is re-checked', refusedAfterRebuild);
+  check("the new vault's metadata is untouched", JSON.stringify(areas.local.vault_meta) === rebuiltMeta);
+  await vault.lock();
+  check('its own password still opens it', await opens(vault.unlockWithPassword('a rebuilt vault password')));
+  check('every account is still readable', (await storage.getAccounts()).length === 2);
+
+  // The reset is spread over the metadata as it stands at commit, not as it
+  // stood when the code was shown.
+  scenario('A passkey added while the new code is on screen survives the reset');
+  const beforePasskey = await vault.prepareRecovery(rebuilt.recoveryCode, 'password after second recovery');
+  const masterKey = await vault.getMasterKeyBytes();
+  const PRF = new Uint8Array(32).fill(7);
+  await vault.attachPasskey(masterKey!, 'Y3JlZA==', 'c2FsdA==', PRF, 'Laptop');
+  await flush();
+  await beforePasskey.commit();
+  await flush();
+  check('the passkey is still registered', (await vault.getVaultPasskey())?.label === 'Laptop');
+  await vault.lock();
+  check('and still opens the vault', await opens(vault.unlockWithPasskey(PRF)));
+  await vault.lock();
+  check('as does the password set by the reset', await opens(vault.unlockWithPassword('password after second recovery')));
+  await vault.lock();
 }

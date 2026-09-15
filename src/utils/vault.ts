@@ -687,15 +687,34 @@ export async function changePassword(currentPassword: string, newPassword: strin
   await writeSession({ mk: toBase64(masterKeyBytes), lastActivity: Date.now() });
 }
 
+export interface PreparedRecovery {
+  /** Show this and have it typed back BEFORE calling commit(). */
+  recoveryCode: string;
+  /**
+   * Replaces the password and recovery wrappers and unlocks. Until this
+   * resolves, the old password and the old recovery code both still work.
+   */
+  commit: () => Promise<void>;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((byte, i) => byte === b[i]);
+}
+
 /**
- * Sets a new password after a recovery-code unlock, and rotates the recovery
- * code — the old one was just read aloud from a screen or a text file, so it
- * has to be treated as spent.
+ * A forgotten-password reset, built and verified in memory, with nothing written.
+ *
+ * Split from the commit for the same reason prepareVault is. The reset rotates
+ * the recovery code — the old one was just read off a screen or out of a text
+ * file, so it has to be treated as spent — and the moment the new wrappers are
+ * saved, the replacement exists nowhere but in memory. This used to save first
+ * and show the code afterwards. Saving also writes the unlocked key to session
+ * storage; the popup's storage listener reads that as "unlocked" and swaps the
+ * lock screen for the account list, so the new code vanished before it could be
+ * read. The user was let in once, and the next time they forgot the password
+ * the only code they held was refused.
  */
-export async function resetPasswordWithRecoveryCode(
-  code: string,
-  newPassword: string
-): Promise<string> {
+export async function prepareRecovery(code: string, newPassword: string): Promise<PreparedRecovery> {
   const meta = await getVaultMeta();
   if (!meta) throw new Error('No vault configured');
 
@@ -708,12 +727,16 @@ export async function resetPasswordWithRecoveryCode(
 
   const salt = newSalt();
   const recoverySalt = newSalt();
-  const newRecoveryCode = generateRecoveryCode();
-  const passwordKey = await deriveKeyFromPassword(newPassword, salt);
-  const recoveryKey = await deriveKeyFromPassword(normalizeRecoveryCode(newRecoveryCode), recoverySalt);
+  const recoveryCode = generateRecoveryCode();
+  const [passwordKey, recoveryKey] = await Promise.all([
+    deriveKeyFromPassword(newPassword, salt),
+    deriveKeyFromPassword(normalizeRecoveryCode(recoveryCode), recoverySalt),
+  ]);
 
-  await saveVaultMeta({
-    ...meta,
+  const wrappers: Pick<
+    VaultMeta,
+    'salt' | 'iterations' | 'wrappedByPassword' | 'recoverySalt' | 'wrappedByRecovery'
+  > = {
     salt: toBase64(salt),
     // Both wrappers are new, so the count that describes them must be too —
     // see changePassword.
@@ -721,10 +744,47 @@ export async function resetPasswordWithRecoveryCode(
     wrappedByPassword: await wrapMasterKey(masterKeyBytes, passwordKey),
     recoverySalt: toBase64(recoverySalt),
     wrappedByRecovery: await wrapMasterKey(masterKeyBytes, recoveryKey),
-  });
+  };
 
-  await writeSession({ mk: toBase64(masterKeyBytes), lastActivity: Date.now() });
-  return newRecoveryCode;
+  // Opened again the way unlocking will open them — a fresh derivation at the
+  // stored iteration count, through the same normalisation — rather than with
+  // the keys already in hand. A wrapper that only opens with the key object that
+  // built it looks fine today and fails on the one day it is needed.
+  const candidate: VaultMeta = { ...meta, ...wrappers };
+  const opened = await Promise.all([
+    unwrapWith(candidate, newPassword, 'salt', 'wrappedByPassword'),
+    unwrapWith(candidate, normalizeRecoveryCode(recoveryCode), 'recoverySalt', 'wrappedByRecovery'),
+  ]).catch(() => null);
+  if (!opened || !opened.every(bytes => sameBytes(bytes, masterKeyBytes))) {
+    throw new Error('The new password could not be verified — nothing was changed');
+  }
+
+  let committing: Promise<void> | null = null;
+
+  const commit = (): Promise<void> => {
+    committing ??= (async () => {
+      // Asked again, not only in prepare: the screen between the two is one the
+      // user lingers on, copying a code onto paper, and another window can turn
+      // protection off or rebuild the vault meanwhile. This master key opens
+      // only the vault it was unwrapped from; written over any other, the new
+      // password would open nothing.
+      const current = await getVaultMeta();
+      if (!current || current.vaultId !== meta.vaultId) {
+        throw new Error('Password protection was changed somewhere else — nothing was changed');
+      }
+
+      // Spread over the copy read just now, not the one from prepare, so a
+      // passkey added in between survives the reset.
+      await saveVaultMeta({ ...current, ...wrappers });
+      await writeSession({ mk: toBase64(masterKeyBytes), lastActivity: Date.now() });
+    })().catch(error => {
+      committing = null;
+      throw error;
+    });
+    return committing;
+  };
+
+  return { recoveryCode, commit };
 }
 
 /** Verifies a password without changing session state. */

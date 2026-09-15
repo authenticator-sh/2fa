@@ -135,7 +135,9 @@ Design notes:
   re-encrypting every record — the bulk rewrite is where data gets lost.
 - **Recovery code.** A 160-bit code independently wraps the same master key, so
   a forgotten password is recoverable. It is shown once, must be typed back to
-  confirm, and is rotated after each use.
+  confirm, and is rotated after each use. A reset writes nothing until the
+  replacement code has been typed back, so until then the old password and the
+  old code both still work.
 - **What is encrypted.** The entire account record except its `id` and
   fingerprint — including the service name, so a stolen profile leaks no
   metadata about which services the user has accounts with.
@@ -319,7 +321,7 @@ To verify that the version published on the Chrome Web Store was built from this
 
 1. Download the `.crx` for the published version from the Chrome Web Store
 2. Unzip it to a directory
-3. Check out this repository at the matching git tag (e.g. `v1.13.0`)
+3. Check out this repository at the matching git tag (e.g. `v1.13.1`)
 4. Run `npm ci && npm run build` using **Node 20 LTS**
 5. Compare the `dist/` directory contents with the unzipped `.crx`
 
@@ -330,7 +332,7 @@ Differences should only exist in:
 For each release we publish `SHA256SUMS-v<version>.txt` — a SHA-256 for every file in the produced `dist/` — in [GitHub Releases](https://github.com/authenticator-sh/2fa/releases). It is in `sha256sum` format, so you can check your own build against it directly:
 
 ```bash
-cd dist && sha256sum -c ../SHA256SUMS-v1.13.0.txt   # shasum -a 256 -c on macOS
+cd dist && sha256sum -c ../SHA256SUMS-v1.13.1.txt   # shasum -a 256 -c on macOS
 ```
 
 ## Architecture

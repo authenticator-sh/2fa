@@ -181,7 +181,7 @@ const strings: TranslationStrings = {
   "vault.recover.submit": "Restaurer l'accès",
   "vault.recover.invalid": "Ce code de récupération n'est pas valide",
   "vault.recover.back": "Retour au mot de passe",
-  "vault.recover.rotated": "Votre mot de passe a été modifié. Voici votre nouveau code de récupération — enregistrez-le, l'ancien ne fonctionne plus.",
+  "vault.recover.rotated": "Voici votre nouveau code de récupération. Enregistrez-le et saisissez-le ci-dessous. Une fois terminé, votre nouveau mot de passe et ce code remplaceront les anciens.",
   "vault.settings.title": "Protection par mot de passe",
   "vault.settings.on": "Activée — vos codes sont chiffrés sur cet appareil",
   "vault.settings.off": "Désactivée — toute personne utilisant cet ordinateur peut lire vos codes",

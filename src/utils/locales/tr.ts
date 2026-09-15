@@ -181,7 +181,7 @@ const strings: TranslationStrings = {
   "vault.recover.submit": "Erişimi geri yükle",
   "vault.recover.invalid": "Bu kurtarma kodu geçerli değil",
   "vault.recover.back": "Parolaya dön",
-  "vault.recover.rotated": "Parolanız değiştirildi. İşte yeni kurtarma kodunuz — kaydedin, eskisi artık çalışmıyor.",
+  "vault.recover.rotated": "İşte yeni kurtarma kodunuz. Kaydedin ve aşağıya yazın. Bitirdiğinizde yeni parolanız ve bu kod eskilerin yerini alır.",
   "vault.settings.title": "Parola koruması",
   "vault.settings.on": "Açık — kodlarınız bu cihazda şifreli",
   "vault.settings.off": "Kapalı — bu bilgisayarı kullanan herkes kodlarınızı okuyabilir",

@@ -104,7 +104,9 @@ export async function run(): Promise<void> {
 
   scenario('A recovery-code reset also leaves the passkey working');
   await vault.lock();
-  const freshRecovery = await vault.resetPasswordWithRecoveryCode(recoveryCode, 'third password here');
+  const reset = await vault.prepareRecovery(recoveryCode, 'third password here');
+  await reset.commit();
+  const freshRecovery = reset.recoveryCode;
   await flush();
   check('a new recovery code is issued', /^[A-Z2-9]{5}(-[A-Z2-9]{5})+$/.test(freshRecovery));
   await vault.lock();

@@ -181,7 +181,7 @@ const strings: TranslationStrings = {
   "vault.recover.submit": "استعادة الوصول",
   "vault.recover.invalid": "رمز الاسترداد هذا غير صالح",
   "vault.recover.back": "العودة إلى كلمة المرور",
-  "vault.recover.rotated": "تم تغيير كلمة المرور. هذا رمز الاسترداد الجديد — احفظه، القديم لم يعد يعمل.",
+  "vault.recover.rotated": "هذا رمز الاسترداد الجديد. احفظه واكتبه أدناه. عند الانتهاء، ستحل كلمة المرور الجديدة وهذا الرمز محل القديمين.",
   "vault.settings.title": "الحماية بكلمة مرور",
   "vault.settings.on": "مفعّلة — رموزك مشفّرة على هذا الجهاز",
   "vault.settings.off": "معطّلة — أي شخص يستخدم هذا الحاسوب يمكنه قراءة رموزك",

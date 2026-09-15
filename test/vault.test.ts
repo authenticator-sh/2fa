@@ -90,7 +90,9 @@ export async function run(): Promise<void> {
 
   scenario('Recovering a forgotten password');
   await vault.lock();
-  const rotated = await vault.resetPasswordWithRecoveryCode(recoveryCode, 'third password');
+  const recovery = await vault.prepareRecovery(recoveryCode, 'third password');
+  await recovery.commit();
+  const rotated = recovery.recoveryCode;
   check('the recovery code restores access', (await storage.getAccounts()).length === 2);
   check('the recovery code is rotated', rotated !== recoveryCode);
   check('the spent recovery code is refused', await throwsNamed('WrongPasswordError', () => vault.unlockWithRecoveryCode(recoveryCode)));

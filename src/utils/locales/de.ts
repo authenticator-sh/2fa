@@ -181,7 +181,7 @@ const strings: TranslationStrings = {
   "vault.recover.submit": "Zugriff wiederherstellen",
   "vault.recover.invalid": "Dieser Wiederherstellungscode ist ungültig",
   "vault.recover.back": "Zurück zum Passwort",
-  "vault.recover.rotated": "Dein Passwort wurde geändert. Hier ist dein neuer Wiederherstellungscode — speichere ihn, der alte gilt nicht mehr.",
+  "vault.recover.rotated": "Hier ist dein neuer Wiederherstellungscode. Speichere ihn und gib ihn unten ein. Sobald du fertig bist, ersetzen dein neues Passwort und dieser Code die alten.",
   "vault.settings.title": "Passwortschutz",
   "vault.settings.on": "An — deine Codes sind auf diesem Gerät verschlüsselt",
   "vault.settings.off": "Aus — jeder an diesem Computer kann deine Codes lesen",

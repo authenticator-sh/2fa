@@ -181,7 +181,7 @@ const strings: TranslationStrings = {
   "vault.recover.submit": "Przywróć dostęp",
   "vault.recover.invalid": "Ten kod odzyskiwania jest nieprawidłowy",
   "vault.recover.back": "Wróć do hasła",
-  "vault.recover.rotated": "Hasło zostało zmienione. Oto nowy kod odzyskiwania — zapisz go, stary już nie działa.",
+  "vault.recover.rotated": "Oto nowy kod odzyskiwania. Zapisz go i wpisz poniżej. Po zakończeniu nowe hasło i ten kod zastąpią stare.",
   "vault.settings.title": "Ochrona hasłem",
   "vault.settings.on": "Włączona — kody są zaszyfrowane na tym urządzeniu",
   "vault.settings.off": "Wyłączona — każdy przy tym komputerze może zobaczyć Twoje kody",

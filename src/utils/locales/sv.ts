@@ -181,7 +181,7 @@ const strings: TranslationStrings = {
   "vault.recover.submit": "Återställ åtkomst",
   "vault.recover.invalid": "Den återställningskoden är ogiltig",
   "vault.recover.back": "Tillbaka till lösenord",
-  "vault.recover.rotated": "Ditt lösenord har ändrats. Här är din nya återställningskod — spara den, den gamla fungerar inte längre.",
+  "vault.recover.rotated": "Här är din nya återställningskod. Spara den och skriv in den nedan. När du är klar ersätter ditt nya lösenord och den här koden de gamla.",
   "vault.settings.title": "Lösenordsskydd",
   "vault.settings.on": "På — dina koder är krypterade på den här enheten",
   "vault.settings.off": "Av — alla som använder datorn kan läsa dina koder",

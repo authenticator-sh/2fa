@@ -181,7 +181,7 @@ const strings: TranslationStrings = {
   "vault.recover.submit": "접근 복구",
   "vault.recover.invalid": "유효하지 않은 복구 코드입니다",
   "vault.recover.back": "비밀번호로 돌아가기",
-  "vault.recover.rotated": "비밀번호가 변경되었습니다. 새 복구 코드입니다. 저장하세요. 이전 코드는 더 이상 사용할 수 없습니다.",
+  "vault.recover.rotated": "새 복구 코드입니다. 저장한 뒤 아래에 입력하세요. 완료하면 새 비밀번호와 이 코드가 이전 것을 대체합니다.",
   "vault.settings.title": "비밀번호 보호",
   "vault.settings.on": "켜짐 — 코드가 이 기기에서 암호화되어 있습니다",
   "vault.settings.off": "꺼짐 — 이 컴퓨터를 쓰는 누구나 코드를 읽을 수 있습니다",

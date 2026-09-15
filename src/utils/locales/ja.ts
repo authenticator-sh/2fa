@@ -181,7 +181,7 @@ const strings: TranslationStrings = {
   "vault.recover.submit": "アクセスを復元",
   "vault.recover.invalid": "その復旧コードは無効です",
   "vault.recover.back": "パスワードに戻る",
-  "vault.recover.rotated": "パスワードを変更しました。新しい復旧コードです。保存してください。以前のコードは無効になりました。",
+  "vault.recover.rotated": "新しい復旧コードです。保存して、下に入力してください。完了すると、新しいパスワードとこのコードが以前のものに置き換わります。",
   "vault.settings.title": "パスワード保護",
   "vault.settings.on": "オン — コードはこの端末で暗号化されています",
   "vault.settings.off": "オフ — このパソコンを使う人は誰でもコードを見られます",

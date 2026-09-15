@@ -17,7 +17,7 @@ body:
     attributes:
       label: Extension version
       description: Shown at the bottom of Settings, and in `chrome://extensions`.
-      placeholder: "1.13.0"
+      placeholder: "1.13.1"
     validations:
       required: true
   - type: input

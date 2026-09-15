@@ -3,7 +3,12 @@ import { AlertTriangle, Download, Eye, EyeOff, Fingerprint, Lock } from 'lucide-
 import { Logo } from '@/components/Logo';
 import { createT, type Language } from '@/utils/i18n';
 import { MIN_PASSWORD_LENGTH } from '@/utils/crypto';
-import { getVaultPasskey, resetPasswordWithRecoveryCode } from '@/utils/vault';
+import {
+  getVaultPasskey,
+  prepareRecovery,
+  WrongPasswordError,
+  type PreparedRecovery,
+} from '@/utils/vault';
 import { isPasskeyApiAvailable, openPasskeyCeremony } from '@/utils/passkey';
 import { downloadBackupFile } from '@/utils/backup-file';
 import { normalizeRecoveryCode } from '@/utils/crypto';
@@ -22,7 +27,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
   const [showPassword, setShowPassword] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [newRecoveryCode, setNewRecoveryCode] = useState<string | null>(null);
+  const [prepared, setPrepared] = useState<PreparedRecovery | null>(null);
   const [typedRecovery, setTypedRecovery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -66,25 +71,51 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
     setBusy(true);
     setError(null);
     try {
-      // Rotate the recovery code too: the old one has just been read off a
-      // screen or out of a text file, so it must be treated as spent. This
-      // also leaves the vault unlocked, so there is nothing else to do here —
-      // re-using the old code afterwards would fail, it no longer unwraps.
-      setNewRecoveryCode(await resetPasswordWithRecoveryCode(recoveryCode, newPassword));
+      // Builds the new password and a replacement recovery code in memory and
+      // proves both open the vault. Nothing is written until the replacement has
+      // been typed back below. Saving here is what used to lose it: the save
+      // unlocks the vault, the vault hook swaps this whole screen for the account
+      // list, and the new code went with it while the old one was already spent.
+      setPrepared(await prepareRecovery(recoveryCode, newPassword));
     } catch (err) {
       console.error('Recovery failed:', err);
-      setError(t('vault.recover.invalid'));
+      setError(
+        err instanceof WrongPasswordError
+          ? t('vault.recover.invalid')
+          : err instanceof Error
+            ? err.message
+            : String(err)
+      );
     } finally {
       setBusy(false);
     }
   };
 
-  if (newRecoveryCode) {
-    // The code the user just used is spent, and this replacement exists nowhere
-    // else. A popup dies on any focus loss, so it cannot be dismissed with a
-    // single click — it has to be typed back, same as during setup.
+  const handleFinishRecovery = async () => {
+    if (!prepared) return;
+    if (normalizeRecoveryCode(typedRecovery) !== normalizeRecoveryCode(prepared.recoveryCode)) return;
+
+    setBusy(true);
+    setError(null);
+    try {
+      // Unlocks as it saves, so this screen is replaced by the account list —
+      // which, now that the code has been typed back, is the right moment.
+      await prepared.commit();
+      onRecovered();
+    } catch (err) {
+      console.error('Failed to save the recovered password:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (prepared) {
+    // A popup dies on any focus loss, so this cannot be dismissed with a single
+    // click — the code has to be typed back, same as during setup. Dying here
+    // costs nothing: the reset is not saved yet, so the old code still works.
     const confirmed =
-      normalizeRecoveryCode(typedRecovery) === normalizeRecoveryCode(newRecoveryCode);
+      normalizeRecoveryCode(typedRecovery) === normalizeRecoveryCode(prepared.recoveryCode);
 
     return (
       <div className="flex-1 overflow-y-auto flex flex-col justify-center p-6 bg-gray-50 dark:bg-dark-900">
@@ -98,14 +129,14 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
 
         <div className="w-full bg-gray-100 dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-lg p-3 mb-2">
           <code className="block text-center text-sm font-mono font-semibold tracking-wider text-gray-900 dark:text-gray-100 break-all">
-            {newRecoveryCode}
+            {prepared.recoveryCode}
           </code>
         </div>
 
         <button
           onClick={() =>
             downloadBackupFile(
-              `${t('vault.recovery.title')}\n\n${newRecoveryCode}\n\n${t('vault.recovery.warning')}\n`,
+              `${t('vault.recovery.title')}\n\n${prepared.recoveryCode}\n\n${t('vault.recovery.warning')}\n`,
               'authenticator-recovery-code.txt'
             )
           }
@@ -122,18 +153,43 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
           type="text"
           value={typedRecovery}
           onChange={e => setTypedRecovery(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && confirmed && !busy && handleFinishRecovery()}
           autoFocus
           spellCheck={false}
           className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4] mb-3"
         />
 
+        {error && (
+          <div className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400 mb-3">
+            <AlertTriangle size={14} className="flex-shrink-0" />
+            {error}
+          </div>
+        )}
+
         <button
-          onClick={onRecovered}
-          disabled={!confirmed}
+          onClick={handleFinishRecovery}
+          disabled={!confirmed || busy}
           className="w-full bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
         >
           {t('vault.recovery.finish')}
         </button>
+
+        {/* Only once saving has failed — the vault was changed from another
+            window, say. Nothing was written, so going back is safe, and without
+            this the screen would be a dead end. */}
+        {error && (
+          <button
+            onClick={() => {
+              setPrepared(null);
+              setTypedRecovery('');
+              setMode('password');
+              setError(null);
+            }}
+            className="w-full text-xs text-gray-500 dark:text-gray-400 hover:underline mt-3"
+          >
+            {t('vault.recover.back')}
+          </button>
+        )}
       </div>
     );
   }

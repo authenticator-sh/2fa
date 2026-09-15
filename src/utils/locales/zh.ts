@@ -181,7 +181,7 @@ const strings: TranslationStrings = {
   "vault.recover.submit": "恢复访问",
   "vault.recover.invalid": "该恢复码无效",
   "vault.recover.back": "返回输入密码",
-  "vault.recover.rotated": "密码已更改。这是你的新恢复码——请保存，旧的已失效。",
+  "vault.recover.rotated": "这是你的新恢复码。请保存并在下方输入。完成后，新密码和此恢复码将替换旧的。",
   "vault.settings.title": "密码保护",
   "vault.settings.on": "已开启——你的验证码在本设备上已加密",
   "vault.settings.off": "已关闭——任何使用这台电脑的人都能读取你的验证码",

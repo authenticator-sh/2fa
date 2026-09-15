@@ -181,7 +181,7 @@ const strings: TranslationStrings = {
   "vault.recover.submit": "Pulihkan akses",
   "vault.recover.invalid": "Kode pemulihan itu tidak valid",
   "vault.recover.back": "Kembali ke kata sandi",
-  "vault.recover.rotated": "Kata sandi Anda telah diubah. Ini kode pemulihan baru Anda — simpan, yang lama tidak berlaku lagi.",
+  "vault.recover.rotated": "Ini kode pemulihan baru Anda. Simpan dan ketik di bawah. Setelah selesai, kata sandi baru dan kode ini menggantikan yang lama.",
   "vault.settings.title": "Perlindungan kata sandi",
   "vault.settings.on": "Aktif — kode Anda terenkripsi di perangkat ini",
   "vault.settings.off": "Nonaktif — siapa pun di komputer ini bisa membaca kode Anda",

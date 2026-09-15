@@ -181,7 +181,7 @@ const strings: TranslationStrings = {
   "vault.recover.submit": "Khôi phục truy cập",
   "vault.recover.invalid": "Mã khôi phục không hợp lệ",
   "vault.recover.back": "Quay lại mật khẩu",
-  "vault.recover.rotated": "Mật khẩu đã được đổi. Đây là mã khôi phục mới — hãy lưu lại, mã cũ không còn dùng được.",
+  "vault.recover.rotated": "Đây là mã khôi phục mới của bạn. Hãy lưu lại và nhập vào bên dưới. Khi hoàn tất, mật khẩu mới và mã này sẽ thay thế mật khẩu và mã cũ.",
   "vault.settings.title": "Bảo vệ bằng mật khẩu",
   "vault.settings.on": "Bật — mã của bạn được mã hóa trên thiết bị này",
   "vault.settings.off": "Tắt — bất kỳ ai dùng máy này đều đọc được mã của bạn",

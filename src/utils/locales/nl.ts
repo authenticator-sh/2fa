@@ -181,7 +181,7 @@ const strings: TranslationStrings = {
   "vault.recover.submit": "Toegang herstellen",
   "vault.recover.invalid": "Deze herstelcode is niet geldig",
   "vault.recover.back": "Terug naar wachtwoord",
-  "vault.recover.rotated": "Je wachtwoord is gewijzigd. Dit is je nieuwe herstelcode — bewaar hem, de oude werkt niet meer.",
+  "vault.recover.rotated": "Dit is je nieuwe herstelcode. Bewaar hem en typ hem hieronder. Zodra je klaar bent, vervangen je nieuwe wachtwoord en deze code de oude.",
   "vault.settings.title": "Wachtwoordbeveiliging",
   "vault.settings.on": "Aan — je codes zijn versleuteld op dit apparaat",
   "vault.settings.off": "Uit — iedereen op deze computer kan je codes lezen",
