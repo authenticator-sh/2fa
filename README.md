@@ -321,7 +321,7 @@ To verify that the version published on the Chrome Web Store was built from this
 
 1. Download the `.crx` for the published version from the Chrome Web Store
 2. Unzip it to a directory
-3. Check out this repository at the matching git tag (e.g. `v1.13.1`)
+3. Check out this repository at the matching git tag (e.g. `v1.13.2`)
 4. Run `npm ci && npm run build` using **Node 20 LTS**
 5. Compare the `dist/` directory contents with the unzipped `.crx`
 
@@ -332,7 +332,7 @@ Differences should only exist in:
 For each release we publish `SHA256SUMS-v<version>.txt` — a SHA-256 for every file in the produced `dist/` — in [GitHub Releases](https://github.com/authenticator-sh/2fa/releases). It is in `sha256sum` format, so you can check your own build against it directly:
 
 ```bash
-cd dist && sha256sum -c ../SHA256SUMS-v1.13.1.txt   # shasum -a 256 -c on macOS
+cd dist && sha256sum -c ../SHA256SUMS-v1.13.2.txt   # shasum -a 256 -c on macOS
 ```
 
 ## Architecture

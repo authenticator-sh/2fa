@@ -413,14 +413,20 @@ function dedupeBySecret(accounts: Account[]): Account[] {
 }
 
 /**
- * Turn on-disk records back into accounts.
+ * Turn on-disk records back into accounts, without touching module state.
  *
  * Plaintext records may legitimately appear alongside encrypted ones — a
  * second device that still runs an older build keeps pushing cleartext into
  * sync. We accept them here and let the next save re-encrypt them rather than
  * dropping the user's accounts on the floor.
+ *
+ * Split from `decodeAccounts` for the restore path, which decodes a backup
+ * snapshot: those records are not what is on disk, so they must not become the
+ * quarantine list that the next save writes back.
  */
-export async function decodeAccounts(stored: StoredAccount[]): Promise<Account[]> {
+export async function decodeRecords(
+  stored: StoredAccount[]
+): Promise<{ accounts: Account[]; held: StoredAccount[] }> {
   const meta = await getVaultMeta();
 
   // The lock check is unconditional and independent of what the records look
@@ -431,8 +437,7 @@ export async function decodeAccounts(stored: StoredAccount[]): Promise<Account[]
   if (meta) await requireKeys();
 
   if (stored.length === 0) {
-    quarantined = [];
-    return [];
+    return { accounts: [], held: [] };
   }
 
   if (!meta) {
@@ -440,8 +445,7 @@ export async function decodeAccounts(stored: StoredAccount[]): Promise<Account[]
     // exists. It cannot be read, but it must not be deleted either — the user
     // may still be able to restore the vault on another device.
     const [encrypted, cleartext] = partition(stored, isEncryptedAccount);
-    quarantined = encrypted;
-    return dedupeBySecret(cleartext as Account[]);
+    return { accounts: dedupeBySecret(cleartext as Account[]), held: encrypted };
   }
 
   const { dataKey } = await requireKeys();
@@ -473,8 +477,16 @@ export async function decodeAccounts(stored: StoredAccount[]): Promise<Account[]
     }
   }
 
+  return { accounts: dedupeBySecret(decoded), held };
+}
+
+/**
+ * Decode what is on disk, remembering the records that could not be read.
+ */
+export async function decodeAccounts(stored: StoredAccount[]): Promise<Account[]> {
+  const { accounts, held } = await decodeRecords(stored);
   quarantined = held;
-  return dedupeBySecret(decoded);
+  return accounts;
 }
 
 function partition<T>(items: T[], predicate: (item: T) => boolean): [T[], T[]] {
@@ -943,6 +955,95 @@ export async function importAccountList(importedAccounts: Account[]): Promise<Im
     return {
       accounts: [...existingAccounts, ...newAccounts],
       result: { added: newAccounts.length, unreadable },
+    };
+  });
+}
+
+export interface RestoreResult {
+  /** Accounts written that were not already here. */
+  added: number;
+  /** Accounts in the snapshot the user still has, so nothing was written. */
+  skipped: number;
+  /** Records in the snapshot this device cannot read — another vault's, or damaged. */
+  unreadable: number;
+}
+
+/**
+ * Merge an automatic snapshot back into the store.
+ *
+ * Merge, never replace: the snapshot is up to a day old, and someone restoring
+ * it is usually someone who has already re-added one or two accounts by hand.
+ * Anything already here keeps its place, its name and its group; only accounts
+ * whose secret is absent are appended. That also makes restoring twice
+ * harmless, which matters when the button is pressed by someone who is not sure
+ * the first press worked.
+ *
+ * The snapshot holds records in their on-disk form, so one taken while the
+ * vault was on is ciphertext. Decoding it here means a snapshot from the vault
+ * currently configured opens, one from a vault that is gone is counted rather
+ * than written as junk, and cleartext from before the vault existed is
+ * re-encrypted by the save.
+ */
+export async function restoreFromSnapshot(records: StoredAccount[]): Promise<RestoreResult> {
+  // Decoded before the mutation opens, deliberately. `decodeAccounts` keeps the
+  // unreadable records of the LIVE store in module state and every save writes
+  // them back; decoding a snapshot through it would replace that list with the
+  // snapshot's and delete the records it displaced.
+  const { accounts: recovered, held } = await decodeRecords(records);
+
+  const usable: Account[] = [];
+  for (const [index, entry] of recovered.entries()) {
+    const account = normalizeImported(entry, index);
+    if (account) usable.push(account);
+  }
+
+  // Beyond saving after decryption — a record with no secret left in it.
+  const damaged = recovered.length - usable.length;
+
+  // Nothing to add means nothing to write. Saving the list back over itself
+  // would cost a sync push and a storage event that reloads every open surface,
+  // to arrive at the list they are already showing.
+  if (usable.length === 0) {
+    return { added: 0, skipped: 0, unreadable: held.length + damaged };
+  }
+
+  return mutateAccounts((existingAccounts, stored) => {
+    const known = new Set(existingAccounts.map(acc => secretKey(acc.secret)));
+    // Ids from the stored records too, not only the decoded ones: a record this
+    // device cannot read still occupies its id, and it is invisible to the list
+    // the caller sees.
+    const usedIds = new Set([...existingAccounts.map(acc => acc.id), ...stored.map(record => record.id)]);
+    const additions: Account[] = [];
+
+    for (const account of usable) {
+      const key = secretKey(account.secret);
+      if (known.has(key)) continue;
+      known.add(key);
+
+      // Same id, different secret: two accounts, one identity. `deleteAccount`
+      // filters the list by id, so deleting either would have deleted both —
+      // and that is one click away from the screen this restore is offered on.
+      // Ids survive an export and an import, so a hand-edited backup or a file
+      // restored twice under different secrets is all it takes.
+      if (usedIds.has(account.id)) {
+        let candidate = `${account.id}-restored`;
+        for (let n = 2; usedIds.has(candidate); n++) candidate = `${account.id}-restored-${n}`;
+        additions.push({ ...account, id: candidate });
+        usedIds.add(candidate);
+        continue;
+      }
+
+      usedIds.add(account.id);
+      additions.push(account);
+    }
+
+    return {
+      accounts: [...existingAccounts, ...additions],
+      result: {
+        added: additions.length,
+        skipped: usable.length - additions.length,
+        unreadable: held.length + damaged,
+      },
     };
   });
 }

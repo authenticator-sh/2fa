@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { AlertTriangle, Download, RefreshCw, Upload } from 'lucide-react';
 import { createT, type Language } from '@/utils/i18n';
 
@@ -9,6 +10,14 @@ interface AccountsUnavailableProps {
   language: Language;
   onRetry: () => void;
   onImport: () => void;
+  /**
+   * The restore-from-a-copy button, when there is a copy to restore from.
+   *
+   * Passed in rather than decided here: whether an automatic snapshot holds
+   * anything is one question, asked once, and both places that offer a restore
+   * read the same answer.
+   */
+  restore?: ReactNode;
 }
 
 /**
@@ -30,6 +39,7 @@ export function AccountsUnavailable({
   language,
   onRetry,
   onImport,
+  restore,
 }: AccountsUnavailableProps) {
   const t = createT(language);
 
@@ -80,6 +90,7 @@ export function AccountsUnavailable({
           <RefreshCw size={14} />
           {t('recovery.retry')}
         </button>
+        {restore}
         <button
           onClick={handleSaveCopy}
           className="flex items-center justify-center gap-1.5 rounded-lg border border-gray-300 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-500 dark:text-gray-300 dark:hover:bg-dark-700"

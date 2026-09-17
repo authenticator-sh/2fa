@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useCallback, useState, useMemo, useRef, useEffect } from 'react';
 import { Plus, Settings, AlertTriangle, HelpCircle, Moon, Sun, Sparkles, ArrowLeft } from 'lucide-react';
 import { useAccounts } from '@/hooks/useAccounts';
 import { useVault } from '@/hooks/useVault';
@@ -23,11 +23,13 @@ import { VaultSettings } from '@/components/VaultSettings';
 import { VaultSetupModal } from '@/components/VaultSetupModal';
 import { EmptyStateGuide } from '@/components/EmptyStateGuide';
 import { AccountsUnavailable } from '@/components/AccountsUnavailable';
+import { RestoreBackups, RestoreOffer } from '@/components/RestoreBackups';
 import { GroupFilter } from '@/components/GroupFilter';
 import { SupportFooter } from '@/components/SupportFooter';
 import { getTimeSyncNotice, dismissTimeNotice, getClockStatus, recheckClock, type ClockStatus } from '@/utils/time-sync';
 import { applyDocumentLanguage, createT, detectLanguage, loadLanguage, type Language } from '@/utils/i18n';
 import { addMultipleAccounts, getAccounts } from '@/utils/storage';
+import { listBackupSummaries, type BackupSummary } from '@/utils/auto-backup';
 import { shouldShowBackupReminder, markBackupDone } from '@/utils/backup-reminder';
 import { shouldShowVaultPrompt, markVaultPromptShown } from '@/utils/vault-prompt';
 import { describeImport } from '@/utils/import-message';
@@ -141,6 +143,10 @@ function App() {
   const [quickFillOn, setQuickFillOn] = useState(true);
   const [syncOn, setSyncOn] = useState(true);
   const [syncOverflow, setSyncOverflow] = useState(false);
+  // The automatic snapshots, described without their records. Read once here
+  // rather than in each place that offers a restore, so the offer on the empty
+  // list and the list in Settings can never disagree about what exists.
+  const [backups, setBackups] = useState<BackupSummary[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
   // Off unless asked for. The list is the one screen every user of this
   // extension already knows by heart, and a coloured circle appearing beside
@@ -255,6 +261,40 @@ function App() {
   useEffect(() => {
     if (accounts.length === 0 && searchQuery) setSearchQuery('');
   }, [accounts.length, searchQuery]);
+
+  /**
+   * Read the snapshot list, and re-read it after a restore.
+   *
+   * Not gated on the account list being empty: the same summaries are what
+   * Settings lists at any time, and a read of seven index entries costs
+   * nothing next to opening the popup.
+   */
+  const loadBackups = useCallback(() => {
+    listBackupSummaries()
+      .then(setBackups)
+      .catch(error => console.warn('Could not list the automatic copies:', error));
+  }, []);
+
+  useEffect(loadBackups, [loadBackups]);
+
+  /** After a restore: the list, the snapshot counts, and the reminder state. */
+  const handleRestored = useCallback(() => {
+    reload();
+    loadBackups();
+  }, [reload, loadBackups]);
+
+  /**
+   * The newest snapshot that holds anything, or null.
+   *
+   * This is the whole condition for offering a restore where an empty list is:
+   * a first run has no snapshots, so a new user is never told they might have
+   * lost something, and someone whose list emptied out is never told they are
+   * new.
+   */
+  const recoverable = useMemo(
+    () => backups.find(backup => backup.accountCount > 0) ?? null,
+    [backups]
+  );
 
   // Show the "What's New" modal once after an update, if we have copy for it
   useEffect(() => {
@@ -1018,6 +1058,10 @@ function App() {
           <h3 className="text-gray-900 dark:text-gray-100 font-medium mb-3 text-sm">{t('settings.backupRestore')}</h3>
           <ExportImport onImportComplete={reload} onExportComplete={() => setShowBackupReminder(false)} language={language} />
 
+          {/* Always here, whatever state the list is in: the copies are most
+              useful to someone who knew about them before they needed them. */}
+          <RestoreBackups backups={backups} language={language} onRestored={handleRestored} />
+
           <SettingToggle
             label={t('settings.sync')}
             hint={t('settings.syncHint')}
@@ -1236,6 +1280,16 @@ function App() {
               language={language}
               onRetry={reload}
               onImport={handleImportClick}
+              restore={
+                recoverable && (
+                  <RestoreOffer
+                    backup={recoverable}
+                    language={language}
+                    onRestored={handleRestored}
+                    variant="inline"
+                  />
+                )
+              }
             />
           ) : isFiltered && accounts.length > 0 ? (
             <div className="flex flex-col items-center justify-center h-[340px] text-center p-6">
@@ -1260,14 +1314,25 @@ function App() {
               </button>
             </div>
           ) : (
-            <EmptyStateGuide
-              language={language}
-              onAddAccount={() => setShowAddModal(true)}
-              onImport={handleImportClick}
-              onScanWithCamera={() =>
-                chrome.tabs.create({ url: chrome.runtime.getURL('scan.html') })
-              }
-            />
+            <>
+              {/* Only when a snapshot actually holds accounts — otherwise this
+                  is a first run and the guide below is the whole answer. */}
+              {recoverable && (
+                <RestoreOffer
+                  backup={recoverable}
+                  language={language}
+                  onRestored={handleRestored}
+                />
+              )}
+              <EmptyStateGuide
+                language={language}
+                onAddAccount={() => setShowAddModal(true)}
+                onImport={handleImportClick}
+                onScanWithCamera={() =>
+                  chrome.tabs.create({ url: chrome.runtime.getURL('scan.html') })
+                }
+              />
+            </>
           )
         ) : (
           <div className="bg-white dark:bg-dark-800 pb-20">

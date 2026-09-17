@@ -394,8 +394,33 @@ type VaultTranslationKeys = {
   'share.caution': string;
   'share.failed': string;
   'share.done': string;
+  // Restoring from the automatic daily snapshots
+  'restore.title': string;
+  'restore.hint': string;
+  'restore.none': string;
+  /** "{0} account(s)" — what one snapshot holds */
+  'restore.count': string;
+  'restore.ageToday': string;
+  /** "{0} day(s) ago" */
+  'restore.ageDays': string;
+  'restore.ageUnknown': string;
+  'restore.action': string;
+  'restore.busy': string;
+  'restore.done': string;
+  'restore.nothingNew': string;
+  'restore.held': string;
+  'restore.failed': string;
+  'restore.gone': string;
+  'restore.locked': string;
+  'restore.confirmTitle': string;
+  /** "{0}" — how long ago the snapshot was taken */
+  'restore.confirmBody': string;
+  'restore.offerTitle': string;
+  'restore.offerBody': string;
+  'restore.offerAction': string;
   'update.feature.shareCodes': string;
   'update.feature.openIn': string;
+  'update.feature.restoreBackups': string;
 };
 
 /** A complete set of strings for one language. */

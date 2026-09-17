@@ -1,7 +1,7 @@
 {
   "name": "authenticator-extension",
-  "version": "1.13.1",
-  "description": "Modern Google Authenticator Chrome Extension",
+  "version": "1.13.2",
+  "description": "Modern Authenticator Chrome Extension",
   "type": "module",
   "scripts": {
     "dev": "vite --host",

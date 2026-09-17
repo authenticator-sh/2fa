@@ -19,7 +19,8 @@ type UpdateHighlightKey =
   | 'update.feature.uriExport'
   | 'update.feature.accountInitials'
   | 'update.feature.shareCodes'
-  | 'update.feature.openIn';
+  | 'update.feature.openIn'
+  | 'update.feature.restoreBackups';
 
 // Maps an extension version to the changelog bullets shown in the "What's New"
 // modal right after that version is installed. Versions with no entry here
@@ -58,4 +59,8 @@ export const WHATS_NEW: Record<string, UpdateHighlightKey[]> = {
     'update.feature.openIn',
     'update.feature.accountInitials',
   ],
+  // A patch release earns a modal only when it changes what the app can do for
+  // someone in trouble. This one does: the daily copies have existed since
+  // 1.10.0 and nothing could reach them, so nobody knew they were there.
+  '1.13.2': ['update.feature.restoreBackups'],
 };
