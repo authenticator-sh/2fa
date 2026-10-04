@@ -90,7 +90,7 @@ export function AccountsUnavailable({
       <div className="flex w-full max-w-[220px] flex-col gap-2">
         <button
           onClick={onRetry}
-          className="flex items-center justify-center gap-1.5 rounded-lg bg-[#4285F4] py-2 text-sm font-medium text-white transition-colors hover:bg-[#3367D6]"
+          className="flex items-center justify-center gap-1.5 rounded-lg bg-[#1a73e8] py-2 text-sm font-medium text-white transition-colors hover:bg-[#1967D2]"
         >
           <RefreshCw size={14} />
           {t('recovery.retry')}
@@ -105,7 +105,7 @@ export function AccountsUnavailable({
         </button>
         <button
           onClick={onImport}
-          className="flex items-center justify-center gap-1.5 text-xs font-medium text-[#4285F4] hover:underline"
+          className="flex items-center justify-center gap-1.5 text-xs font-medium text-[#1a73e8] dark:text-[#669DF6] hover:underline"
         >
           <Upload size={13} />
           {t('accounts.importFromBackup')}

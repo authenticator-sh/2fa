@@ -1,0 +1,131 @@
+{
+  "_comment": "A CXF 1.0 export shaped after the FIDO Alliance Credential Exchange Format, Proposed Standard (errata 2026-03-09), https://fidoalliance.org/specs/cx/cxf-v1.0-ps-errata-20260309.html — Header §3.1, Account §3.2.1, Item §3.2.3, TOTP §3.3.16. Seeds are the RFC 6238 test keys (SHA1 '12345678901234567890', SHA256 its 32-byte and SHA512 its 64-byte extension), so imported accounts can be checked against the published codes: at T=59, 94287082 / 46119246 / 90693936. Also carries what a real vendor file has that we must ignore: a password next to the TOTP seed, a passkey-only item, unknown fields, and one TOTP entry with an algorithm outside the enumeration, which the spec says importers MUST ignore. Read by test/cxf.test.ts.",
+  "version": {
+    "major": 1,
+    "minor": 0
+  },
+  "exporterRpId": "vault.example.com",
+  "exporterDisplayName": "Example Vault",
+  "timestamp": 1760000000,
+  "accounts": [
+    {
+      "id": "YWNjb3VudC0x",
+      "username": "",
+      "email": "user@example.com",
+      "collections": [],
+      "items": [
+        {
+          "id": "aXRlbS0x",
+          "creationAt": 1700000000,
+          "modifiedAt": 1700000100,
+          "title": "GitHub",
+          "favorite": true,
+          "scope": {
+            "urls": [
+              "https://github.com"
+            ],
+            "androidApps": []
+          },
+          "credentials": [
+            {
+              "type": "basic-auth",
+              "username": {
+                "fieldType": "string",
+                "value": "alice"
+              },
+              "password": {
+                "fieldType": "concealed-string",
+                "value": "hunter2"
+              }
+            },
+            {
+              "type": "totp",
+              "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+              "period": 30,
+              "digits": 8,
+              "username": "alice@example.com",
+              "algorithm": "sha1",
+              "issuer": "GitHub"
+            }
+          ],
+          "tags": [
+            "work"
+          ]
+        },
+        {
+          "id": "aXRlbS0y",
+          "title": "Google",
+          "credentials": [
+            {
+              "type": "totp",
+              "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZA",
+              "period": 30,
+              "digits": 8,
+              "username": "bob@example.com",
+              "algorithm": "sha256"
+            }
+          ]
+        },
+        {
+          "id": "aXRlbS0z",
+          "title": "Passkey only",
+          "credentials": [
+            {
+              "type": "passkey",
+              "credentialId": "Y3JlZA",
+              "rpId": "example.com",
+              "username": "p",
+              "userDisplayName": "p",
+              "userHandle": "dQ",
+              "key": "a2V5"
+            }
+          ]
+        },
+        {
+          "id": "aXRlbS00",
+          "title": "Legacy hash",
+          "credentials": [
+            {
+              "type": "totp",
+              "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+              "period": 30,
+              "digits": 6,
+              "username": "old",
+              "algorithm": "md5"
+            }
+          ]
+        }
+      ],
+      "extensions": [
+        {
+          "name": "vendor-thing"
+        }
+      ]
+    },
+    {
+      "id": "YWNjb3VudC0y",
+      "username": "family",
+      "email": "",
+      "collections": [],
+      "items": [
+        {
+          "id": "aXRlbS01",
+          "creationAt": 1700000200,
+          "title": "AWS",
+          "subtitle": "ops",
+          "credentials": [
+            {
+              "type": "totp",
+              "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNA",
+              "period": 30,
+              "digits": 8,
+              "username": "ops",
+              "algorithm": "sha512",
+              "issuer": "AWS"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

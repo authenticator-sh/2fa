@@ -25,8 +25,17 @@ const KEY = 'deletedIdentities';
 /** Old enough that any pending sync write has long since resolved or failed. */
 const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 
-/** Bounds the key's size on an account someone churns through repeatedly. */
-const MAX_ENTRIES = 200;
+/**
+ * Bounds the key's size on an account someone churns through repeatedly.
+ *
+ * Counted in markers, not deletions. Since 1.13.4 a deletion records its seed
+ * in every form a copy of it can arrive in — secret, normalised secret, and
+ * the fingerprints of both while a vault is open (see seedIdentities in
+ * storage.ts) — so one delete costs two to four entries where it used to cost
+ * one. Raised to match, so as many deletions are remembered as before; at ~60
+ * bytes an entry it is still a few tens of KB of local storage.
+ */
+const MAX_ENTRIES = 600;
 
 /** identity hash -> when it was deleted. */
 type Tombstones = Record<string, number>;

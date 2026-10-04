@@ -95,7 +95,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         <div className="flex w-full max-w-[220px] flex-col gap-2">
           <button
             onClick={() => window.location.reload()}
-            className="rounded-lg bg-[#4285F4] py-2 text-sm font-medium text-white transition-colors hover:bg-[#3367D6]"
+            className="rounded-lg bg-[#1a73e8] py-2 text-sm font-medium text-white transition-colors hover:bg-[#1967D2]"
           >
             {say('crash.reload', 'Reload')}
           </button>
@@ -106,7 +106,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             {say('crash.saveCopy', 'Save a copy of my accounts')}
           </button>
         </div>
-        <p className="max-w-[260px] break-words text-[10px] text-gray-400 dark:text-gray-500">
+        <p className="max-w-[260px] break-words text-[10px] text-gray-500 dark:text-gray-400">
           {this.state.message}
         </p>
       </div>

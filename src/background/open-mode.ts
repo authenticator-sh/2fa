@@ -7,7 +7,7 @@
 // side panel's own click-to-toggle. Applied on install and startup rather than
 // trusted to persist, and again whenever the setting changes.
 
-import { getOpenMode, HOST_PAGES, OPEN_MODE_KEY, type OpenMode } from '@/utils/open-mode';
+import { DEFAULT_OPEN_MODE, getOpenMode, HOST_PAGES, OPEN_MODE_KEY, readOpenMode, type OpenMode } from '@/utils/open-mode';
 import {
   forgetPopoutWindow,
   openPopoutWindow,
@@ -15,6 +15,56 @@ import {
   siteOfTab,
   siteOfUrl,
 } from '@/utils/popout';
+
+/**
+ * The mode as last seen, for the listeners that cannot wait to read it.
+ *
+ * `chrome.sidePanel.open` is honoured only "in response to a user action", and
+ * in a service worker that means during the listener's own synchronous run:
+ * the first `await` ends it. Every path that opened the panel used to read the
+ * mode from storage first, so the open was always refused — silently, since
+ * the refusal was caught as "older Chrome". The mode is therefore kept here,
+ * read once when the worker starts and followed through storage.onChanged.
+ *
+ * Null until that first read lands. A worker woken by the very click it is
+ * about to handle usually has not got it yet — the event is dispatched as soon
+ * as the script has run, ahead of the storage reply — and those clicks take
+ * the old route, which can still end somewhere useful.
+ */
+let knownMode: OpenMode | null = null;
+
+/** The mode, if it is already known without waiting. */
+export function openModeNow(): OpenMode | null {
+  return knownMode;
+}
+
+/**
+ * Open the side panel from inside the user action that asked for it.
+ *
+ * Must be called before the listener's first `await` — anywhere later and
+ * Chrome refuses. Returns null when nothing was attempted (another mode, or the
+ * mode not known yet, or no panel API), otherwise whether it opened.
+ */
+export function openSidePanelInGesture(target: { windowId?: number; tabId?: number }): Promise<boolean> | null {
+  if (knownMode !== 'sidepanel' || !chrome.sidePanel?.open) return null;
+  // A window is what the icon's own toggle opens the panel in; a tab is only
+  // the fallback for an event that did not say which window it came from.
+  const options =
+    target.windowId !== undefined
+      ? { windowId: target.windowId }
+      : target.tabId !== undefined
+        ? { tabId: target.tabId }
+        : null;
+  if (!options) return null;
+  try {
+    return chrome.sidePanel.open(options).then(
+      () => true,
+      () => false
+    );
+  } catch {
+    return Promise.resolve(false);
+  }
+}
 
 /**
  * One apply at a time.
@@ -93,8 +143,10 @@ export async function openAppFor(
 
   if (mode === 'sidepanel' && chrome.sidePanel?.open) {
     try {
-      // Chrome 116+, and only in response to a user action — a context-menu
-      // click or the keyboard shortcut both qualify.
+      // Chrome 116+, and only in response to a user action. By the time a
+      // caller has awaited anything that action is over and Chrome refuses —
+      // which is why the listeners open the panel themselves, up front, with
+      // openSidePanelInGesture, whenever they can tell in time.
       // A side panel hangs off a normal window; the last focused one can be
       // our own floating window or a site popup, neither of which can host it.
       const windowId =
@@ -112,8 +164,25 @@ export async function openAppFor(
   return false;
 }
 
-/** Fires only when no popup is set — window mode, or side panel mode on a Chrome without one. */
-async function handleActionClick(tab: chrome.tabs.Tab): Promise<void> {
+/**
+ * Fires only when no popup is set — window mode, or side panel mode on a Chrome without one.
+ *
+ * Deliberately not async: the side panel has to be asked for before anything
+ * is awaited, or the click no longer counts as the user's.
+ */
+function handleActionClick(tab: chrome.tabs.Tab): void {
+  const opening = openSidePanelInGesture({ windowId: tab.windowId, tabId: tab.id });
+  void finishActionClick(tab, opening);
+}
+
+async function finishActionClick(tab: chrome.tabs.Tab, opening: Promise<boolean> | null): Promise<void> {
+  if (opening && (await opening)) {
+    // Open — but getting here at all means the icon's own toggle is off (see
+    // below), so put it back for the next click.
+    await applyOpenMode();
+    return;
+  }
+
   const mode = await getOpenMode();
   if (mode === 'window') {
     // `activeTab` is granted by this click, which is what makes the tab's URL
@@ -150,12 +219,18 @@ async function handleActionClick(tab: chrome.tabs.Tab): Promise<void> {
 }
 
 export function registerOpenMode(): void {
-  chrome.action.onClicked.addListener((tab) => {
-    void handleActionClick(tab);
-  });
+  chrome.action.onClicked.addListener(handleActionClick);
 
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && OPEN_MODE_KEY in changes) void applyOpenMode();
+    if (area !== 'local' || !(OPEN_MODE_KEY in changes)) return;
+    knownMode = readOpenMode(changes[OPEN_MODE_KEY].newValue) ?? DEFAULT_OPEN_MODE;
+    void applyOpenMode();
+  });
+
+  // Only if nothing newer has arrived meanwhile: a change event carries the
+  // value as written, and this read may have been answered before it.
+  void getOpenMode().then((mode) => {
+    if (knownMode === null) knownMode = mode;
   });
 
   chrome.windows.onRemoved.addListener((windowId) => {

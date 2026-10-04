@@ -12,83 +12,10 @@
 
 import en from './locales/en';
 import type { TranslationKey, TranslationStrings } from './i18n-keys';
+import { detectLanguage, SUPPORTED_LANGUAGES as SUPPORTED, type Language } from './language';
 
 export type { TranslationKey, TranslationStrings };
-
-export type Language = 'en' | 'zh' | 'es' | 'hi' | 'ar' | 'pt' | 'ru' | 'ja' | 'de' | 'fr' | 'ko' | 'it' | 'tr' | 'vi' | 'pl' | 'nl' | 'id' | 'th' | 'uk' | 'sv';
-
-export const languages: { code: Language; label: string; flag: string }[] = [
-  { code: 'en', label: 'English', flag: '🇺🇸' },
-  { code: 'zh', label: '中文', flag: '🇨🇳' },
-  { code: 'es', label: 'Español', flag: '🇪🇸' },
-  { code: 'hi', label: 'हिन्दी', flag: '🇮🇳' },
-  { code: 'ar', label: 'العربية', flag: '🇸🇦' },
-  { code: 'pt', label: 'Português', flag: '🇧🇷' },
-  { code: 'ru', label: 'Русский', flag: '🇷🇺' },
-  { code: 'ja', label: '日本語', flag: '🇯🇵' },
-  { code: 'de', label: 'Deutsch', flag: '🇩🇪' },
-  { code: 'fr', label: 'Français', flag: '🇫🇷' },
-  { code: 'ko', label: '한국어', flag: '🇰🇷' },
-  { code: 'it', label: 'Italiano', flag: '🇮🇹' },
-  { code: 'tr', label: 'Türkçe', flag: '🇹🇷' },
-  { code: 'vi', label: 'Tiếng Việt', flag: '🇻🇳' },
-  { code: 'pl', label: 'Polski', flag: '🇵🇱' },
-  { code: 'nl', label: 'Nederlands', flag: '🇳🇱' },
-  { code: 'id', label: 'Bahasa Indonesia', flag: '🇮🇩' },
-  { code: 'th', label: 'ไทย', flag: '🇹🇭' },
-  { code: 'uk', label: 'Українська', flag: '🇺🇦' },
-  { code: 'sv', label: 'Svenska', flag: '🇸🇪' },
-];
-
-const SUPPORTED: ReadonlySet<string> = new Set(languages.map((entry) => entry.code));
-
-/**
- * Codes Chrome can still report that no longer match the tag we ship under.
- * `in` is the pre-1989 code for Indonesian and Chrome inherits it from Java's
- * locale table; without this, an Indonesian browser silently gets English.
- */
-const LEGACY_CODES: Readonly<Record<string, Language>> = { in: 'id' };
-
-/**
- * The best of our twenty languages for a BCP-47 tag, or English.
- *
- * Only the primary subtag is considered, because the region almost never
- * changes which of our files is right: `pt-BR` and `pt-PT` both want `pt`, and
- * every `es-419` variant wants `es`. The one place this is a genuine compromise
- * is Chinese — we ship Simplified only, so `zh-TW` and `zh-HK` are answered
- * with Simplified rather than with English, on the grounds that a reader of
- * Traditional can read it and a reader of English-by-default cannot.
- */
-export function matchLanguage(tag: string | null | undefined): Language {
-  if (!tag) return 'en';
-
-  const primary = tag.toLowerCase().split(/[-_]/)[0];
-  const code = LEGACY_CODES[primary] ?? primary;
-  return SUPPORTED.has(code) ? (code as Language) : 'en';
-}
-
-/**
- * Which language to open in when the user has never picked one.
- *
- * Twenty translated interfaces were reachable only from a dropdown nobody had
- * a reason to open: every install started in English, including for the people
- * least able to read it. The browser already knows, and `chrome.i18n` needs no
- * permission to ask.
- *
- * Deliberately not persisted. A stored `language` means "the user chose this"
- * and always wins; its absence means "follow the browser", so someone who
- * changes their browser language — or an install that gains a translation in a
- * later release — is followed rather than frozen.
- */
-export function detectLanguage(): Language {
-  try {
-    return matchLanguage(chrome?.i18n?.getUILanguage?.());
-  } catch {
-    // No chrome.i18n in this context (tests, a stripped build) — English is a
-    // fine answer and this must never be the thing that stops the popup.
-    return 'en';
-  }
-}
+export { detectLanguage, languages, matchLanguage, type Language } from './language';
 
 /**
  * The language a page opens in: the stored choice, else the browser's.
@@ -186,6 +113,123 @@ export function getActiveLanguage(): Language {
   return activeLanguage;
 }
 
+/** The CLDR categories a plural block may name. */
+export const PLURAL_CATEGORIES = ['zero', 'one', 'two', 'few', 'many', 'other'] as const;
+export type PluralCategory = (typeof PLURAL_CATEGORIES)[number];
+
+export interface PluralBlock {
+  /** Which argument the block counts: the N of `{N, plural, …}`. */
+  arg: number;
+  forms: Partial<Record<PluralCategory, string>>;
+  /** Where the block starts and ends in the string, end exclusive. */
+  start: number;
+  end: number;
+}
+
+const PLURAL_HEAD = /\{(\d+),\s*plural,/y;
+const PLURAL_FORM = /\s*(zero|one|two|few|many|other)\s*\{/y;
+
+/**
+ * Every `{N, plural, one {…} other {…}}` block in a string.
+ *
+ * The subset of ICU MessageFormat the tables need and nothing more: a block
+ * picks one form by the number in argument N, `#` inside the form stands for
+ * that number, and a form may carry the ordinary `{1}` placeholders. A block
+ * rather than one key per form, because some sentences count two things — "3
+ * links saved, 1 account left out" — and in Russian each noun takes its own
+ * form. "аккаунт(ов)" was the workaround, and it read as a form nobody fills in.
+ *
+ * Throws on a block it cannot read; the test over every table calls this, so a
+ * broken translation fails there and not in front of a user.
+ */
+export function parsePluralBlocks(text: string): PluralBlock[] {
+  const blocks: PluralBlock[] = [];
+  for (let i = text.indexOf('{'); i !== -1; i = text.indexOf('{', i + 1)) {
+    PLURAL_HEAD.lastIndex = i;
+    const head = PLURAL_HEAD.exec(text);
+    if (!head) continue;
+
+    const forms: PluralBlock['forms'] = {};
+    let at = PLURAL_HEAD.lastIndex;
+    for (;;) {
+      while (text[at] === ' ') at++;
+      if (text[at] === '}') {
+        at++;
+        break;
+      }
+      PLURAL_FORM.lastIndex = at;
+      const form = PLURAL_FORM.exec(text);
+      if (!form) throw new Error(`Unreadable plural form at "${text.slice(at, at + 20)}"`);
+      at = PLURAL_FORM.lastIndex;
+      const start = at;
+      let depth = 1;
+      while (at < text.length && depth > 0) {
+        if (text[at] === '{') depth++;
+        else if (text[at] === '}') depth--;
+        at++;
+      }
+      if (depth > 0) throw new Error('Unbalanced braces in a plural block');
+      forms[form[1] as PluralCategory] = text.slice(start, at - 1);
+    }
+    if (forms.other === undefined) throw new Error('A plural block needs an "other" form');
+    blocks.push({ arg: Number(head[1]), forms, start: i, end: at });
+    i = at - 1;
+  }
+  return blocks;
+}
+
+const pluralRules = new Map<Language, Intl.PluralRules>();
+
+/** The plural category a number takes in a language — cached, it is asked on every render. */
+export function pluralCategory(language: Language, count: number): PluralCategory {
+  let rules = pluralRules.get(language);
+  if (!rules) {
+    try {
+      rules = new Intl.PluralRules(language);
+    } catch {
+      rules = new Intl.PluralRules('en');
+    }
+    pluralRules.set(language, rules);
+  }
+  return rules.select(count) as PluralCategory;
+}
+
+/**
+ * Fill a table string: plural blocks first, then the plain placeholders.
+ *
+ * In that order so an argument can never be read as syntax — a group named
+ * "{0, plural, …}" is inserted as text, after every block has been decided.
+ */
+export function formatMessage(text: string, language: Language, args: (string | number)[]): string {
+  let blocks: PluralBlock[] = [];
+  try {
+    blocks = parsePluralBlocks(text);
+  } catch (error) {
+    console.error('Unreadable plural block in a translation:', error);
+  }
+
+  let resolved = text;
+  for (const block of blocks.reverse()) {
+    const count = Number(args[block.arg]);
+    const category = Number.isFinite(count) ? pluralCategory(language, count) : 'other';
+    // A form the table left out falls back to "other" rather than to nothing:
+    // a half-translated sentence still beats an empty toast.
+    const form = (block.forms[category] ?? block.forms.other ?? '').replace(/#/g, () => String(args[block.arg] ?? ''));
+    resolved = resolved.slice(0, block.start) + form + resolved.slice(block.end);
+  }
+
+  // One pass over the placeholders the table wrote, not one replace per
+  // argument: an argument is user-typed text — a group name, an account name —
+  // and replacing in turn let a group called "{1}" pick up the next argument.
+  // The replacement goes through a function so `$&`, `` $` ``, `$'` and `$1`
+  // inside it are inserted literally; as a plain string a group called
+  // "Work $& Home" made replace() splice the match back in, while "A$'B"
+  // silently deleted text.
+  return resolved.replace(/\{(\d+)\}/g, (match, index: string) =>
+    Number(index) < args.length ? String(args[Number(index)]) : match
+  );
+}
+
 // `language` is kept in the signature so every call site stays unchanged and
 // components still re-render when it changes; the active table is module state
 // because `t()` has to remain synchronous.
@@ -194,16 +238,11 @@ export function getTranslation(
   key: TranslationKey,
   ...args: (string | number)[]
 ): string {
-  let text = active[key] || en[key] || key;
-  args.forEach((arg, i) => {
-    // The replacement goes through a function so `$&`, `` $` ``, `$'` and `$1`
-    // inside it are inserted literally. Arguments are user-typed values — group
-    // names, account names — and as a plain string a group called "Work $& Home"
-    // made replace() splice the match back in, while "A$'B" silently deleted
-    // text.
-    text = text.replace(`{${i}}`, () => String(arg));
-  });
-  return text;
+  // The table that supplied the text decides the plural rules: a key missing
+  // from the active table comes back in English, and must be counted in it.
+  const own = active[key];
+  const text = own || en[key] || key;
+  return formatMessage(text, own ? activeLanguage : 'en', args);
 }
 
 export function createT(language: Language) {

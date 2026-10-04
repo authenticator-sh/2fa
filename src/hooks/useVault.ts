@@ -46,9 +46,12 @@ export function useVault() {
     // A passkey ceremony runs in a window of its own and cannot write this
     // context's session directly. If it left a key staged, adopt it here —
     // once — before deciding whether to show the lock screen. This is the only
-    // place that consumes a hand-off, deliberately: getMasterKeyBytes enforces
-    // auto-lock and must not grow a second way to say "unlocked".
-    await consumeKeyHandoff();
+    // place that consumes an unlock hand-off, deliberately: getMasterKeyBytes
+    // enforces auto-lock and must not grow a second way to say "unlocked".
+    // Only 'unlock': a key staged for linking a passkey belongs to the ceremony
+    // window, and taking it here opened the vault for anyone who clicked the
+    // icon while that window was up.
+    await consumeKeyHandoff('unlock');
 
     setState({
       enabled: true,
@@ -150,6 +153,9 @@ export function useVault() {
 
   const setAutoLockMinutes = useCallback(
     async (minutes: number) => {
+      // Switching to "every open" also takes the key out of session storage
+      // (see vault.setAutoLockMinutes); this page keeps it in memory, so the
+      // user is not locked out of the screen they just changed the setting on.
       await persistAutoLockMinutes(minutes);
       setState(previous => ({ ...previous, autoLockMinutes: minutes }));
     },

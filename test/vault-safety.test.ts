@@ -6,7 +6,7 @@
 // was written beside. None of these lose a byte on the happy path, and each of
 // them ends with accounts nobody can open.
 
-import { areas, check, faults, flush, resetFaults, resetState, scenario, storageContext, throwsNamed, withLatency } from './harness';
+import { areas, check, faults, flush, resetFaults, resetState, scenario, storageContext, throwsNamed, withLatency, USER_ADD } from './harness';
 
 const PASSWORD = 'correct horse battery staple';
 
@@ -272,8 +272,10 @@ export async function run(): Promise<void> {
   check('every account is still readable', (await storage.getAccounts()).length === 2);
 
   // The reset is spread over the metadata as it stands at commit, not as it
-  // stood when the code was shown.
-  scenario('A passkey added while the new code is on screen survives the reset');
+  // stood when the code was shown — and a reset unlinks every passkey, so one
+  // linked while the code was on screen goes too. Spreading the prepare-time
+  // copy would have kept it: that copy had no passkey to drop.
+  scenario('A passkey added while the new code is on screen is unlinked by the reset too');
   const beforePasskey = await vault.prepareRecovery(rebuilt.recoveryCode, 'password after second recovery');
   const masterKey = await vault.getMasterKeyBytes();
   const PRF = new Uint8Array(32).fill(7);
@@ -281,10 +283,9 @@ export async function run(): Promise<void> {
   await flush();
   await beforePasskey.commit();
   await flush();
-  check('the passkey is still registered', (await vault.getVaultPasskey())?.label === 'Laptop');
+  check('the passkey is no longer registered', (await vault.getVaultPasskey()) === null);
   await vault.lock();
-  check('and still opens the vault', await opens(vault.unlockWithPasskey(PRF)));
-  await vault.lock();
+  check('and no longer opens the vault', !(await opens(vault.unlockWithPasskey(PRF))));
   check('as does the password set by the reset', await opens(vault.unlockWithPassword('password after second recovery')));
   await vault.lock();
 
@@ -313,7 +314,7 @@ export async function run(): Promise<void> {
     const onWrite = (changes: any, area: string) => {
       const next = changes.authenticator_accounts?.newValue;
       if (area === 'local' && !adding && Array.isArray(next) && next.some(isCleartext)) {
-        adding = scanner.addAccount({ ...ACCOUNTS[0], id: 'n4', secret: 'NBSWY3DPEB3W64TM' }).catch(e => e);
+        adding = scanner.addAccount({ ...ACCOUNTS[0], id: 'n4', secret: 'NBSWY3DPEB3W64TM' }, USER_ADD).catch(e => e);
       }
     };
     chrome.storage.onChanged.addListener(onWrite);
@@ -346,7 +347,7 @@ export async function run(): Promise<void> {
     try {
       await Promise.all([
         prepared.commit(),
-        scanner.addAccount({ ...ACCOUNTS[0], id: 'n3', secret: 'MFRGGZDFMZTWQ2LK' }).catch(e => e),
+        scanner.addAccount({ ...ACCOUNTS[0], id: 'n3', secret: 'MFRGGZDFMZTWQ2LK' }, USER_ADD).catch(e => e),
       ]);
       await flush();
     } finally {

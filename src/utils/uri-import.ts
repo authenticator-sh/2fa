@@ -8,6 +8,7 @@
 // hole underneath it.
 
 import { generateRandomColor, parseQRCode, UnsupportedOTPTypeError, type ParsedOTPAuth } from './qr-parser';
+import { AccountLimitError, type AddOrigin } from '@/billing/gate';
 import { cleanSecret } from './totp';
 import { addMultipleAccounts, VaultLockedError } from './storage';
 import { describeFileImport } from './import-message';
@@ -34,6 +35,12 @@ export interface URIImportPlan {
   unreadable: number[];
   /** Lines that parsed and were understood to be counter-based. */
   hotp: number[];
+  /**
+   * Lines understood and refused for another reason: an OTP kind we do not
+   * generate, or an algorithm, digit count or period we cannot honour. Kept
+   * apart from `hotp` so the message does not call an MD5 line counter-based.
+   */
+  unsupported: number[];
   /** Entries a migration payload on some line refused on its own. */
   skippedInBatch: number;
   /** Links past MAX_IMPORT_LINES, never looked at. */
@@ -80,10 +87,12 @@ export function planURIImport(text: string): URIImportPlan {
 
   const unreadable = new Set<number>();
   const hotp = new Set<number>();
+  const unsupported = new Set<number>();
   const plan: URIImportPlan = {
     accounts: [],
     unreadable: [],
     hotp: [],
+    unsupported: [],
     skippedInBatch: 0,
     ignored,
   };
@@ -102,7 +111,7 @@ export function planURIImport(text: string): URIImportPlan {
       // their counter-based token is a corrupt line sends them back to export
       // it again, and the second export will not work either.
       if (error instanceof UnsupportedOTPTypeError) {
-        hotp.add(entry.line);
+        (error.reason === 'hotp' ? hotp : unsupported).add(entry.line);
       } else {
         unreadable.add(entry.line);
       }
@@ -112,6 +121,7 @@ export function planURIImport(text: string): URIImportPlan {
   // Sorted so the numbers read in the order the user's eye scans the paste.
   plan.unreadable = [...unreadable].sort((a, b) => a - b);
   plan.hotp = [...hotp].sort((a, b) => a - b);
+  plan.unsupported = [...unsupported].sort((a, b) => a - b);
   return plan;
 }
 
@@ -133,7 +143,7 @@ export interface URIImportOutcome {
  * taught one of them. A file the extension itself had just written came back as
  * "invalid backup file" on the path the onboarding sends people down.
  */
-export async function importURIList(text: string, language: Language): Promise<URIImportOutcome> {
+export async function importURIList(text: string, language: Language, origin: AddOrigin): Promise<URIImportOutcome> {
   const t = createT(language);
   const plan = planURIImport(text);
 
@@ -145,6 +155,7 @@ export async function importURIList(text: string, language: Language): Promise<U
     algorithm: parsed.algorithm,
     digits: parsed.digits,
     period: parsed.period,
+    ...(parsed.type ? { type: parsed.type } : {}),
     createdAt: Date.now() + index,
     color: generateRandomColor(),
   }));
@@ -161,6 +172,9 @@ export async function importURIList(text: string, language: Language): Promise<U
   if (plan.hotp.length > 0) {
     notes.push(t('import.uriHotp', plan.hotp.length, listLines(plan.hotp)));
   }
+  if (plan.unsupported.length > 0) {
+    notes.push(t('import.uriUnsupported', plan.unsupported.length, listLines(plan.unsupported)));
+  }
   if (plan.skippedInBatch > 0) {
     notes.push(t('import.uriBatchSkipped', plan.skippedInBatch));
   }
@@ -173,15 +187,17 @@ export async function importURIList(text: string, language: Language): Promise<U
   }
 
   try {
-    const result = await addMultipleAccounts(accounts);
+    const result = await addMultipleAccounts(accounts, origin);
     return {
       kind: result.added > 0 && notes.length === 0 ? 'success' : 'info',
       // Not describeImport: that says "from QR code", and these came from a
       // paste or a .txt.
-      message: [describeFileImport({ added: result.added, alreadyHere: result.skipped }, language), ...notes].join(' '),
+      message: [describeFileImport({ added: result.added, alreadyHere: result.skipped, updated: result.updated }, language), ...notes].join(' '),
       added: result.added,
     };
   } catch (error) {
+    // The paywall, not a message: billing/add.ts catches it above this call.
+    if (error instanceof AccountLimitError) throw error;
     if (error instanceof VaultLockedError) {
       return { kind: 'error', message: t('scan.lockedTitle') };
     }

@@ -37,35 +37,64 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-// Save backup to IndexedDB
-export async function saveBackup(accounts: StoredAccount[]): Promise<void> {
-  try {
-    const db = await openDB();
-    const transaction = db.transaction([STORE_NAME], 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
+/**
+ * A key no other snapshot has.
+ *
+ * `backup_<ms>` alone collided whenever two copies were taken in the same
+ * millisecond — the popup and the side panel opening together, a vault switch
+ * right after a daily copy — and IndexedDB refuses an `add` over an existing
+ * key by aborting the whole transaction. The copy was simply not written, and
+ * the failure was logged where nobody reads. Older rows keep their ids; nothing
+ * parses them, the order comes from `timestamp`.
+ */
+function newBackupId(at: number): string {
+  const random = crypto.getRandomValues(new Uint32Array(2));
+  return `backup_${at}_${random[0].toString(36)}${random[1].toString(36)}`;
+}
 
+/**
+ * Wait for a transaction to be durable.
+ *
+ * A request's `onsuccess` only says the request ran; the transaction can still
+ * abort when it commits — a full disk, quota — and then nothing was written.
+ * `oncomplete` is the one signal that the data is on disk.
+ */
+function committed(transaction: IDBTransaction): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error ?? new Error('Backup transaction aborted'));
+  });
+}
+
+/**
+ * Save a snapshot. Rejects when it was not written, so the caller can tell a
+ * copy that exists from one that was only attempted.
+ */
+export async function saveBackup(accounts: StoredAccount[]): Promise<void> {
+  const db = await openDB();
+  try {
+    const transaction = db.transaction([STORE_NAME], 'readwrite');
     const at = Date.now();
     const backup: Backup = {
-      id: `backup_${at}`,
+      id: newBackupId(at),
       timestamp: at,
       accounts,
       version: chrome.runtime.getManifest().version,
       accountCount: accounts.length
     };
 
-    await new Promise<void>((resolve, reject) => {
-      const request = store.add(backup);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
-
+    // Handlers attached before the request can run, so an abort is never missed.
+    const done = committed(transaction);
+    transaction.objectStore(STORE_NAME).add(backup);
+    await done;
+  } finally {
     db.close();
-
-    // Clean old backups
-    await cleanOldBackups();
-  } catch (error) {
-    console.error('Failed to save backup:', error);
   }
+
+  // Clean old backups — only once the new one is provably there, so a failed
+  // write never costs the oldest copy as well.
+  await cleanOldBackups();
 }
 
 /** A snapshot described without its records. */
@@ -147,18 +176,20 @@ async function cleanOldBackups(): Promise<void> {
     const transaction = db.transaction([STORE_NAME], 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
 
-    // Delete old backups
+    // Delete old backups. `committed` listens for an abort too: waiting on
+    // oncomplete/onerror alone never settled when the commit itself failed,
+    // and the auto-backup lock stayed held for the life of the page.
+    const done = committed(transaction);
     const toDelete = backups.slice(MAX_BACKUPS);
     for (const backup of toDelete) {
       store.delete(backup.id);
     }
 
-    await new Promise<void>((resolve, reject) => {
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-    });
-
-    db.close();
+    try {
+      await done;
+    } finally {
+      db.close();
+    }
   } catch (error) {
     console.error('Failed to clean old backups:', error);
   }
@@ -178,22 +209,22 @@ export async function replaceAllBackups(accounts: StoredAccount[]): Promise<void
   const transaction = db.transaction([STORE_NAME], 'readwrite');
   const store = transaction.objectStore(STORE_NAME);
 
+  const done = committed(transaction);
+  const at = Date.now();
   store.clear();
   store.add({
-    id: `backup_${Date.now()}`,
-    timestamp: Date.now(),
+    id: newBackupId(at),
+    timestamp: at,
     accounts,
     version: chrome.runtime.getManifest().version,
     accountCount: accounts.length,
   } satisfies Backup);
 
-  await new Promise<void>((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-    transaction.onabort = () => reject(transaction.error);
-  });
-
-  db.close();
+  try {
+    await done;
+  } finally {
+    db.close();
+  }
 }
 
 /**
@@ -206,14 +237,14 @@ export async function wipeAllBackups(): Promise<void> {
   try {
     const db = await openDB();
     const transaction = db.transaction([STORE_NAME], 'readwrite');
+    const done = committed(transaction);
     transaction.objectStore(STORE_NAME).clear();
 
-    await new Promise<void>((resolve, reject) => {
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-    });
-
-    db.close();
+    try {
+      await done;
+    } finally {
+      db.close();
+    }
   } catch (error) {
     console.error('Failed to wipe backups:', error);
     throw error;

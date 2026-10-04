@@ -8,6 +8,7 @@
 //
 //   npm run checksums          write SHA256SUMS-v<version>.txt
 //   npm run checksums -- --check   recompute and diff against that file
+//   npm run checksums -- --force   overwrite an existing file that differs
 //
 // Format is `<sha256>  <path>` with paths relative to dist/, sorted by byte
 // order — the same layout sha256sum(1) reads, so `sha256sum -c` works on the
@@ -122,6 +123,23 @@ if (process.argv.includes("--check")) {
   }
   console.log(`checksums: dist/ matches ${outName} (${got.size} files)`);
 } else {
+  // The sums for a version are published with its release. A dist/ rebuilt
+  // from newer work without a version bump still says the old version, and
+  // overwriting would quietly swap the published sums for ones describing code
+  // that was never released. Rewriting identical content is fine; anything
+  // else has to be asked for.
+  let existing = null;
+  try {
+    existing = readFileSync(outPath, "utf8");
+  } catch {
+    // Not written yet — the normal case for a new version.
+  }
+  if (existing !== null && existing !== body && !process.argv.includes("--force")) {
+    fail(
+      `${outName} already exists and dist/ no longer matches it. If this is a new release, bump the version; ` +
+        `\`npm run checksums -- --check\` lists what differs; \`-- --force\` overwrites.`
+    );
+  }
   writeFileSync(outPath, body);
   console.log(`checksums: wrote ${outName} (${lines.length} files)`);
 }

@@ -20,7 +20,9 @@ export type QuickFillOutcome =
   /** Not even the clipboard was available; the code was shown to be typed. */
   | 'shown'
   /** This frame is not the one the user is typing in — another will answer. */
-  | 'skipped';
+  | 'skipped'
+  /** No field took it, and the caller asked to handle the fallback itself. */
+  | 'missed';
 
 export interface QuickFillPageArgs {
   /** null means there is nothing to fill and `noticeText` is the whole job. */
@@ -31,6 +33,29 @@ export interface QuickFillPageArgs {
    * The context menu knows its frame and passes false.
    */
   requireFocus: boolean;
+  /**
+   * Whether a field may be picked out of the page when the caret is not in
+   * one. False when this frame is answering for another: the right-click
+   * landed in a frame we could not enter, and this page's own code-looking
+   * field is not the one the user was pointing at — the clipboard is.
+   */
+  mayGuess: boolean;
+  /**
+   * Find the frame by its caret rather than by `document.hasFocus()`.
+   *
+   * For a fill finished from our own window after an unlock or a pick: that
+   * window has the focus now, so no document in the tab reports having it, and
+   * every frame would skip. Each document still remembers its focused element,
+   * though, and the frame whose one is a text field is where the user was.
+   */
+  caretOnly?: boolean;
+  /**
+   * False when the caller has focus of its own to copy with. The page cannot:
+   * with our window in front, both clipboard routes here are refused and the
+   * code would end up in a toast for retyping, while the popup could simply
+   * have copied it.
+   */
+  clipboard?: boolean;
   // Toast copy, already translated — the page has no access to our locales.
   /** Shown when the code went to the clipboard instead of into the field. */
   copiedText: string;
@@ -43,7 +68,7 @@ export interface QuickFillPageArgs {
 export async function quickFillInPage(args: QuickFillPageArgs): Promise<QuickFillOutcome> {
   const CODE = args.code || '';
 
-  if (args.requireFocus && !document.hasFocus()) return 'skipped';
+  if (args.requireFocus && !args.caretOnly && !document.hasFocus()) return 'skipped';
 
   const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -83,7 +108,42 @@ export async function quickFillInPage(args: QuickFillPageArgs): Promise<QuickFil
   if (args.requireFocus) {
     const holder = focusedElement();
     if (holder && (holder.tagName === 'IFRAME' || holder.tagName === 'FRAME')) return 'skipped';
+    if (args.caretOnly && !isFillable(holder)) return 'skipped';
   }
+
+  /**
+   * Every text field on the page, including those inside open shadow roots.
+   *
+   * `querySelectorAll` stops at a shadow boundary, and sign-in forms built as
+   * web components — a design system's <otp-input>, an embedded identity
+   * widget — keep their fields behind one. With the caret elsewhere the code
+   * then went to the clipboard while the field sat in plain view. Closed roots
+   * are unreachable by design and stay that way.
+   *
+   * Bounded, because this runs on whatever page the user happens to be on: a
+   * few hundred roots and tens of thousands of elements is already an unusual
+   * page, and past that a guess is not worth freezing it for.
+   */
+  const candidateFields = (): Element[] => {
+    const MAX_ROOTS = 200;
+    const MAX_DEPTH = 8;
+    let budget = 20000;
+    const fields: Element[] = [];
+    const roots: Array<{ root: Document | ShadowRoot; depth: number }> = [{ root: document, depth: 0 }];
+
+    for (let i = 0; i < roots.length && i < MAX_ROOTS; i += 1) {
+      const { root, depth } = roots[i];
+      fields.push(...Array.from(root.querySelectorAll('input, textarea')));
+      if (depth >= MAX_DEPTH || budget <= 0) continue;
+
+      const all = root.querySelectorAll('*');
+      for (let j = 0; j < all.length && budget > 0; j += 1, budget -= 1) {
+        const shadow = (all[j] as Element).shadowRoot;
+        if (shadow) roots.push({ root: shadow, depth: depth + 1 });
+      }
+    }
+    return fields;
+  };
 
   const OTP_HINT = /(^|[^a-z])(otp|totp|mfa|2fa|twofactor|two_factor|onetime|one_time|authcode|securitycode|verification|verify|passcode|token)([^a-z]|$)/i;
 
@@ -97,7 +157,7 @@ export async function quickFillInPage(args: QuickFillPageArgs): Promise<QuickFil
    * field" ends in the clipboard fallback instead of a guess.
    */
   const guessTarget = (): HTMLElement | null => {
-    const inputs = Array.from(document.querySelectorAll('input, textarea'));
+    const inputs = candidateFields();
     let best: HTMLElement | null = null;
     let bestScore = 0;
 
@@ -389,9 +449,11 @@ export async function quickFillInPage(args: QuickFillPageArgs): Promise<QuickFil
   }
 
   const focused = focusedElement();
-  const target = isFillable(focused) ? (focused as HTMLElement) : guessTarget();
+  const target = isFillable(focused) ? (focused as HTMLElement) : args.mayGuess ? guessTarget() : null;
 
   if (target && (await fill(target))) return 'filled';
+
+  if (args.clipboard === false) return 'missed';
 
   if (await copy(CODE)) {
     toast(args.copiedText);

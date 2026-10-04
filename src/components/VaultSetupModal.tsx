@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
+import { useReturnFocus } from '@/hooks/useLayer';
 import { AlertTriangle, Check, Download, Eye, EyeOff, Lock, ShieldCheck } from 'lucide-react';
 import { createT, type Language } from '@/utils/i18n';
 import { assessPasswordStrength, MIN_PASSWORD_LENGTH, normalizeRecoveryCode } from '@/utils/crypto';
@@ -28,6 +29,9 @@ const STRENGTH_STYLE = {
 
 export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModalProps) {
   const t = createT(language);
+  const ids = useId();
+  // Back to "Turn on" in Settings or the prompt's button, not to <body>.
+  useReturnFocus();
 
   const [step, setStep] = useState<Step>('password');
   const [password, setPassword] = useState('');
@@ -140,11 +144,12 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
                 ))}
               </ul>
 
-              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label htmlFor={`${ids}-password`} className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                 {t('vault.setup.password')}
               </label>
               <div className="relative mb-2">
                 <input
+                  id={`${ids}-password`}
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
@@ -154,9 +159,11 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute end-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  aria-label={t('a11y.showPassword')}
+                  aria-pressed={showPassword}
+                  className="absolute end-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
                 >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  {showPassword ? <EyeOff size={16} aria-hidden /> : <Eye size={16} aria-hidden />}
                 </button>
               </div>
 
@@ -171,10 +178,11 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
                 </div>
               )}
 
-              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label htmlFor={`${ids}-confirm`} className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                 {t('vault.setup.confirm')}
               </label>
               <input
+                id={`${ids}-confirm`}
                 type={showPassword ? 'text' : 'password'}
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}
@@ -202,7 +210,7 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
                 <button
                   onClick={handleCreate}
                   disabled={busy || !password || !confirmPassword}
-                  className="flex-1 bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
+                  className="flex-1 bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
                 >
                   {busy ? t('vault.setup.working') : t('vault.setup.continue')}
                 </button>
@@ -245,10 +253,11 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
                 <p className="text-[11px] text-red-800 dark:text-red-300">{t('vault.recovery.warning')}</p>
               </div>
 
-              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+              <label htmlFor={`${ids}-recovery`} className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                 {t('vault.recovery.confirm')}
               </label>
               <input
+                id={`${ids}-recovery`}
                 type="text"
                 value={typedRecovery}
                 onChange={e => setTypedRecovery(e.target.value)}
@@ -263,7 +272,7 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
               <button
                 onClick={handleConfirmRecovery}
                 disabled={busy || !typedRecovery}
-                className="w-full bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
+                className="w-full bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
               >
                 {busy ? t('vault.setup.working') : t('vault.recovery.finish')}
               </button>
@@ -283,15 +292,16 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
               <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
                 {t('vault.done.askTitle')}
               </p>
-              <div className="grid grid-cols-2 gap-1.5 mb-4">
+              <div className="grid grid-cols-2 gap-1.5 mb-4" role="group" aria-label={t('vault.done.askTitle')}>
                 {AUTO_LOCK_OPTIONS.map(minutes => (
                   <button
                     key={minutes}
                     type="button"
+                    aria-pressed={autoLock === minutes}
                     onClick={() => handleAutoLockChange(minutes)}
                     className={`text-xs font-medium py-2 px-2 rounded-lg border transition-colors ${
                       autoLock === minutes
-                        ? 'border-[#4285F4] bg-blue-50 dark:bg-blue-900/20 text-[#4285F4]'
+                        ? 'border-[#4285F4] bg-blue-50 dark:bg-blue-900/20 text-[#1a73e8] dark:text-[#669DF6]'
                         : 'border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
                     }`}
                   >
@@ -311,7 +321,7 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
                 </button>
                 <button
                   onClick={handleFinish}
-                  className="flex-1 bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
+                  className="flex-1 bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
                 >
                   {t('update.gotIt')}
                 </button>

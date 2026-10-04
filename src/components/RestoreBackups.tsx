@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ChevronDown, History, LifeBuoy, RotateCcw } from 'lucide-react';
+import { ChevronDown, LifeBuoy, RotateCcw } from 'lucide-react';
+import { SettingRow, settingsButton, settingsWell } from '@/components/SettingsSection';
 import { restoreFromBackup, type BackupSummary } from '@/utils/auto-backup';
 import { restoreFromSnapshot, type RestoreResult } from '@/utils/storage';
 import { VaultLockedError } from '@/utils/vault';
@@ -141,7 +142,7 @@ export function RestoreBackups({ backups, language, onRestored }: RestoreBackups
   const shown = showOlder ? backups : newest ? [newest] : [];
 
   const row = (backup: BackupSummary) => (
-    <li key={backup.id} className="flex items-center justify-between gap-3 px-3 py-1.5">
+    <li key={backup.id} className="flex items-center justify-between gap-3 px-2.5 py-1.5">
       <p className="min-w-0 truncate text-xs text-gray-700 dark:text-gray-300">
         <span className="font-medium text-gray-900 dark:text-gray-100">
           {startOfLine(describeAge(backup.timestamp, t), language)}
@@ -156,7 +157,7 @@ export function RestoreBackups({ backups, language, onRestored }: RestoreBackups
         <button
           onClick={() => void run(backup)}
           disabled={busyId !== null}
-          className="flex-shrink-0 rounded-md border border-gray-300 dark:border-dark-500 px-2.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-300 transition-colors hover:bg-gray-50 dark:hover:bg-dark-600 disabled:opacity-50"
+          className={`${settingsButton.secondary} bg-white dark:bg-dark-700`}
         >
           {busyId === backup.id ? t('restore.busy') : t('restore.action')}
         </button>
@@ -165,28 +166,18 @@ export function RestoreBackups({ backups, language, onRestored }: RestoreBackups
   );
 
   return (
-    <div className="mt-4">
-      <div className="flex items-center gap-1.5">
-        <History size={14} className="text-gray-400" />
-        <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">
-          {t('restore.title')}
-        </h3>
-      </div>
-      <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
-        {t('restore.hint')}
-      </p>
-
+    <SettingRow label={t('restore.title')} hint={t('restore.hint')}>
       {backups.length === 0 ? (
-        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{t('restore.none')}</p>
+        <p className={`${settingsWell} px-2.5 py-2 text-xs text-gray-500 dark:text-gray-400`}>{t('restore.none')}</p>
       ) : (
-        <ul className="mt-2 divide-y divide-gray-200 dark:divide-dark-600 rounded-lg border border-gray-200 dark:border-dark-600 bg-white dark:bg-dark-700">
+        <ul className={`${settingsWell} divide-y divide-gray-200 dark:divide-dark-700`}>
           {shown.map(row)}
           {older.length > 0 && (
             <li>
               <button
                 onClick={() => setShowOlder(open => !open)}
                 aria-expanded={showOlder}
-                className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-xs text-gray-600 transition-colors hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-dark-600"
+                className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-xs text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
               >
                 {t('restore.older', older.length)}
                 <ChevronDown
@@ -198,7 +189,7 @@ export function RestoreBackups({ backups, language, onRestored }: RestoreBackups
           )}
         </ul>
       )}
-    </div>
+    </SettingRow>
   );
 }
 
@@ -248,7 +239,7 @@ export function RestoreOffer({ backup, language, onRestored, variant = 'banner' 
   return (
     <div className="mx-4 mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/50 dark:bg-blue-900/20">
       <div className="flex items-start gap-2">
-        <LifeBuoy size={15} className="mt-0.5 flex-shrink-0 text-blue-600 dark:text-blue-400" />
+        <LifeBuoy size={15} className="mt-0.5 flex-shrink-0 text-[#1a73e8] dark:text-[#8AB4F8]" />
         <div className="min-w-0">
           <p className="text-xs font-medium text-gray-900 dark:text-gray-100">
             {t('restore.offerTitle', backup.accountCount)}
@@ -259,7 +250,7 @@ export function RestoreOffer({ backup, language, onRestored, variant = 'banner' 
           <button
             onClick={() => void run()}
             disabled={busy}
-            className="mt-2 rounded-md bg-[#4285F4] px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-[#3367D6] disabled:opacity-50"
+            className="mt-2 rounded-md bg-[#1a73e8] px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-[#1967D2] disabled:opacity-50"
           >
             {busy ? t('restore.busy') : t('restore.action')}
           </button>

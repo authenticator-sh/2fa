@@ -1,61 +1,71 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, rmSync } from 'fs';
 
 // Plugin to copy files after build
-function copyFilesPlugin() {
+function copyFilesPlugin(): Plugin {
+  // Where this build actually writes. It used to be hardcoded as dist/, so
+  // `vite build --outDir elsewhere` put the bundle elsewhere but then read and
+  // rewrote the HTML in the real dist/ — a trial build clobbered the last
+  // release build. Taken from the resolved config so --outDir is honoured.
+  let outDir = resolve(__dirname, 'dist');
+  const out = (...parts: string[]) => resolve(outDir, ...parts);
+
   return {
     name: 'copy-files',
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
     writeBundle() {
-      // Ensure dist directory exists
-      mkdirSync(resolve(__dirname, 'dist'), { recursive: true });
+      // Ensure the output directory exists
+      mkdirSync(outDir, { recursive: true });
 
-      // Rewrite absolute asset URLs to relative paths and move HTML to dist root.
+      // Rewrite absolute asset URLs to relative paths and move HTML to the output root.
       const rewriteAbsoluteAssets = (html: string) =>
         html
           .replace(/(src|href)="\/([^"]+)"/g, '$1="./$2"');
 
       const popupHtml = rewriteAbsoluteAssets(
-        readFileSync(resolve(__dirname, 'dist/src/popup/index.html'), 'utf-8')
+        readFileSync(out('src/popup/index.html'), 'utf-8')
       );
-      writeFileSync(resolve(__dirname, 'dist/popup.html'), popupHtml);
+      writeFileSync(out('popup.html'), popupHtml);
       // The same document under two more names: the floating window and the
       // side panel. The page tells which it is from its file name (see
       // utils/open-mode.ts), so these must stay byte-identical copies rather
       // than become entries of their own.
-      writeFileSync(resolve(__dirname, 'dist/window.html'), popupHtml);
-      writeFileSync(resolve(__dirname, 'dist/sidepanel.html'), popupHtml);
+      writeFileSync(out('window.html'), popupHtml);
+      writeFileSync(out('sidepanel.html'), popupHtml);
 
       const scanHtml = rewriteAbsoluteAssets(
-        readFileSync(resolve(__dirname, 'dist/src/scan/index.html'), 'utf-8')
+        readFileSync(out('src/scan/index.html'), 'utf-8')
       );
-      writeFileSync(resolve(__dirname, 'dist/scan.html'), scanHtml);
+      writeFileSync(out('scan.html'), scanHtml);
 
       const passkeyHtml = rewriteAbsoluteAssets(
-        readFileSync(resolve(__dirname, 'dist/src/passkey/index.html'), 'utf-8')
+        readFileSync(out('src/passkey/index.html'), 'utf-8')
       );
-      writeFileSync(resolve(__dirname, 'dist/passkey.html'), passkeyHtml);
+      writeFileSync(out('passkey.html'), passkeyHtml);
 
-      // The generated HTML has been rewritten and moved to the dist root; the
+      // The generated HTML has been rewritten and moved to the output root; the
       // nested copy would otherwise ship as dead weight inside the package.
-      rmSync(resolve(__dirname, 'dist/src'), { recursive: true, force: true });
+      rmSync(out('src'), { recursive: true, force: true });
 
       // Copy manifest.json
       copyFileSync(
         resolve(__dirname, 'public/manifest.json'),
-        resolve(__dirname, 'dist/manifest.json')
+        out('manifest.json')
       );
 
       // Create icons directory
-      mkdirSync(resolve(__dirname, 'dist/icons'), { recursive: true });
+      mkdirSync(out('icons'), { recursive: true });
 
       // Copy icons
       ['icon16.png', 'icon48.png', 'icon128.png'].forEach(icon => {
         try {
           copyFileSync(
             resolve(__dirname, 'public/icons', icon),
-            resolve(__dirname, 'dist/icons', icon)
+            out('icons', icon)
           );
         } catch (e) {
           console.log(`Icon ${icon} not found, skipping`);
@@ -66,7 +76,7 @@ function copyFilesPlugin() {
       // at authenticator.sh/welcome and no longer ships with the extension)
       const imagesDir = resolve(__dirname, 'public/images');
       if (existsSync(imagesDir)) {
-        const destImages = resolve(__dirname, 'dist/images');
+        const destImages = out('images');
         mkdirSync(destImages, { recursive: true });
         readdirSync(imagesDir).forEach((file) => {
           copyFileSync(resolve(imagesDir, file), resolve(destImages, file));
@@ -79,7 +89,7 @@ function copyFilesPlugin() {
         const locales = readdirSync(translationsDir);
         locales.forEach(locale => {
           const localePath = resolve(translationsDir, locale);
-          const destPath = resolve(__dirname, 'dist/_locales', locale);
+          const destPath = out('_locales', locale);
           mkdirSync(destPath, { recursive: true });
           const files = readdirSync(localePath);
           files.forEach(file => {
@@ -94,8 +104,24 @@ function copyFilesPlugin() {
   };
 }
 
+// Which billing server this build talks to and which signing keys it trusts
+// (src/billing/config.ts, src/billing/keys.ts). A plain `vite build` is a
+// store build: production server, production key only. Development points at
+// a local or preview server with BILLING_ENV=preview BILLING_API=http://localhost:3100;
+// the e2e build uses BILLING_ENV=test and the key under test/fixtures.
+const BILLING_ENV = process.env.BILLING_ENV ?? 'production';
+if (!['production', 'preview', 'test'].includes(BILLING_ENV)) {
+  throw new Error(`BILLING_ENV must be production, preview or test (got ${BILLING_ENV})`);
+}
+
 export default defineConfig({
   plugins: [react(), copyFilesPlugin()],
+  define: {
+    __BILLING_ENV__: JSON.stringify(BILLING_ENV),
+    __BILLING_API__: JSON.stringify(process.env.BILLING_API ?? ''),
+    // Ignored by a store build (src/billing/config.ts); test builds move the release day.
+    __BILLING_RELEASE__: JSON.stringify(process.env.BILLING_RELEASE ?? ''),
+  },
   // Everything under public/ is placed deliberately by copyFilesPlugin —
   // manifest to the root, icons to icons/, translations to _locales/. Letting
   // Vite also mirror public/ verbatim shipped a second, unused 488 KB copy of

@@ -12,6 +12,7 @@ import { resolveLanguage, type Language } from './i18n';
 import { readPopupSize, type PopupSize } from './popup-size';
 import { OPEN_MODE_KEY, readOpenMode, type OpenMode } from './open-mode';
 import { QUICK_FILL_ENABLED_KEY } from './quick-fill';
+import { readSortOrder, SORT_ORDER_KEY, type SortOrder } from './list-view';
 
 export interface SettingsPatch {
   language?: Language;
@@ -24,6 +25,7 @@ export interface SettingsPatch {
   syncOverflow?: boolean;
   quickFill?: boolean;
   suggestions?: boolean;
+  sortOrder?: SortOrder;
 }
 
 type StorageChanges = Record<string, { oldValue?: unknown; newValue?: unknown }>;
@@ -61,6 +63,7 @@ export function settingsFromChanges(changes: StorageChanges, areaName: string): 
   if (has(QUICK_FILL_ENABLED_KEY)) patch.quickFill = value(QUICK_FILL_ENABLED_KEY) !== false;
   if (has('suggestionsEnabled')) patch.suggestions = value('suggestionsEnabled') !== false;
   if (has('syncOverflow')) patch.syncOverflow = value('syncOverflow') === true;
+  if (has(SORT_ORDER_KEY)) patch.sortOrder = readSortOrder(value(SORT_ORDER_KEY));
 
   return patch;
 }

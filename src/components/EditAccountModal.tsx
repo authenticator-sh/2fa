@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import type { Account } from '@/types';
 import { ModalHeader } from './ModalHeader';
@@ -20,6 +20,7 @@ interface EditAccountModalProps {
 
 export function EditAccountModal({ account, onClose, onSave, language, groups = [], accounts = [] }: EditAccountModalProps) {
   const t = createT(language);
+  const ids = useId();
   const [name, setName] = useState(account.name);
   const [issuer, setIssuer] = useState(account.issuer);
   const [group, setGroup] = useState(account.group ?? '');
@@ -55,7 +56,7 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
     // still a rename, and refusing it until the key is fixed would hold the
     // name hostage to a key the user may not have to hand.
     if (secretEditable && secret !== String(account.secret ?? '')) {
-      const checked = checkReplacementSecret(secret, account.id, accounts);
+      const checked = checkReplacementSecret(secret, account.id, accounts, account.type);
       if ('error' in checked) {
         setSecretError(t(checked.error));
         return;
@@ -107,10 +108,11 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
         <div className="mx-auto w-full max-w-md p-4">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label htmlFor={`${ids}-name`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                 {t('addAccount.accountName')}
               </label>
               <input
+                id={`${ids}-name`}
                 type="text"
                 value={name}
                 onChange={(e) => {
@@ -118,6 +120,7 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
                   if (error) setError(null);
                 }}
                 aria-invalid={error ? true : undefined}
+                aria-describedby={error ? `${ids}-name-error` : undefined}
                 className={`w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500 ${
                   error
                     ? 'border-red-400 dark:border-red-500 focus:border-red-500'
@@ -125,15 +128,16 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
                 }`}
               />
               {error && (
-                <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{error}</p>
+                <p id={`${ids}-name-error`} className="mt-1.5 text-xs text-red-600 dark:text-red-400">{error}</p>
               )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              <label htmlFor={`${ids}-issuer`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                 {t('addAccount.issuer')}
               </label>
               <input
+                id={`${ids}-issuer`}
                 type="text"
                 value={issuer}
                 onChange={(e) => setIssuer(e.target.value)}
@@ -187,9 +191,11 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
                   <button
                     type="button"
                     onClick={() => setShowSecret(!showSecret)}
-                    className="absolute end-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors p-1"
+                    aria-label={t('a11y.showKey')}
+                    aria-pressed={showSecret}
+                    className="absolute end-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 transition-colors p-1"
                   >
-                    {showSecret ? <EyeOff size={16} /> : <Eye size={16} />}
+                    {showSecret ? <EyeOff size={16} aria-hidden /> : <Eye size={16} aria-hidden />}
                   </button>
                 </div>
               )}
@@ -213,7 +219,7 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
             <button
               type="submit"
               disabled={saving}
-              className="w-full rounded-lg bg-[#4285F4] py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#3367D6] disabled:opacity-50"
+              className="w-full rounded-lg bg-[#1a73e8] py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#1967D2] disabled:opacity-50"
             >
               {t('edit.save')}
             </button>

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useEscapeLayer, useReturnFocus } from '@/hooks/useLayer';
 import { ArrowLeft } from 'lucide-react';
 
 /**
@@ -9,10 +10,11 @@ import { ArrowLeft } from 'lucide-react';
  * not a window floating over the app, it *is* the screen, and it should read
  * like Settings does: you are somewhere else, and this is the way back.
  *
- * It also carries the two behaviours every one of these screens has to have
- * and two of the three had forgotten: Escape leaves, and focus starts inside
- * rather than on the button underneath that opened it. Keeping them here is
- * what stops the next screen forgetting them again.
+ * It also carries the behaviours every one of these screens has to have and
+ * two of the three had forgotten: Escape leaves, focus starts inside rather
+ * than on the button underneath that opened it, and goes back to that button
+ * when the screen closes. Keeping them here is what stops the next screen
+ * forgetting them again.
  */
 interface ModalHeaderProps {
   title: string;
@@ -24,16 +26,15 @@ interface ModalHeaderProps {
 export function ModalHeader({ title, back, onBack }: ModalHeaderProps) {
   const backRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    // In the popup, Escape would otherwise close the whole window and take a
-    // half-typed form with it; in the floating window and the side panel there
-    // was no keyboard way out of these screens at all.
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onBack();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onBack]);
+  // In the popup, Escape would otherwise close the whole window and take a
+  // half-typed form with it; in the floating window and the side panel there
+  // was no keyboard way out of these screens at all. A layer, not a document
+  // listener: a confirmation raised from inside one of these screens is the one
+  // an Escape belongs to, and it used to close both.
+  useEscapeLayer(onBack);
+
+  // Back to the row button or the + that opened the screen, not to <body>.
+  useReturnFocus();
 
   useEffect(() => {
     // Focus lands on the way out, not on a field: these screens open over a

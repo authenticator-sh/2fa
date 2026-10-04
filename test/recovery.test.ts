@@ -5,7 +5,7 @@
 // or hide someone's 2FA seeds. None of these are hypothetical: each mirrors a
 // specific failure traced through the shipping code.
 
-import { areas, check, faults, flush, resetState, scenario, syncAccountKeys } from './harness';
+import { areas, check, faults, flush, resetState, scenario, syncAccountKeys, USER_ADD } from './harness';
 
 const PASSWORD = 'correct horse battery staple';
 
@@ -175,7 +175,7 @@ export async function run(): Promise<void> {
   await flush();
   await storage.deleteAccount('a1');
   await flush();
-  await storage.addAccount({ ...ACCOUNTS[0], id: 'a1-again' });
+  await storage.addAccount({ ...ACCOUNTS[0], id: 'a1-again' }, USER_ADD);
   await flush();
   const readded = await storage.getAccounts();
   check('it is back', readded.some(a => a.secret === 'JBSWY3DPEHPK3PXP'), readded.map(a => a.id).join(','));
@@ -208,7 +208,7 @@ export async function run(): Promise<void> {
     { name: 'no id', issuer: 'Dropbox', secret: 'MFRGGZDFMZTWQ2LK', period: 30 },
     { id: 'g4', name: 'no secret', issuer: 'Nothing' },
   ]);
-  const outcome = await storage.importAccounts(damaged);
+  const outcome = await storage.importAccounts(damaged, USER_ADD);
   await flush();
   const recovered = await storage.getAccounts();
   check('the three usable accounts are restored', recovered.length === 3, `got ${recovered.length}`);
@@ -228,7 +228,7 @@ export async function run(): Promise<void> {
       { id: 'n2', name: 'b', issuer: 'B', secret: 'KRSXG5CTMVRXEZLU', period: 30, group: { evil: true } },
       { id: 'n3', name: 'c', issuer: 'C', secret: 'MFRGGZDFMZTWQ2LK', period: 30, group: 'Work' },
     ])
-  );
+  , USER_ADD);
   await flush();
   const typed = await storage.getAccounts();
   check('all three imported', typed.length === 3, `got ${typed.length}`);
@@ -248,7 +248,7 @@ export async function run(): Promise<void> {
     JSON.stringify([
       { id: 'l1', name: 'a', issuer: 'A', secret: 'JBSWY3DPEHPK3PXP', period: 30, group: 'G'.repeat(5000) },
     ])
-  );
+  , USER_ADD);
   await flush();
   const clamped = (await storage.getAccounts())[0];
   check('the name is cut to a sane length', (clamped.group?.length ?? 0) <= 64, `${clamped.group?.length}`);
@@ -261,7 +261,7 @@ export async function run(): Promise<void> {
     JSON.stringify([
       { id: 'w1', name: 'a', issuer: 'A', secret: 'JBSWY3DPEHPK3PXP', period: 30, group: '   ' },
     ])
-  );
+  , USER_ADD);
   await flush();
   check('the field is gone', (await storage.getAccounts())[0].group === undefined);
 
@@ -271,7 +271,7 @@ export async function run(): Promise<void> {
   await resetState();
   let rejected = false;
   try {
-    await storage.importAccounts(JSON.stringify([{ id: 'x', name: 'x' }, { nope: true }]));
+    await storage.importAccounts(JSON.stringify([{ id: 'x', name: 'x' }, { nope: true }]), USER_ADD);
   } catch {
     rejected = true;
   }

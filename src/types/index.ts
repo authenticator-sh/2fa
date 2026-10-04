@@ -23,6 +23,18 @@ export interface Account {
    * means ungrouped, which is what every account imported from anywhere else is.
    */
   group?: string;
+  /**
+   * Which code the secret produces. Absent means RFC 6238 TOTP, which is every
+   * record written before Steam Guard support and still nearly all of them.
+   *
+   * `steam` is Steam Guard: the same HMAC-SHA1 over 30-second steps, printed
+   * as five characters from Steam's own alphabet instead of digits. Stored as
+   * `type` because that is the field every importer already reads — Aegis
+   * writes `type: "steam"` — so a backup of ours read by a version that does
+   * not know Steam is refused as unsupported instead of imported as a TOTP
+   * account whose code is confidently wrong.
+   */
+  type?: 'steam';
 }
 
 /**

@@ -7,7 +7,7 @@
 // must not disturb the records the live store is holding for a vault this
 // device cannot open.
 
-import { areas, check, flush, resetState, scenario, setBackupRows, throwsNamed } from './harness';
+import { areas, backupRows, check, faults, flush, resetState, scenario, setBackupRows, throwsNamed, USER_ADD } from './harness';
 
 const PASSWORD = 'correct horse battery staple';
 
@@ -79,7 +79,7 @@ export async function run(): Promise<void> {
     digits: 6,
     period: 30,
     createdAt: 3,
-  } as any);
+  } as any, USER_ADD);
   await flush();
   await storage.deleteAccount('a1');
   await flush();
@@ -213,4 +213,75 @@ export async function run(): Promise<void> {
   );
   await vault.unlockWithPassword(PASSWORD);
   check('the accounts are still there afterwards', (await storage.getAccounts()).length === 2);
+  // --- how the copies are written -----------------------------------------
+
+  scenario('Two copies taken in the same millisecond are both kept');
+  await resetState();
+  {
+    const realNow = Date.now;
+    const frozen = realNow();
+    Date.now = () => frozen;
+    try {
+      await backups.saveBackup([ACCOUNTS[0]]);
+      await backups.saveBackup(ACCOUNTS);
+    } finally {
+      Date.now = realNow;
+    }
+    // One id per millisecond made the second add a key collision, which aborted
+    // its transaction — and the failure was swallowed, so nobody knew.
+    check('both are on disk', backupRows.length === 2, `${backupRows.length} row(s)`);
+    check('under different ids', new Set(backupRows.map(row => row.id)).size === 2);
+  }
+
+  // A request's success is not the transaction's: the write can still be
+  // refused at commit (a full disk), and a copy reported as written that never
+  // was is the one the user finds missing on the day they need it.
+  scenario('Saving a copy reports a write that did not commit');
+  await resetState();
+  faults.idbCommitFails = true;
+  let commitError: unknown = null;
+  await backups.saveBackup(ACCOUNTS).catch(error => (commitError = error));
+  faults.idbCommitFails = false;
+  check('the failure reaches the caller', commitError !== null);
+  check('and nothing is on disk', backupRows.length === 0, `${backupRows.length} row(s)`);
+
+  scenario('Only the seven newest copies are kept');
+  await resetState();
+  {
+    const realNow = Date.now;
+    const start = realNow();
+    let day = 0;
+    Date.now = () => start + day * (86_400_000 + 60_000);
+    try {
+      for (day = 0; day < 9; day++) await backups.autoBackup([{ ...ACCOUNTS[0], name: `day ${day}` }]);
+      day = 9;
+      const kept = await backups.getAllBackups();
+      check('seven copies remain', kept.length === 7, `${kept.length}`);
+      const days = kept.map(copy => (copy.accounts[0] as any).name).join();
+      check('and they are the newest seven', days === 'day 8,day 7,day 6,day 5,day 4,day 3,day 2', days);
+    } finally {
+      Date.now = realNow;
+    }
+  }
+
+  // The popup takes a copy whenever it loads a list, once a day. A copy of an
+  // empty list — a sync area not yet downloaded, a store emptied by mistake —
+  // would take a slot, and a week of them rotates out every copy that still
+  // held the accounts.
+  scenario('Loading an empty list does not take a copy of it');
+  await resetState();
+  {
+    const { createAccountsLoader } = await import('@/hooks/useAccounts');
+    const settle = async () => {
+      for (let i = 0; i < 20 && backupRows.length === 0; i++) await flush();
+    };
+    const loader = createAccountsLoader(() => {});
+    await loader.load();
+    await settle();
+    check('no copy of nothing is written', backupRows.length === 0, `${backupRows.length} row(s)`);
+    await storage.saveAccounts(ACCOUNTS);
+    await loader.load();
+    await settle();
+    check('a list with accounts in it is copied', backupRows.length === 1, `${backupRows.length} row(s)`);
+  }
 }

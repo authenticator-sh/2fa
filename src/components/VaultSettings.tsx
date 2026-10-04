@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Fingerprint, Lock, ShieldCheck, ShieldOff } from 'lucide-react';
+import { Lock } from 'lucide-react';
+import { SettingRow, SettingsSection, settingsButton, settingsInput, settingsWell } from '@/components/SettingsSection';
 import { createT, type Language } from '@/utils/i18n';
 import { MIN_PASSWORD_LENGTH } from '@/utils/crypto';
 import {
   AUTO_LOCK_OPTIONS,
   changePassword,
   detachPasskey,
-  getMasterKeyBytes,
   getVaultPasskey,
-  stageKeyHandoff,
+  stagePasskeyRegistration,
+  WrongPasswordError,
   type VaultPasskey,
 } from '@/utils/vault';
 import { isPasskeyApiAvailable, openPasskeyCeremony } from '@/utils/passkey';
@@ -75,20 +76,46 @@ export function VaultSettings({
   }, [enabled]);
 
   const handleAddPasskey = async () => {
+    // The password is required even while unlocked, as for turning protection
+    // off: a passkey is a new, lasting way in, and linking one must not be
+    // something anyone at an unattended, unlocked browser can do in a click.
+    const password = await promptDialog({
+      title: t('vault.passkey.add'),
+      body: t('vault.settings.currentPassword'),
+      password: true,
+      confirmLabel: t('common.confirm'),
+      cancelLabel: t('common.cancel'),
+    });
+    if (!password) return;
+
     // The ceremony page needs the master key to wrap it, and it is a separate
-    // context. With auto-lock on "every open" the key is never in session
-    // storage, so hand it over explicitly — otherwise registration is
-    // impossible on exactly that setting.
-    const masterKey = await getMasterKeyBytes();
-    if (!masterKey) {
-      toast('error', t('vault.passkey.needsUnlock'));
+    // context that cannot read this one's memory — on auto-lock "every open"
+    // the key is in no store at all. So it is handed over explicitly, unwrapped
+    // from the password just typed and staged for registration only.
+    //
+    // Only a wrong password is called one. Every failure used to be: a storage
+    // write refused while staging the key told the user their correct password
+    // was wrong, and sent them round again for nothing.
+    try {
+      await stagePasskeyRegistration(password);
+    } catch (error) {
+      if (error instanceof WrongPasswordError) {
+        toast('error', t('vault.lock.wrong'));
+      } else {
+        console.error('Could not prepare the passkey registration:', error);
+        toast('error', t('settings.saveFailed'));
+      }
       return;
     }
-    await stageKeyHandoff(masterKey);
 
     // Its own window, not this popup: the authenticator prompt takes focus and
     // Chrome destroys the popup the moment that happens.
-    openPasskeyCeremony('register');
+    try {
+      openPasskeyCeremony('register');
+    } catch (error) {
+      console.error('Could not open the passkey window:', error);
+      toast('error', t('settings.saveFailed'));
+    }
   };
 
   const handleRemovePasskey = async () => {
@@ -103,7 +130,17 @@ export function VaultSettings({
 
     // No password needed, and deliberately so: this removes a convenience, not
     // a way in. The password and recovery wrappers are untouched.
-    await detachPasskey();
+    try {
+      await detachPasskey();
+    } catch (error) {
+      // Unhandled, this was a rejection nobody saw and a panel left as it was
+      // with no word of why. What is stored decides what the panel shows, so
+      // it is read back rather than assumed either way.
+      console.error('Could not remove the passkey:', error);
+      toast('error', t('settings.saveFailed'));
+      setPasskey(await getVaultPasskey().catch(() => passkey));
+      return;
+    }
     setPasskey(null);
     toast('success', t('vault.settings.saved'));
     onChanged();
@@ -172,127 +209,120 @@ export function VaultSettings({
   };
 
   return (
-    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-dark-600">
-      <h3 className="text-gray-900 dark:text-gray-100 font-medium mb-2 text-sm flex items-center gap-1.5">
-        {enabled ? (
-          <ShieldCheck className="text-green-600 dark:text-green-400" size={15} />
-        ) : (
-          <ShieldOff className="text-gray-400" size={15} />
-        )}
-        {t('vault.settings.title')}
-      </h3>
-
-      <p className={`text-xs mb-3 ${enabled ? 'text-green-700 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}`}>
-        {enabled ? t('vault.settings.on') : t('vault.settings.off')}
-      </p>
-
-      {!enabled ? (
-        <button
-          onClick={onEnableClick}
-          className="w-full flex items-center justify-center gap-1.5 bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2 rounded-lg transition-colors"
-        >
-          <Lock size={15} />
-          {t('vault.settings.enable')}
-        </button>
-      ) : (
-        <>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs text-gray-700 dark:text-gray-300">{t('vault.settings.autoLock')}</span>
-            <select
-              value={autoLockMinutes}
-              onChange={e => onAutoLockChange(Number(e.target.value))}
-              className="text-xs bg-white dark:bg-dark-700 border border-gray-300 dark:border-dark-500 rounded-md px-2 py-1 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-[#4285F4]"
-            >
-              {AUTO_LOCK_OPTIONS.map(minutes => (
-                <option key={minutes} value={minutes}>
-                  {autoLockLabel(minutes)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {isPasskeyApiAvailable() && (
-            <div className="bg-gray-100 dark:bg-dark-900 rounded-lg p-2.5 mb-2">
-              <div className="flex items-center gap-1.5 mb-1">
-                <Fingerprint className="text-[#4285F4]" size={14} />
-                <span className="text-xs font-medium text-gray-900 dark:text-gray-100">
-                  {t('vault.passkey.title')}
-                </span>
-              </div>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-2">
-                {passkey ? t('vault.passkey.on', passkey.label) : t('vault.passkey.hint')}
-              </p>
-              <button
-                onClick={passkey ? handleRemovePasskey : handleAddPasskey}
-                className="w-full text-xs font-medium py-1.5 rounded-md border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors"
-              >
-                {passkey ? t('vault.passkey.remove') : t('vault.passkey.add')}
-              </button>
-            </div>
-          )}
-
-          <div className="flex gap-2 mb-2">
-            <button
-              onClick={onLock}
-              className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium py-2 rounded-lg border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors"
-            >
-              <Lock size={14} />
+    <SettingsSection title={t('settings.sectionSecurity')}>
+      <SettingRow
+        label={t('vault.settings.title')}
+        hint={enabled ? t('vault.settings.on') : t('vault.settings.off')}
+        tone={enabled ? 'ok' : undefined}
+        control={
+          enabled ? (
+            <button onClick={onLock} className={settingsButton.secondary}>
+              <Lock size={13} />
               {t('vault.settings.lockNow')}
             </button>
-            <button
-              onClick={() => setShowChangeForm(!showChangeForm)}
-              className="flex-1 text-xs font-medium py-2 rounded-lg border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors"
-            >
-              {t('vault.settings.changePassword')}
+          ) : (
+            <button onClick={onEnableClick} className={settingsButton.primary}>
+              <Lock size={13} />
+              {t('vault.settings.enable')}
             </button>
-          </div>
+          )
+        }
+      />
 
-          {showChangeForm && (
-            <div className="bg-gray-100 dark:bg-dark-900 rounded-lg p-2.5 mb-2">
-              <input
-                type="password"
-                value={currentPassword}
-                onChange={e => setCurrentPassword(e.target.value)}
-                placeholder={t('vault.settings.currentPassword')}
-                className="w-full px-2.5 py-1.5 text-xs rounded-md border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-[#4285F4] mb-2"
-              />
-              <input
-                type="password"
-                value={newPassword}
-                onChange={e => setNewPassword(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleChangePassword()}
-                placeholder={t('vault.settings.newPassword')}
-                className="w-full px-2.5 py-1.5 text-xs rounded-md border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-[#4285F4] mb-2"
-              />
+      {enabled && (
+        <>
+          <SettingRow
+            label={t('vault.settings.autoLock')}
+            htmlFor="vault-auto-lock"
+            control={
+              <select
+                id="vault-auto-lock"
+                value={autoLockMinutes}
+                onChange={e => onAutoLockChange(Number(e.target.value))}
+                className="text-xs bg-white dark:bg-dark-800 border border-gray-300 dark:border-dark-500 rounded-md px-2 py-1 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-[#4285F4]"
+              >
+                {AUTO_LOCK_OPTIONS.map(minutes => (
+                  <option key={minutes} value={minutes}>
+                    {autoLockLabel(minutes)}
+                  </option>
+                ))}
+              </select>
+            }
+          />
+
+          {isPasskeyApiAvailable() && (
+            <SettingRow
+              label={t('vault.passkey.title')}
+              hint={passkey ? t('vault.passkey.on', passkey.label) : t('vault.passkey.hint')}
+              tone={passkey ? 'ok' : undefined}
+              control={
+                <button
+                  onClick={passkey ? handleRemovePasskey : handleAddPasskey}
+                  className={settingsButton.secondary}
+                >
+                  {passkey ? t('vault.passkey.remove') : t('vault.passkey.add')}
+                </button>
+              }
+            />
+          )}
+
+          {/* The two things that need the password typed again, side by side
+              and both quiet: neither is a setting, and neither is pressed twice. */}
+          <div className="px-3 py-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
               <button
-                onClick={handleChangePassword}
-                disabled={busy || !currentPassword || !newPassword}
-                className="w-full bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-xs py-1.5 rounded-md transition-colors disabled:opacity-50"
+                onClick={() => setShowChangeForm(!showChangeForm)}
+                aria-expanded={showChangeForm}
+                className={settingsButton.link}
               >
                 {t('vault.settings.changePassword')}
               </button>
+              <button onClick={handleDisable} disabled={busy} className={settingsButton.danger}>
+                {t('vault.settings.disable')}
+              </button>
             </div>
-          )}
 
-          <button
-            onClick={handleDisable}
-            disabled={busy}
-            className="w-full text-xs text-red-600 dark:text-red-400 hover:underline py-1 disabled:opacity-50"
-          >
-            {t('vault.settings.disable')}
-          </button>
+            {showChangeForm && (
+              <div className={`${settingsWell} space-y-2 p-2.5`}>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={e => setCurrentPassword(e.target.value)}
+                  placeholder={t('vault.settings.currentPassword')}
+                  aria-label={t('vault.settings.currentPassword')}
+                  className={settingsInput}
+                />
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleChangePassword()}
+                  placeholder={t('vault.settings.newPassword')}
+                  aria-label={t('vault.settings.newPassword')}
+                  className={settingsInput}
+                />
+                <button
+                  onClick={handleChangePassword}
+                  disabled={busy || !currentPassword || !newPassword}
+                  className={`${settingsButton.primary} w-full`}
+                >
+                  {t('vault.settings.changePassword')}
+                </button>
+              </div>
+            )}
+
+            {message && (
+              <p
+                className={`text-xs mt-2 ${
+                  message.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                }`}
+              >
+                {message.text}
+              </p>
+            )}
+          </div>
         </>
       )}
-
-      {message && (
-        <p
-          className={`text-xs mt-2 ${
-            message.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-          }`}
-        >
-          {message.text}
-        </p>
-      )}
-    </div>
+    </SettingsSection>
   );
 }

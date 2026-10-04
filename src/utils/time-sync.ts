@@ -1,5 +1,13 @@
 import { ageOf } from './clock';
-import { getTimeOffsetMs, persistTimeOffset, setTimeOffsetMs, setTimeOffsetRefresher } from './totp';
+import {
+  getTimeOffsetMs,
+  isTimeOffsetPending,
+  keepWitnessedTimeOffset,
+  persistTimeOffset,
+  setTimeOffsetMs,
+  setTimeOffsetRefresher,
+  settleTimeOffset,
+} from './totp';
 
 export interface TimeSyncResult {
   // synced is true when the clock is fine OR when we simply couldn't measure
@@ -171,10 +179,11 @@ export const SOURCES: ReadonlyArray<TimeSource> = [
 
 /**
  * The best estimate among samples that corroborate each other: the largest
- * group agreeing within tolerance, represented by its lowest-latency member.
- * Fewer than two agreeing samples is not an estimate, and returns null.
+ * group agreeing within tolerance, represented by its lowest-latency member,
+ * with how many samples it speaks for. Fewer than two agreeing samples is not
+ * an estimate, and returns null.
  */
-function agreeingEstimate(samples: Sample[]): Sample | null {
+function agreeingEstimate(samples: Sample[]): { member: Sample; size: number } | null {
   let best: { member: Sample; size: number } | null = null;
 
   for (const candidate of samples) {
@@ -187,7 +196,7 @@ function agreeingEstimate(samples: Sample[]): Sample | null {
     if (better) best = { member, size: group.length };
   }
 
-  return best?.member ?? null;
+  return best;
 }
 
 // One measurement with NTP-style latency compensation: the server timestamp is
@@ -213,21 +222,53 @@ async function sample(
  * Make code generation follow a measurement `ageMs` old: its correction when it
  * is confident and within sane bounds, none otherwise.
  *
- * A reading we could not take clears the correction rather than leaving it be.
- * Leaving it be was meant to stop a bad reading from moving code generation,
- * but 0 does not move it anywhere new — it is the local clock, the historical
- * default — while keeping the old value meant a correction nobody could vouch
- * for any more went on being applied, and Settings said "unknown, not
- * corrected" over codes that were being corrected. Only a confident reading
- * ever sets a non-zero value, which is the guard that matters.
+ * A reading we could not take is not evidence of anything, and it changes only
+ * what it has to. A correction this page measured itself and is still watching
+ * stays until its own five minutes are up — dropping it on one failed renewal
+ * is how a side panel lost its correction for good (keepWitnessedTimeOffset
+ * has the whole argument). Any other correction is cleared, as it always was:
+ * read back from disk or from another page, nothing here can tell whether the
+ * clock was fixed under it, and Settings must never say "unknown" over codes
+ * that are being corrected by something nobody can vouch for. Only a confident
+ * reading ever sets a non-zero value, which is the guard that matters.
  *
  * The measurement's own age travels with it, so a reading served from the
- * cache does not come back as a fresh one and extend itself.
+ * cache does not come back as a fresh one and extend itself. `witnessed` is
+ * whether this page just took it.
  */
-async function applyCorrection(result: TimeSyncResult, ageMs = 0): Promise<void> {
-  const next = result.confident ? correctionFor(result) : 0;
-  setTimeOffsetMs(next, ageMs);
+async function applyCorrection(result: TimeSyncResult, ageMs = 0, witnessed = false): Promise<void> {
+  if (!result.confident) {
+    // Kept: the record on disk already says when it was measured, and lapses
+    // on its own. Cleared: off the disk too, so no other page revives it.
+    if (keepWitnessedTimeOffset()) return;
+    setTimeOffsetMs(0);
+    await persistTimeOffset(0);
+    return;
+  }
+  const next = correctionFor(result);
+  setTimeOffsetMs(next, ageMs, witnessed);
   await persistTimeOffset(next, Date.now() - ageMs);
+}
+
+/**
+ * The reading to show for `result`.
+ *
+ * A reading we could not take, over a correction that was kept (see
+ * applyCorrection), is shown as the measurement that correction came from.
+ * Shown as "unknown", Settings said "codes use your device clock as-is" over
+ * codes that were being adjusted, and the banner vanished while the drift it
+ * described was still being corrected.
+ */
+function shownResult(result: TimeSyncResult): TimeSyncResult {
+  if (result.confident) return result;
+  const kept = getTimeOffsetMs();
+  if (kept === 0) return result;
+  return {
+    synced: Math.abs(kept) < WARN_THRESHOLD_MS,
+    confident: true,
+    offsetMs: kept,
+    offsetSeconds: Math.round(kept / 1000),
+  };
 }
 
 /**
@@ -246,7 +287,9 @@ export interface ClockStatus {
   corrected: boolean;
 }
 
-function statusOf(result: TimeSyncResult): ClockStatus {
+/** The status to show for a reading already in hand — what watchClock hands a page. */
+export function clockStatusOf(measured: TimeSyncResult): ClockStatus {
+  const result = shownResult(measured);
   // `corrected` is read off what code generation is doing, not derived from
   // the measurement. Derived, it said "not corrected" for an unknown clock
   // while a correction from an earlier reading was still being applied — the
@@ -263,7 +306,7 @@ function statusOf(result: TimeSyncResult): ClockStatus {
 
 /** The clock as last measured, for display. Cheap: shares the cache. */
 export async function getClockStatus(): Promise<ClockStatus> {
-  return statusOf(await checkTimeSync());
+  return clockStatusOf(await checkTimeSync());
 }
 
 /** Measure now, ignoring the cache. */
@@ -278,7 +321,7 @@ async function remeasure(): Promise<TimeSyncResult> {
 
 /** Measure again now, ignoring the cache — what the "check now" button does. */
 export async function recheckClock(): Promise<ClockStatus> {
-  return statusOf(await remeasure());
+  return clockStatusOf(await remeasure());
 }
 
 // Renewal for pages that stay open: totp.ts asks shortly before a correction
@@ -293,10 +336,21 @@ let inFlight: Promise<TimeSyncResult> | null = null;
 
 export async function checkTimeSync(): Promise<TimeSyncResult> {
   if (inFlight) return inFlight;
-  inFlight = measure().finally(() => {
-    inFlight = null;
-  });
-  return inFlight;
+  const current = measure()
+    .then((result) => {
+      afterMeasurement(result);
+      return result;
+    })
+    .finally(() => {
+      // Superseded by "check now" or a renewal, it is not the answer anyone is
+      // waiting for; the measurement that replaced it settles instead.
+      if (inFlight !== current) return;
+      inFlight = null;
+      // Whatever it found, a page waiting on it to draw codes can stop.
+      settleTimeOffset();
+    });
+  inFlight = current;
+  return current;
 }
 
 async function measure(): Promise<TimeSyncResult> {
@@ -310,8 +364,19 @@ async function measure(): Promise<TimeSyncResult> {
     // correction and then reported "your clock is fine" for six hours, which
     // is the exact combination that makes codes fail with nothing on screen to
     // explain it. The other way round, a cached reading we could not take
-    // clears a correction nothing vouches for any more.
-    await applyCorrection(cached.result, cached.age);
+    // clears a correction nothing here vouches for any more.
+    //
+    // Read first, because reading is what notices a correction lapsing or the
+    // clock being stepped under it — and then this cache holds the very
+    // measurement being replaced, and a new one is already on its way. And
+    // left alone when it is already the correction in force: restamped from
+    // the cache, it would lose the monotonic history this page has for it,
+    // which is what lets a step of the clock be seen at all.
+    const current = getTimeOffsetMs();
+    if (!isTimeOffsetPending()) {
+      const next = cached.result.confident ? correctionFor(cached.result) : 0;
+      if (current === 0 || current !== next) await applyCorrection(cached.result, cached.age);
+    }
     return cached.result;
   }
 
@@ -322,10 +387,26 @@ async function measure(): Promise<TimeSyncResult> {
     .map((s) => s.value);
 
   const agreed = agreeingEstimate(samples);
+  // Every source that answered, agreeing — or a dissent that changes nothing.
+  //
+  // With three sources a majority is two, and two was all it took: two
+  // answering the same wrong time (a proxy rewriting both, a shared upstream
+  // gone bad) moved every code by up to the twelve-hour cap while the third
+  // said the device was right. A dissent is now read with the device clock as
+  // the tie-breaker. If the majority says the device is fine, the device agrees
+  // with it and the odd one out is outvoted. If the majority wants to move the
+  // codes and somebody who answered says otherwise, nothing is settled: the
+  // reading is uncertain, corrects nothing new and is retried. A clock that is
+  // really hours out — the time zone written as UTC — is still corrected
+  // whenever the sources that answer agree, with one of them down or all three
+  // up; only a source answering with a different time holds it back.
+  const trusted =
+    agreed !== null &&
+    (agreed.size === samples.length || Math.abs(agreed.member.offset) < CORRECT_DEADZONE_MS);
 
   let result: TimeSyncResult;
-  if (agreed) {
-    const offsetMs = agreed.offset;
+  if (agreed && trusted) {
+    const offsetMs = agreed.member.offset;
     result = {
       synced: Math.abs(offsetMs) < WARN_THRESHOLD_MS,
       confident: true,
@@ -333,13 +414,13 @@ async function measure(): Promise<TimeSyncResult> {
       offsetSeconds: Math.round(offsetMs / 1000),
     };
   } else {
-    // Fewer than two agreeing samples → uncertain. Never alarm, and
-    // correct nothing: applyCorrection clears whatever an earlier one set.
+    // Fewer than two agreeing samples, or a dissent over a correction →
+    // uncertain. Never alarm, and correct nothing new.
     result = { synced: true, confident: false, offsetMs: 0, offsetSeconds: 0 };
   }
 
   await writeCache(result);
-  await applyCorrection(result);
+  await applyCorrection(result, 0, true);
 
   if (result.confident && result.synced) {
     // The clock is provably fine, so an old dismissal has done its job. Left
@@ -375,7 +456,12 @@ export async function dismissTimeNotice(offsetSeconds: number): Promise<void> {
 // null. A notice appears only when we are confident the clock is materially off
 // and the user hasn't already dismissed a similar reading.
 export async function getTimeSyncNotice(): Promise<number | null> {
-  const result = await checkTimeSync();
+  return noticeFor(await checkTimeSync());
+}
+
+/** The notice for a reading already in hand — see getTimeSyncNotice. */
+export async function noticeFor(measured: TimeSyncResult): Promise<number | null> {
+  const result = shownResult(measured);
   if (!result.confident || result.synced) return null;
 
   const offsetSeconds = Math.abs(result.offsetSeconds);
@@ -383,4 +469,95 @@ export async function getTimeSyncNotice(): Promise<number | null> {
   if (dismissed !== null && Math.abs(dismissed - offsetSeconds) < 60) return null;
 
   return offsetSeconds;
+}
+
+// ---- Pages that stay open ----------------------------------------------------
+//
+// The popup measures once and is gone in a minute. The side panel and the
+// floating window stay open for days, through Wi-Fi dropping, laptops sleeping
+// and the OS fixing the clock, and one measurement taken when they opened
+// described none of that. Worse, a failed one described it permanently: with
+// the correction gone, the only thing that ever asked for a new measurement —
+// a correction about to lapse — was gone with it.
+//
+// So a page that stays open watches: a reading we could not take is retried
+// on a backoff, straight away when the network comes back or the page is shown
+// again, and every reading, from anywhere, is handed to the page to display.
+
+/**
+ * How long to wait before trying again after a reading we could not take:
+ * a minute, then longer, never more than five — the life of a correction, so
+ * a clock that needs one is never without it for longer than that once the
+ * network is back.
+ */
+const RETRY_DELAYS_MS = [60_000, 2 * 60_000, 4 * 60_000, 5 * 60_000];
+
+const watchers = new Set<(result: TimeSyncResult) => void>();
+let failedInARow = 0;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelRetry(): void {
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
+}
+
+function retryNow(): void {
+  cancelRetry();
+  remeasure().catch(() => {});
+}
+
+function afterMeasurement(result: TimeSyncResult): void {
+  for (const watcher of [...watchers]) {
+    try {
+      watcher(result);
+    } catch {
+      // one broken display must not stop the others, or the retries below
+    }
+  }
+
+  if (result.confident) {
+    failedInARow = 0;
+    cancelRetry();
+    return;
+  }
+  if (watchers.size === 0 || retryTimer) return;
+  const delay = RETRY_DELAYS_MS[Math.min(failedInARow, RETRY_DELAYS_MS.length - 1)];
+  failedInARow++;
+  retryTimer = setTimeout(retryNow, delay);
+}
+
+// The network is back: if the last reading failed, that is very likely why.
+function onOnline(): void {
+  if (failedInARow > 0) retryNow();
+}
+
+// Shown again — after a sleep, or from behind other windows. Reading the
+// correction runs the checks it carries: a wall clock stepped while the page
+// was hidden drops it here and measures again, before the first code is drawn.
+function onVisible(): void {
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+  getTimeOffsetMs();
+  if (failedInARow > 0) retryNow();
+}
+
+/**
+ * Keep the clock measured for as long as this page is open, and hear about
+ * every reading — the first included, whoever asked for it.
+ *
+ * Returns the function that stops watching.
+ */
+export function watchClock(onReading: (result: TimeSyncResult) => void): () => void {
+  watchers.add(onReading);
+  if (watchers.size === 1) {
+    globalThis.addEventListener?.('online', onOnline);
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
+  }
+  return () => {
+    watchers.delete(onReading);
+    if (watchers.size > 0) return;
+    cancelRetry();
+    failedInARow = 0;
+    globalThis.removeEventListener?.('online', onOnline);
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
+  };
 }

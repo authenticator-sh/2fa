@@ -15,13 +15,19 @@ import { AlertTriangle, CameraOff, Check, Loader2, Lock, Upload } from 'lucide-r
 import type jsQRType from 'jsqr';
 import { Logo } from '@/components/Logo';
 import { FeedbackHost } from '@/components/FeedbackHost';
+import { PaywallHost } from '@/components/PaywallHost';
+import { addWithLimit } from '@/billing/add';
+import { finishHeldAdd, isHeld } from '@/billing/held-add';
+import { BILLING_KEYS } from '@/billing/state';
+import { hasPendingCheckout, syncBilling } from '@/billing/sync';
+import { accountLabel } from '@/utils/account-label';
 import { SupportFooter } from '@/components/SupportFooter';
 import { applyDocumentLanguage, createT, loadLanguage, resolveLanguage, type Language, type TranslationKey } from '@/utils/i18n';
 import { settingsFromChanges } from '@/utils/settings-watch';
 import { addMultipleAccounts } from '@/utils/storage';
 import { readActiveGroup } from '@/utils/active-group';
 import { VaultLockedError } from '@/utils/vault';
-import { generateRandomColor, parseQRCode, UnsupportedOTPTypeError } from '@/utils/qr-parser';
+import { generateRandomColor, isAuthenticatorQR, parseQRCode, qrFailureKey } from '@/utils/qr-parser';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { toast } from '@/utils/ui-feedback';
 import { cleanSecret } from '@/utils/totp';
@@ -36,6 +42,9 @@ type Status =
   // named in the result so the accounts are not simply missing later.
   | { kind: 'added'; outcome: ImportOutcome; group?: string; batch?: { index: number; total: number } }
   | { kind: 'locked' }
+  // Stopped by the free limit on the way to Checkout: kept, and added here once
+  // Pro is on (billing/held-add.ts). `label` names it; `ids` are its accounts.
+  | { kind: 'held'; label: string; ids: string[]; group?: string }
   | { kind: 'denied' }
   | { kind: 'noCamera' }
   // `title` defaults to the camera failing to start, the original case; a
@@ -78,6 +87,7 @@ export default function App() {
   const chosenCameraRef = useRef<string | null>(null);
   /** A second image while the first is still decoding would race the add. */
   const decodingImageRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const t = createT(language);
   // The callbacks below are memoised — the document listeners hang off them —
@@ -121,6 +131,40 @@ export default function App() {
     applyDocumentLanguage(language);
   }, [language]);
 
+  // A code held for Pro on its way to Checkout: added as soon as Pro is on,
+  // whichever window it came on in. This tab stays open while the person pays
+  // in another, so coming back to it asks the server whether they have.
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  useEffect(() => {
+    if (!chrome.storage?.onChanged?.addListener) return;
+    const settle = async () => {
+      const done = await finishHeldAdd();
+      if (!done || done.added + done.updated === 0) return;
+      const now = statusRef.current;
+      if (now.kind === 'held' && done.accounts.every(a => now.ids.includes(a.id))) {
+        setStatus({ kind: 'added', outcome: { added: done.added, updated: done.updated, skipped: 0, total: done.accounts.length, unsupported: 0 }, group: now.group });
+      } else {
+        toast('success', tRef.current('billing.heldAdded', accountLabel(done.accounts[0]!)));
+      }
+    };
+    const onChanged = (changes: Record<string, { newValue?: unknown }>, areaName: string) => {
+      if (areaName === 'local' && changes[BILLING_KEYS.entitlement]?.newValue) void settle();
+    };
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || statusRef.current.kind !== 'held') return;
+      void hasPendingCheckout().then(pending => (pending ? syncBilling({ force: true }) : undefined));
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      chrome.storage.onChanged.removeListener(onChanged);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, []);
+
   const stopCamera = useCallback(() => {
     stopLoopRef.current?.();
     stopLoopRef.current = null;
@@ -134,22 +178,26 @@ export default function App() {
       try {
         parsed = parseQRCode(text);
       } catch (error) {
-        // A QR we read and refuse — currently only counter-based tokens. Unlike
-        // an unrecognised code, rescanning this one will never help, so the
-        // session ends with an explanation instead of looping on the camera.
+        // A QR we read and refuse — counter-based, or a kind or parameters we
+        // cannot generate. Unlike an unrecognised code, rescanning this one
+        // will never help, so the session ends with an explanation instead of
+        // looping on the camera.
         stopCamera();
-        setStatus({
-          kind: 'error',
-          title: 'scan.refusedTitle',
-          body:
-            error instanceof UnsupportedOTPTypeError
-              ? 'addAccount.errorHotp'
-              : 'addAccount.errorInvalidQR',
-        });
+        setStatus({ kind: 'error', title: 'scan.refusedTitle', body: qrFailureKey(text, error) });
         return;
       }
 
       if (!parsed || parsed.accounts.length === 0) {
+        // One of ours whose payload cannot be read: a migration export cut
+        // short, a link whose secret is not Base32. The QR decoder's own error
+        // correction has already vouched for the bytes, so rescanning returns
+        // the same payload — the camera used to keep "scanning" it forever with
+        // nothing on screen to say it had been seen at all.
+        if (isAuthenticatorQR(text)) {
+          stopCamera();
+          setStatus({ kind: 'error', title: 'scan.refusedTitle', body: qrFailureKey(text) });
+          return;
+        }
         // Not an otpauth QR — keep scanning rather than failing the session.
         handledRef.current = false;
         return;
@@ -173,13 +221,33 @@ export default function App() {
         algorithm: data.algorithm,
         digits: data.digits,
         period: data.period,
+        ...(data.type ? { type: data.type } : {}),
         createdAt: Date.now() + index,
         color: generateRandomColor(),
         ...(filteredGroup ? { group: filteredGroup } : {}),
       }));
 
       try {
-        const result = await addMultipleAccounts(accounts);
+        // A Google Authenticator export is an import; one code from a sign-up
+        // page is a new account — and is kept through Checkout, so the code
+        // does not have to be scanned again after paying.
+        const single = parsed.type !== 'migration';
+        const result = await addWithLimit('scan', origin => addMultipleAccounts(accounts, origin), {
+          import: !single,
+          hold: single ? accounts : undefined,
+        });
+        if (!result) {
+          const ids = accounts.map(a => a.id);
+          // Gone to Checkout: waiting for Pro, and said so. Otherwise the
+          // paywall was left without Pro: nothing was written, and the card
+          // says so rather than going back to a camera that looks idle.
+          setStatus(
+            single && (await isHeld(ids))
+              ? { kind: 'held', label: accountLabel(accounts[0]!), ids, group: filteredGroup }
+              : { kind: 'error', title: 'scan.limitTitle', body: 'scan.limitBody' }
+          );
+          return;
+        }
         setStatus({
           kind: 'added',
           outcome: { ...result, unsupported: parsed.skipped ?? 0 },
@@ -489,6 +557,8 @@ export default function App() {
         return { icon: CameraOff, tone: 'red', title: t('scan.noCameraTitle'), body: t('scan.noCameraBody') };
       case 'locked':
         return { icon: Lock, tone: 'yellow', title: t('scan.lockedTitle'), body: t('scan.lockedBody') };
+      case 'held':
+        return { icon: Lock, tone: 'yellow', title: t('scan.limitTitle'), body: t('billing.heldWaiting', status.label) };
       case 'error':
         return { icon: AlertTriangle, tone: 'red', title: t(status.title ?? 'scan.errorTitle'), body: t(status.body) };
       default:
@@ -498,9 +568,14 @@ export default function App() {
 
   const problem = message();
 
+  // A real button, not a styled label: the input it opens is display:none, so
+  // neither the input nor a label around it could take focus, and the one way
+  // in for anyone whose camera cannot read the code was the mouse. The same
+  // pattern as AddAccountModal's "Choose image".
   const uploadButton = (
-    <label className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-500 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600">
+    <>
       <input
+        ref={fileInputRef}
         type="file"
         accept="image/*"
         className="hidden"
@@ -512,9 +587,16 @@ export default function App() {
           event.target.value = '';
         }}
       />
-      {decodingImage ? <Loader2 className="animate-spin" size={16} /> : <Upload size={16} />}
-      {t('addAccount.chooseImage')}
-    </label>
+      <button
+        type="button"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={decodingImage}
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-wait dark:border-dark-500 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600"
+      >
+        {decodingImage ? <Loader2 className="animate-spin" size={16} /> : <Upload size={16} />}
+        {t('addAccount.chooseImage')}
+      </button>
+    </>
   );
 
   return (
@@ -536,7 +618,7 @@ export default function App() {
                 }`}
               >
                 <Check
-                  className={status.outcome.added > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400'}
+                  className={status.outcome.added > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}
                   size={24}
                 />
               </div>
@@ -576,7 +658,7 @@ export default function App() {
                   onClick={start}
                   className={`flex-1 text-sm font-medium py-2.5 rounded-lg transition-colors ${
                     moreCodes
-                      ? 'bg-[#4285F4] hover:bg-[#3367D6] text-white'
+                      ? 'bg-[#1a73e8] hover:bg-[#1967D2] text-white'
                       : 'border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
                   }`}
                 >
@@ -587,7 +669,7 @@ export default function App() {
                   className={`flex-1 font-medium text-sm py-2.5 rounded-lg transition-colors ${
                     moreCodes
                       ? 'border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
-                      : 'bg-[#4285F4] hover:bg-[#3367D6] text-white'
+                      : 'bg-[#1a73e8] hover:bg-[#1967D2] text-white'
                   }`}
                 >
                   {t('scan.done')}
@@ -612,7 +694,7 @@ export default function App() {
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{problem.body}</p>
               <button
                 onClick={start}
-                className="w-full bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
+                className="w-full bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
               >
                 {t('scan.retry')}
               </button>
@@ -620,7 +702,7 @@ export default function App() {
                   failed. Every state on this card — denied, no camera, error —
                   is one a picture of the code walks straight past. */}
               <div className="mt-2">{uploadButton}</div>
-              <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">{t('scan.uploadHint')}</p>
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{t('scan.uploadHint')}</p>
             </div>
           ) : (
             <>
@@ -676,7 +758,7 @@ export default function App() {
               </p>
 
               <div className="mt-3">{uploadButton}</div>
-              <p className="mt-2 text-center text-xs text-gray-400 dark:text-gray-500">
+              <p className="mt-2 text-center text-xs text-gray-500 dark:text-gray-400">
                 {t('scan.uploadHint')}
               </p>
             </>
@@ -689,6 +771,7 @@ export default function App() {
           </div>
         </div>
         <FeedbackHost />
+        <PaywallHost language={language} />
       </div>
     </div>
   );

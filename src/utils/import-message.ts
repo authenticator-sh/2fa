@@ -11,6 +11,8 @@ export interface ImportOutcome {
    * ten used to report "8 added" and leave the user believing that was all.
    */
   unsupported?: number;
+  /** Accounts already here that the scan switched to Steam Guard codes. */
+  updated?: number;
 }
 
 /**
@@ -33,9 +35,16 @@ export function describeImport(outcome: ImportOutcome, language: Language, group
 }
 
 function summary(outcome: ImportOutcome, t: ReturnType<typeof createT>, group?: string): string {
-  // Nothing was added, so there is no group to report either.
-  if (outcome.added === 0) return t('import.qrNothingNew');
+  // A Steam Guard entry for a seed the list held as plain TOTP changes that
+  // card rather than adding one; "nothing was added" alone would hide it.
+  const updated = outcome.updated ? t('import.steamUpdated', outcome.updated) : '';
 
+  // Nothing was added, so there is no group to report either.
+  if (outcome.added === 0) return updated || t('import.qrNothingNew');
+  return updated ? `${addedClause(outcome, t, group)} ${updated}` : addedClause(outcome, t, group);
+}
+
+function addedClause(outcome: ImportOutcome, t: ReturnType<typeof createT>, group?: string): string {
   if (group) {
     return outcome.skipped > 0
       ? t('import.qrSuccessPartialGroup', outcome.added, group, outcome.skipped)
@@ -51,6 +60,8 @@ function summary(outcome: ImportOutcome, t: ReturnType<typeof createT>, group?: 
 export interface FileImportOutcome {
   added: number;
   alreadyHere: number;
+  /** Accounts already here switched to Steam Guard codes by the file. */
+  updated?: number;
   unreadable?: number;
   unsupported?: number;
 }
@@ -68,16 +79,20 @@ export function describeFileImport(outcome: FileImportOutcome, language: Languag
   const t = createT(language);
   const unreadable = outcome.unreadable ?? 0;
   const unsupported = outcome.unsupported ?? 0;
+  const updated = outcome.updated ?? 0;
   const parts: string[] = [];
 
   if (outcome.added > 0) {
     parts.push(t('import.fileAdded', outcome.added));
+    if (outcome.alreadyHere > 0) parts.push(t('import.fileAlreadyHere', outcome.alreadyHere));
+  } else if (updated > 0) {
     if (outcome.alreadyHere > 0) parts.push(t('import.fileAlreadyHere', outcome.alreadyHere));
   } else if (outcome.alreadyHere > 0) {
     parts.push(t('import.qrNothingNew'));
   } else if (unreadable === 0 && unsupported === 0) {
     parts.push(t('import.fileEmpty'));
   }
+  if (updated > 0) parts.push(t('import.steamUpdated', updated));
 
   if (unreadable > 0) parts.push(t('import.fileUnreadable', unreadable));
   if (unsupported > 0) parts.push(t('import.fileUnsupported', unsupported));
@@ -86,7 +101,9 @@ export function describeFileImport(outcome: FileImportOutcome, language: Languag
 
 /** Green only when everything in the file is now in the list. */
 export function fileImportKind(outcome: FileImportOutcome): 'success' | 'info' {
-  return outcome.added > 0 && !outcome.unreadable && !outcome.unsupported ? 'success' : 'info';
+  return (outcome.added > 0 || (outcome.updated ?? 0) > 0) && !outcome.unreadable && !outcome.unsupported
+    ? 'success'
+    : 'info';
 }
 
 /**
@@ -103,6 +120,10 @@ export function importErrorMessage(error: unknown, language: Language): string {
     switch (error.reason) {
       case 'encrypted':
         return t('import.encryptedElsewhere', error.app ?? '');
+      case 'steam-encrypted':
+        // Not "export it again": SDA has no export. The encryption is removed
+        // in SDA itself, and the same file then imports.
+        return t('import.steamEncrypted');
       case 'only-unsupported':
         return t('import.onlyUnsupported');
       case 'nothing-readable':
@@ -112,6 +133,7 @@ export function importErrorMessage(error: unknown, language: Language): string {
     }
   }
   if (error instanceof Error && error.name === 'WrongExportPasswordError') return t('import.wrongPassword');
+  if (error instanceof Error && error.name === 'DamagedBackupFileError') return t('import.backupDamaged');
   if (error instanceof Error && error.name === 'VaultLockedError') return t('restore.locked');
   return t('import.failed');
 }

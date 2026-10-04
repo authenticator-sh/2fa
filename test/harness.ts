@@ -27,6 +27,11 @@ export const faults = {
   failLocalGetFor: null as string | null,
   /** `chrome.storage.sync.set` rejects, as it does when a value is over quota. */
   failSyncSet: false,
+  /**
+   * An IndexedDB transaction aborts at commit, after every request in it has
+   * already reported success — what a full disk does.
+   */
+  idbCommitFails: false,
 };
 
 export function resetFaults(): void {
@@ -34,6 +39,7 @@ export function resetFaults(): void {
   faults.failLocalSetFor = null;
   faults.failLocalGetFor = null;
   faults.failSyncSet = false;
+  faults.idbCommitFails = false;
 }
 
 // chrome.storage accepts either a callback or returns a promise, and the source
@@ -50,6 +56,22 @@ export function resetFaults(): void {
 type ChangeListener = (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, areaName: string) => void;
 const changeListeners: ChangeListener[] = [];
 
+/** How many chrome.storage.onChanged listeners are registered now. */
+export function storageListenerCount(): number {
+  return changeListeners.length;
+}
+
+/**
+ * Unregisters every chrome.storage.onChanged listener added after the first
+ * `count` — what a module loaded whole for one suite (the service worker)
+ * registered at import. Left in place, it would go on reacting to every later
+ * suite's writes: starting check-ins and creating install records in the
+ * middle of scenarios about something else.
+ */
+export function dropStorageListenersAfter(count: number): void {
+  changeListeners.splice(count);
+}
+
 function emitChanges(
   name: 'local' | 'sync' | 'session',
   changes: Record<string, { oldValue?: unknown; newValue?: unknown }>
@@ -58,6 +80,37 @@ function emitChanges(
   for (const listener of [...changeListeners]) {
     setTimeout(() => listener(changes, name), 0);
   }
+}
+
+/**
+ * A value as chrome.storage keeps it: serialised, never by reference.
+ *
+ * The mock used to store the caller's own object, so a caller that mutated a
+ * list after writing it changed "the disk" too, and every reader shared one
+ * array — the kind of aliasing that makes a lost-update bug pass its test.
+ * Chrome serialises with JSON semantics (an `undefined` property vanishes, NaN
+ * becomes null) except that a Date is stored as `{}`, not as its ISO string.
+ * `undefined` comes back for a value that does not survive at all.
+ */
+function serialised(value: unknown): string | undefined {
+  return JSON.stringify(value, function (this: Record<string, unknown>, key: string, v: unknown) {
+    return this[key] instanceof Date ? {} : v;
+  });
+}
+
+function copyOf<T>(value: T): T {
+  const text = serialised(value);
+  return text === undefined ? (undefined as T) : JSON.parse(text);
+}
+
+/** chrome.storage.sync's documented limits, measured as Chrome measures them. */
+export const SYNC_QUOTA_BYTES_PER_ITEM = 8192;
+export const SYNC_QUOTA_BYTES = 102400;
+
+const utf8 = new TextEncoder();
+/** Key plus serialised value, in UTF-8 bytes — what Chrome charges an item. */
+export function syncItemBytes(key: string, value: unknown): number {
+  return utf8.encode(key).length + utf8.encode(serialised(value) ?? '').length;
 }
 
 function makeArea(store: Store, name: 'local' | 'sync' | 'session') {
@@ -75,6 +128,19 @@ function makeArea(store: Store, name: 'local' | 'sync' | 'session') {
     if (name === 'sync' && faults.failSyncSet) {
       return new Error('QUOTA_BYTES_PER_ITEM quota exceeded');
     }
+    if (name === 'sync') {
+      // The real limits, so a write that only fits by UTF-16 arithmetic fails
+      // here the way it fails for a user with Cyrillic or CJK names. The whole
+      // set is refused and nothing in it lands, as in Chrome.
+      for (const [key, value] of Object.entries(obj)) {
+        if (syncItemBytes(key, value) > SYNC_QUOTA_BYTES_PER_ITEM) {
+          return new Error('QUOTA_BYTES_PER_ITEM quota exceeded');
+        }
+      }
+      const after = { ...store, ...obj };
+      const total = Object.entries(after).reduce((sum, [key, value]) => sum + syncItemBytes(key, value), 0);
+      if (total > SYNC_QUOTA_BYTES) return new Error('QUOTA_BYTES quota exceeded');
+    }
     return null;
   };
 
@@ -91,30 +157,38 @@ function makeArea(store: Store, name: 'local' | 'sync' | 'session') {
       // the sync chunks. Treating it as a key name made every chunked read and
       // every cleanup silently return nothing.
       if (keys === null || keys === undefined) {
-        return settle({ ...store }, callback);
+        return settle(copyOf({ ...store }), callback);
       }
       const wanted = Array.isArray(keys) ? keys : [keys];
       const items: Store = {};
       for (const key of wanted) {
         if (key in store) items[key] = store[key];
       }
-      return settle(items, callback);
+      // A copy: what a caller does to the result is not a write.
+      return settle(copyOf(items), callback);
     },
     set(obj: Store, callback?: () => void) {
       const rejection = rejectionFor(obj);
       if (rejection) return Promise.reject(rejection);
       const changes: Record<string, { oldValue?: unknown; newValue?: unknown }> = {};
       for (const key of Object.keys(obj)) {
-        changes[key] = { oldValue: store[key], newValue: obj[key] };
+        const next = copyOf(obj[key]);
+        // A key set to undefined is not written at all.
+        if (next === undefined) continue;
+        // Chrome reports a key only when its value actually changed. Every open
+        // surface reloads on these, so a mock that announced no-op writes hid
+        // any loop that feeds on its own events behind extra reloads.
+        if (key in store && serialised(store[key]) === serialised(next)) continue;
+        changes[key] = { oldValue: copyOf(store[key]), newValue: copyOf(next) };
+        store[key] = next;
       }
-      Object.assign(store, obj);
       emitChanges(name, changes);
       return settle(undefined as void, callback);
     },
     remove(keys: string | string[], callback?: () => void) {
       const changes: Record<string, { oldValue?: unknown; newValue?: unknown }> = {};
       for (const key of Array.isArray(keys) ? keys : [keys]) {
-        if (key in store) changes[key] = { oldValue: store[key], newValue: undefined };
+        if (key in store) changes[key] = { oldValue: copyOf(store[key]) };
         delete store[key];
       }
       emitChanges(name, changes);
@@ -124,6 +198,114 @@ function makeArea(store: Store, name: 'local' | 'sync' | 'session') {
 }
 
 const later = (fn: () => void) => setTimeout(fn, 0);
+
+/**
+ * One IndexedDB transaction over the backup rows.
+ *
+ * Shaped like the real one where it matters: requests run in order, after the
+ * caller has had its synchronous turn to attach handlers; the rows change only
+ * when the whole transaction commits, and `oncomplete` fires only then; `add`
+ * over an existing key fails with ConstraintError and aborts the lot. The old
+ * mock wrote synchronously and fired `oncomplete` on a timer whether or not
+ * anything had been written, so code that resolved early or swallowed a failed
+ * add looked exactly like code that did not.
+ */
+let idbTail: Promise<void> = Promise.resolve();
+
+function makeTransaction() {
+  const tx: any = { error: null };
+  let staged: any[] = [];
+  const queue: Array<() => void> = [];
+  let finished = false;
+  let done!: () => void;
+  // One transaction at a time, in the order they were opened, as IndexedDB runs
+  // read-write transactions over one store. Each sees the rows the previous one
+  // committed.
+  const previous = idbTail;
+  idbTail = new Promise<void>(resolve => (done = resolve));
+
+  const request = (run: (r: any) => void) => {
+    const r: any = {};
+    queue.push(() => run(r));
+    return r;
+  };
+
+  const abort = (error: unknown) => {
+    finished = true;
+    tx.error = error;
+    done();
+    tx.onerror?.();
+    tx.onabort?.();
+  };
+
+  const pump = () => {
+    if (finished) return;
+    const next = queue.shift();
+    if (!next) {
+      if (faults.idbCommitFails) {
+        abort(Object.assign(new Error('The transaction was aborted.'), { name: 'QuotaExceededError' }));
+        return;
+      }
+      finished = true;
+      backupRows = staged;
+      done();
+      tx.oncomplete?.();
+      return;
+    }
+    next();
+    if (!finished) later(pump);
+  };
+  void previous.then(() =>
+    later(() => {
+      staged = [...backupRows];
+      pump();
+    })
+  );
+
+  const clone = (value: any) => (value === undefined ? undefined : structuredClone(value));
+  const store = {
+    add(value: any) {
+      const row = clone(value);
+      return request(r => {
+        if (staged.some(x => x.id === row.id)) {
+          r.error = Object.assign(new Error('Key already exists in the object store.'), { name: 'ConstraintError' });
+          r.onerror?.();
+          abort(r.error);
+          return;
+        }
+        staged = [...staged, row];
+        r.result = row.id;
+        r.onsuccess?.();
+      });
+    },
+    getAll() {
+      return request(r => {
+        r.result = staged.map(clone);
+        r.onsuccess?.();
+      });
+    },
+    get(id: string) {
+      return request(r => {
+        r.result = clone(staged.find(x => x.id === id));
+        r.onsuccess?.();
+      });
+    },
+    delete(id: string) {
+      return request(r => {
+        staged = staged.filter(x => x.id !== id);
+        r.onsuccess?.();
+      });
+    },
+    clear() {
+      return request(r => {
+        staged = [];
+        r.onsuccess?.();
+      });
+    },
+  };
+  tx.objectStore = () => store;
+  return tx;
+}
 
 /**
  * navigator.locks, as every extension context shares it.
@@ -210,37 +392,7 @@ export function installMocks(): void {
           createObjectStore: () => ({ createIndex: () => {} }),
           close() {},
           transaction() {
-            const tx: any = {};
-            const store = {
-              add(value: any) {
-                const r: any = {};
-                backupRows.push(value);
-                later(() => {
-                  r.onsuccess?.();
-                  tx.oncomplete?.();
-                });
-                return r;
-              },
-              getAll() {
-                const r: any = { result: [...backupRows] };
-                later(() => r.onsuccess?.());
-                return r;
-              },
-              get(id: string) {
-                const r: any = { result: backupRows.find(x => x.id === id) };
-                later(() => r.onsuccess?.());
-                return r;
-              },
-              delete(id: string) {
-                backupRows = backupRows.filter(x => x.id !== id);
-              },
-              clear() {
-                backupRows = [];
-              },
-            };
-            tx.objectStore = () => store;
-            later(() => tx.oncomplete?.());
-            return tx;
+            return makeTransaction();
           },
         };
         request.onsuccess?.();
@@ -378,3 +530,10 @@ export function failureCount(): number {
 export function currentScenarioName(): string {
   return currentScenario;
 }
+
+/**
+ * The origin every pre-billing test adds accounts with: a person, and no
+ * policy yet — so no limit, which is exactly what these tests assumed before
+ * the free limit existed. The limit itself is tested in billing.test.ts.
+ */
+export const USER_ADD = { kind: 'user', gate: { policy: null, entitled: false } } as const;

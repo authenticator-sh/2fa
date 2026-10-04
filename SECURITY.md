@@ -26,6 +26,7 @@ If you do not receive a response within 72 hours, please follow up — your mess
 - Storage and handling of TOTP secrets, account metadata, and backups
 - Cryptographic implementation choices
 - Third-party dependency vulnerabilities affecting the extension
+- The billing check-in and licenses: what the extension sends to `api.authenticator.sh`, and how it verifies the policy and license tokens it receives
 
 **Out of scope:**
 - Issues in third-party services that the extension generates codes for
@@ -64,6 +65,32 @@ report that one is already broken is exactly the kind of report we want:
 - **Expiry is not enforced by us.** A link stops working because it contains no
   further codes. Accordingly there is no revocation, and we make no claim of
   any.
+
+## Billing and licenses
+
+Since 1.14.0 the extension checks in with `api.authenticator.sh` for the free
+plan's account limit and for Pro. These are invariants; breaking one is a
+vulnerability:
+
+- **Nothing about an account leaves the device.** The check-in carries the
+  closed list of fields in the README ("What is sent to our server") — a count
+  of accounts, never a name, issuer, secret, code or site.
+- **The limit can only stop an addition.** No billing state can hide, lock,
+  remove or alter an account, or block showing codes, export, backups,
+  restoring or sync.
+- **No signed policy, no limit.** Until a policy signed by a key the build
+  trusts has been received for this installation, nothing is limited; after
+  that, the limit is checked offline from the last such policy. An unreachable
+  or misbehaving server can never lock anyone out.
+- **Tokens are verified, not trusted.** Policies and licenses are ES256 JWS
+  checked with WebCrypto against the public keys compiled into the build
+  (`src/billing/keys.ts`); a store build trusts the production key only
+  (`scripts/check-bundle.ts` refuses a store build carrying any other).
+
+A way to get Pro without paying by editing the open-source code is not a
+vulnerability — the limit is not DRM. A way for one person to obtain or use
+*another* person's license, or to make someone else's installation limited,
+is.
 
 ## Supported Versions
 

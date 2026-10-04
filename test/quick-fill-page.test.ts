@@ -7,6 +7,7 @@ const CODE = '123456';
 const ARGS: QuickFillPageArgs = {
   code: CODE,
   requireFocus: false,
+  mayGuess: true,
   copiedText: 'Code copied',
   manualText: `Your code: ${CODE}`,
   noticeText: 'Open the extension',
@@ -84,6 +85,24 @@ export async function run(): Promise<void> {
   check('a group too short for the code is refused', eight === 'copied');
   check('nothing was truncated into it', shortBoxes.every(box => box.value === ''));
   shortGroup.remove();
+
+  scenario('A Steam Guard code: five letters and digits');
+
+  // Steam's own sign-in takes five characters, and they are not all digits.
+  // Nothing here may assume a code is numeric or six long.
+  const STEAM = 'KJV9G';
+  const steamField = input({ parent: doc.body, name: 'twofactorcode', maxLength: 5 });
+  steamField.focus();
+  check('a five-character field is filled', (await runDetached({ ...ARGS, code: STEAM })) === 'filled');
+  check('with the letters intact', steamField.value === STEAM, steamField.value);
+  steamField.remove();
+
+  const steamGroup = doc.body.appendChild(new FakeElement());
+  const steamBoxes = Array.from({ length: 5 }, () => input({ parent: steamGroup, maxLength: 1 }));
+  steamBoxes[0].focus();
+  check('five one-character boxes are filled', (await runDetached({ ...ARGS, code: STEAM })) === 'filled');
+  check('one character per box', steamBoxes.map(b => b.value).join('') === STEAM);
+  steamGroup.remove();
 
   scenario('Fields that will not take a code');
 
@@ -186,6 +205,71 @@ export async function run(): Promise<void> {
   check('an unrelated field is never guessed at', (await runDetached(ARGS)) === 'copied');
   check('it stays empty', onlySearch.value === '');
   onlySearch.remove();
+
+  // A sign-in form built as a web component keeps its field behind a shadow
+  // boundary, where the document's own query does not look. With the caret
+  // elsewhere the code went to the clipboard while the field sat in view.
+  scenario('A code field inside a web component');
+
+  const widget = doc.body.appendChild(new FakeElement());
+  widget.tagName = 'OTP-INPUT';
+  const widgetRoot = widget.attachShadow({ mode: 'open' });
+  const inner = widgetRoot.appendChild(new FakeElement());
+  inner.tagName = 'MFA-FIELD';
+  const innerField = input({ parent: inner.attachShadow({ mode: 'open' }), name: 'otp', maxLength: 6 });
+  doc.activeElement = null;
+  clipboard.text = '';
+  check('it is found through nested open roots', (await runDetached(ARGS)) === 'filled');
+  check('and filled', innerField.value === CODE, innerField.value);
+  check('the clipboard is left alone', clipboard.text === '');
+  widget.remove();
+
+  // Closed means closed: the page asked for it not to be reached into.
+  const sealed = doc.body.appendChild(new FakeElement());
+  const sealedField = input({ parent: sealed.attachShadow({ mode: 'closed' }), name: 'otp', maxLength: 6 });
+  doc.activeElement = null;
+  check('a closed root is not entered', (await runDetached(ARGS)) === 'copied');
+  check('its field stays empty', sealedField.value === '');
+  sealed.remove();
+
+  // The right-click landed in a frame we could not enter, and the top page is
+  // answering for it. Its own code field is not the one the user pointed at.
+  scenario('The top page answering for a frame it cannot reach');
+
+  const ownField = input({ parent: doc.body, name: 'verification_code', maxLength: 6 });
+  const unreachable = doc.body.appendChild(new FakeElement());
+  unreachable.tagName = 'IFRAME';
+  unreachable.focus();
+  clipboard.text = '';
+  check('it does not guess a field of its own', (await runDetached({ ...ARGS, mayGuess: false })) === 'copied');
+  check('which stays empty', ownField.value === '');
+  check('the code is on the clipboard', clipboard.text === CODE);
+  ownField.remove();
+  unreachable.remove();
+  doc.activeElement = null;
+
+  // Finished from our own window after an unlock or a pick: that window has
+  // the focus now, so no document in the tab reports having it. The caret is
+  // what still says where the user was.
+  scenario('A fill finished from our window, after the page lost focus');
+
+  const LATE: QuickFillPageArgs = { ...ARGS, requireFocus: true, caretOnly: true, clipboard: false };
+  doc.focused = false;
+  const waiting = input({ parent: doc.body, name: 'otp', maxLength: 6 });
+  waiting.focus();
+  check('the field with the caret is still filled', (await runDetached(LATE)) === 'filled');
+  check('and holds the code', waiting.value === CODE, waiting.value);
+  check('the same page asked the old way skips', (await runDetached({ ...ARGS, requireFocus: true })) === 'skipped');
+  waiting.remove();
+
+  doc.activeElement = null;
+  check('a frame with no caret in a field leaves it to another', (await runDetached(LATE)) === 'skipped');
+
+  clipboard.text = 'something the user copied';
+  const nothing = await runDetached({ ...LATE, requireFocus: false, mayGuess: false });
+  check('with nowhere to put it, the page reports a miss', nothing === 'missed', nothing);
+  check('and leaves the clipboard to our window', clipboard.text === 'something the user copied', clipboard.text);
+  doc.focused = true;
 
   uninstallDom();
 }

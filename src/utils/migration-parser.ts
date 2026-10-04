@@ -38,7 +38,11 @@ export interface MigrationAccount {
   issuer: string;
   algorithm: 'SHA1' | 'SHA256' | 'SHA512';
   digits: 6 | 8;
-  type: 'totp' | 'hotp';
+  /**
+   * `unsupported`: the entry names an algorithm (MD5), a digit count or an OTP
+   * type that this app cannot generate. Read far enough to count, never stored.
+   */
+  type: 'totp' | 'hotp' | 'unsupported';
   counter?: number;
 }
 
@@ -158,6 +162,12 @@ function parseOtpParameters(buffer: Uint8Array): MigrationAccount {
   let digits: 6 | 8 = 6;
   let type: 'totp' | 'hotp' = 'totp';
   let counter: number | undefined;
+  // Set by an enum value we cannot honour. Every one of these used to fall back
+  // to the default — MD5 (4) was read as SHA1, an unknown digit count as 6 —
+  // and the account was stored generating codes for a different key schedule.
+  // 0 is protobuf's "unspecified" in each enum and still means the default:
+  // that is an absent value, not a stated one.
+  let unsupported = false;
 
   while (offset < buffer.length) {
     // Read field tag
@@ -187,8 +197,9 @@ function parseOtpParameters(buffer: Uint8Array): MigrationAccount {
       offset = newOffset;
 
       switch (fieldNumber) {
-        case 4: // algorithm (enum)
+        case 4: // algorithm (enum): 0 unspecified, 1 SHA1, 2 SHA256, 3 SHA512, 4 MD5
           switch (value) {
+            case 0:
             case 1:
               algorithm = 'SHA1';
               break;
@@ -198,13 +209,19 @@ function parseOtpParameters(buffer: Uint8Array): MigrationAccount {
             case 3:
               algorithm = 'SHA512';
               break;
+            default:
+              unsupported = true;
           }
           break;
-        case 5: // digits (enum)
-          digits = value === 2 ? 8 : 6;
+        case 5: // digits (enum): 0 unspecified, 1 six, 2 eight
+          if (value === 0 || value === 1) digits = 6;
+          else if (value === 2) digits = 8;
+          else unsupported = true;
           break;
-        case 6: // type (enum)
-          type = value === 1 ? 'hotp' : 'totp';
+        case 6: // type (enum): 0 unspecified, 1 HOTP, 2 TOTP
+          if (value === 1) type = 'hotp';
+          else if (value === 0 || value === 2) type = 'totp';
+          else unsupported = true;
           break;
         case 7: // counter (int64)
           counter = value;
@@ -225,13 +242,44 @@ function parseOtpParameters(buffer: Uint8Array): MigrationAccount {
 
   return {
     secret: bytesToBase32(secret),
-    name: name || 'Unknown',
-    issuer: issuer || name || 'Unknown',
+    ...splitLabel(name, issuer),
     algorithm,
     digits,
-    type,
+    // HOTP stays HOTP even with an odd algorithm: it is refused either way, and
+    // "counter-based" is the more useful thing to be told.
+    type: type === 'hotp' ? 'hotp' : unsupported ? 'unsupported' : 'totp',
     counter,
   };
+}
+
+/**
+ * Google writes the whole otpauth label into `name` — "Issuer:account" — and
+ * the issuer again on its own. Stored as-is, every migrated account read
+ * "Test1: Test1:test1@…", unlike the same account added from its QR.
+ *
+ * Split the way parseOTPAuthURL splits a label, so both doors store the same
+ * account the same way: the stated issuer wins and its prefix comes off the
+ * name; with no issuer, the label's first colon divides them. No issuer is
+ * left empty rather than filled in with the name or "Unknown" — see the same
+ * rule in qr-parser.ts, and why an invented issuer then came back renamed from
+ * its own backup.
+ */
+function splitLabel(rawName: string, rawIssuer: string): { name: string; issuer: string } {
+  let name = rawName.trim();
+  let issuer = rawIssuer.trim();
+  if (issuer) {
+    if (name.toLowerCase().startsWith(issuer.toLowerCase() + ':')) {
+      name = name.slice(issuer.length + 1).trim();
+    }
+  } else {
+    const separator = name.indexOf(':');
+    if (separator >= 0) {
+      issuer = name.slice(0, separator).trim();
+      name = name.slice(separator + 1).trim();
+    }
+  }
+  // A name is still needed for the card; the one otpauth labels fall back to.
+  return { name: name || 'Account', issuer };
 }
 
 /**

@@ -102,18 +102,35 @@ export async function run(): Promise<void> {
   check('and the old password no longer works',
     await throwsNamed('WrongPasswordError', () => vault.unlockWithPassword(PASSWORD)));
 
-  scenario('A recovery-code reset also leaves the passkey working');
+  // A recovery reset is what someone does when a way in is lost or may be in
+  // the wrong hands; the recovery code is rotated for that reason. A passkey
+  // linked before it used to keep opening the vault afterwards, so whoever the
+  // reset was meant to shut out kept a key. It is unlinked now, and the screen
+  // showing the new code says so before anything is saved.
+  scenario('A recovery-code reset unlinks the passkey');
   await vault.lock();
   const reset = await vault.prepareRecovery(recoveryCode, 'third password here');
+  check('the reset says up front that it will unlink the passkey', reset.removesPasskey === true);
+  check('and has not done it yet', (await vault.getVaultPasskey()) !== null);
   await reset.commit();
   const freshRecovery = reset.recoveryCode;
   await flush();
   check('a new recovery code is issued', /^[A-Z2-9]{5}(-[A-Z2-9]{5})+$/.test(freshRecovery));
   await vault.lock();
-  check('the passkey survives the reset', (await vault.getVaultPasskey()) !== null);
-  const afterReset = await vault.unlockWithPasskey(PRF);
-  check('and still unwraps the master key',
+  check('the passkey is gone after the reset', (await vault.getVaultPasskey()) === null);
+  check('from the synced copy too', !(areas.sync.vault_meta as any)?.passkey);
+  check('so it no longer opens the vault',
+    await throwsNamed('Error', () => vault.unlockWithPasskey(PRF)));
+  const afterReset = await vault.unlockWithPassword('third password here');
+  check('the password set by the reset does',
     JSON.stringify([...afterReset]) === JSON.stringify([...masterKey!]));
+  check('and every account is readable', (await storage.getAccounts()).length === 2);
+  const noPasskeyReset = await vault.prepareRecovery(freshRecovery, 'third password here');
+  check('a reset with no passkey linked has nothing to warn about', noPasskeyReset.removesPasskey === false);
+
+  // Linked again the way the user would, for the removal scenario below.
+  await vault.attachPasskey(afterReset, CRED, SALT, PRF, 'MacBook');
+  await flush();
 
   scenario('Removing the passkey leaves the vault fully openable');
   await vault.detachPasskey();
@@ -145,24 +162,24 @@ export async function run(): Promise<void> {
     !('vault_session' in areas.session), 'keys: ' + JSON.stringify(Object.keys(areas.session)));
 
   const keyToPass = await vault.getMasterKeyBytes();
-  await vault.stageKeyHandoff(keyToPass!);
+  await vault.stageKeyHandoff(keyToPass!, 'unlock');
   await flush();
   check('a staged key is visible to another context', 'vault_handoff' in areas.session);
 
-  const adopted = await vault.consumeKeyHandoff();
+  const adopted = await vault.consumeKeyHandoff('unlock');
   check('the other context receives the same key',
     adopted !== null && JSON.stringify([...adopted]) === JSON.stringify([...keyToPass!]));
   check('and adopting it counts as unlocked', await vault.isUnlocked());
   check('the staged copy is gone after one read', !('vault_handoff' in areas.session));
-  check('a second read finds nothing', (await vault.consumeKeyHandoff()) === null);
+  check('a second read finds nothing', (await vault.consumeKeyHandoff('unlock')) === null);
 
   scenario('Locking clears a staged key, and a stale one is refused');
-  await vault.stageKeyHandoff(keyToPass!);
+  await vault.stageKeyHandoff(keyToPass!, 'unlock');
   await flush();
   await vault.lock();
   await flush();
   check('lock removes the staged key too', !('vault_handoff' in areas.session));
-  check('so it cannot be adopted afterwards', (await vault.consumeKeyHandoff()) === null);
+  check('so it cannot be adopted afterwards', (await vault.consumeKeyHandoff('unlock')) === null);
   check('and the vault really is locked', !(await vault.isUnlocked()));
 
   // An old staged copy must expire rather than sit in memory as a way in.
@@ -170,9 +187,51 @@ export async function run(): Promise<void> {
     mk: Buffer.from(keyToPass!).toString('base64'),
     stagedAt: Date.now() - 10 * 60 * 1000,
   };
-  check('a ten-minute-old hand-off is refused', (await vault.consumeKeyHandoff()) === null);
+  check('a ten-minute-old hand-off is refused', (await vault.consumeKeyHandoff('unlock')) === null);
   check('and is removed rather than left behind', !('vault_handoff' in areas.session));
   check('the vault stays locked', !(await vault.isUnlocked()));
+
+  // "Add a passkey" stages the key for the ceremony window and leaves it there
+  // for up to two minutes. Any popup opened meanwhile used to take it and open
+  // the vault — no password, for whoever clicked the icon.
+  scenario('A key staged for linking a passkey opens nothing else');
+  await vault.stageKeyHandoff(keyToPass!, 'register');
+  await flush();
+  check('a popup does not adopt it', (await vault.consumeKeyHandoff('unlock')) === null);
+  check('so the vault stays locked', !(await vault.isUnlocked()));
+  check('and the staged copy is left for the ceremony page', 'vault_handoff' in areas.session);
+  const forRegistration = await vault.consumeKeyHandoff('register');
+  check('the ceremony page receives the key',
+    forRegistration !== null && JSON.stringify([...forRegistration]) === JSON.stringify([...keyToPass!]));
+  check('once', !('vault_handoff' in areas.session));
+  check('and taking it for registration unlocks nothing either', !(await vault.isUnlocked()));
+
+  await vault.stageKeyHandoff(keyToPass!, 'unlock');
+  await flush();
+  check('the ceremony page does not take an unlock hand-off',
+    (await vault.consumeKeyHandoff('register')) === null && 'vault_handoff' in areas.session);
+  await vault.lock();
+
+  // Written by an older build, or by nothing we know: belongs to nobody.
+  areas.session.vault_handoff = { mk: Buffer.from(keyToPass!).toString('base64'), stagedAt: Date.now() };
+  check('a hand-off with no purpose is refused', (await vault.consumeKeyHandoff('unlock')) === null);
+  check('and cleared', !('vault_handoff' in areas.session));
+  check('the vault is still locked', !(await vault.isUnlocked()));
+
+  // The popup asks for the current password before staging anything, and the
+  // key comes from the password wrapper — so it works on "every open", where
+  // nothing else can hand the ceremony page a key.
+  scenario('Linking a passkey needs the current password');
+  check('a wrong password is refused',
+    await throwsNamed('WrongPasswordError', () => vault.stagePasskeyRegistration('not the password')));
+  check('and stages nothing', !('vault_handoff' in areas.session));
+  await vault.stagePasskeyRegistration(PASSWORD);
+  await flush();
+  check('the right one stages the key for registration only',
+    (areas.session.vault_handoff as any)?.purpose === 'register');
+  check('without unlocking this context', !(await vault.isUnlocked()));
+  const staged = await vault.consumeKeyHandoff('register');
+  check('it is the master key', staged !== null && JSON.stringify([...staged]) === JSON.stringify([...keyToPass!]));
 
   // A user reported the popup sitting on its lock screen with the vault already
   // unlocked behind it, until the extension was closed and reopened. The popup
@@ -205,13 +264,13 @@ export async function run(): Promise<void> {
   };
   chrome.storage.onChanged.addListener(listener);
 
-  await vault.stageKeyHandoff(keyToPass!);
+  await vault.stageKeyHandoff(keyToPass!, 'unlock');
   await flush();
   check('staging a key actually fires an event a live popup can hear',
     seen.length > 0, 'events: ' + JSON.stringify(seen));
 
   seen.length = 0;
-  await vault.consumeKeyHandoff();
+  await vault.consumeKeyHandoff('unlock');
   await flush();
   check('consuming it fires one too, so the popup re-reads and finds it unlocked',
     seen.length > 0, 'events: ' + JSON.stringify(seen));

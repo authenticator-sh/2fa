@@ -8,6 +8,7 @@
 
 import type { Account } from '@/types';
 import type { TranslationKey } from './i18n';
+import { steamSecretToBase32 } from './import-formats';
 import { cleanSecret, isUsableSecret, validateSecret } from './totp';
 
 /**
@@ -38,9 +39,13 @@ export type SecretCheck = { secret: string } | { error: TranslationKey };
 export function checkReplacementSecret(
   input: string,
   accountId: string,
-  accounts: Pick<Account, 'id' | 'secret'>[]
+  accounts: Pick<Account, 'id' | 'secret'>[],
+  type?: Account['type']
 ): SecretCheck {
-  const secret = cleanSecret(input);
+  // A Steam key is read the way the add form reads it, Base64 included; a
+  // maFile's `shared_secret` checked as Base32 alone passed for one key in
+  // fourteen and was stored unconverted.
+  const secret = type === 'steam' ? steamSecretToBase32(input) || cleanSecret(input) : cleanSecret(input);
   if (!secret || !validateSecret(secret) || !isUsableSecret(secret)) {
     return { error: 'addAccount.errorInvalidSecret' };
   }

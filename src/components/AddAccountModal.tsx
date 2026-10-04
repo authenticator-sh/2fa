@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useId } from 'react';
 import { Upload, Monitor, Loader2, Camera, ChevronDown } from 'lucide-react';
 import type { Account } from '@/types';
 import { validateSecret, cleanSecret } from '@/utils/totp';
-import { parseQRCode, parseOTPAuthURL, generateRandomColor, UnsupportedOTPTypeError } from '@/utils/qr-parser';
+import { parseQRCode, parseOTPAuthURL, generateRandomColor, qrFailureKey, UnsupportedOTPTypeError } from '@/utils/qr-parser';
 import { saveErrorMessage } from '@/utils/save-error';
 import { captureCurrentTab } from '@/utils/screen-capture';
 import { decodeQrFromImage } from '@/utils/qr-decode';
@@ -10,6 +10,7 @@ import { ModalHeader } from './ModalHeader';
 import { GroupInput } from './GroupInput';
 import { createT, type Language } from '@/utils/i18n';
 import { looksLikeURIList } from '@/utils/uri-import';
+import { steamSecretToBase32 } from '@/utils/import-formats';
 
 interface AddAccountModalProps {
   onClose: () => void;
@@ -22,22 +23,27 @@ interface AddAccountModalProps {
     account: Account | Account[],
     batch?: { index: number; total: number },
     /** Entries in a migration code that could not be added (HOTP, damaged). */
-    unsupported?: number
-  ) => Promise<void>;
+    unsupported?: number,
+    /** How a single account came in: typed into the form, or read from a QR code. */
+    via?: 'form' | 'qr'
+  ) => Promise<boolean | void>;
   language: Language;
   /** Existing group names, offered as suggestions — the field stays free text. */
   groups?: string[];
   /** Group to prefill, so adding from inside a filtered list lands in it. */
   defaultGroup?: string;
+  /** The tab to open on. The first-run guide's "I have a secret key" asks for the form. */
+  initialTab?: 'manual' | 'qr';
 }
 
 /** Every text field on this form. */
 const FIELD =
   'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-all placeholder-gray-400 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-100 dark:placeholder-gray-500';
 
-export function AddAccountModal({ onClose, onAdd, language, groups = [], defaultGroup = '' }: AddAccountModalProps) {
+export function AddAccountModal({ onClose, onAdd, language, groups = [], defaultGroup = '', initialTab = 'qr' }: AddAccountModalProps) {
   const t = createT(language);
-  const [tab, setTab] = useState<'manual' | 'qr'>('qr');
+  const ids = useId();
+  const [tab, setTab] = useState<'manual' | 'qr'>(initialTab);
   const [name, setName] = useState('');
   const [issuer, setIssuer] = useState('');
   const [group, setGroup] = useState(defaultGroup);
@@ -45,6 +51,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
   const [algorithm, setAlgorithm] = useState<'SHA1' | 'SHA256' | 'SHA512'>('SHA1');
   const [digits, setDigits] = useState<number>(6);
   const [period, setPeriod] = useState(30);
+  const [codeType, setCodeType] = useState<'totp' | 'steam'>('totp');
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -54,6 +61,17 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
   const [showKeyHelp, setShowKeyHelp] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [scanning, setScanning] = useState(false);
+  /**
+   * An image being read and saved, from any of the three ways in — the file
+   * picker, a drop, a screenshot.
+   *
+   * They had no guard in common: dropping a second image while the first was
+   * still being decoded, or choosing a file during a screen scan, ran two
+   * imports side by side, and the one that finished last closed the screen on
+   * the other's error. The ref answers at once; the state disables the buttons.
+   */
+  const reading = useRef(false);
+  const [busyReading, setBusyReading] = useState(false);
   /** A save in flight — the form stays open and the button stays busy. */
   const [saving, setSaving] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
@@ -85,7 +103,16 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
       return;
     }
 
-    if (!validateSecret(secret)) {
+    // A Steam secret usually comes out of a Steam Desktop Authenticator
+    // maFile, where `shared_secret` is Base64, not Base32. Converted here so
+    // the user can paste what the file holds. Only for Steam: for TOTP a
+    // Base64 guess that happens to decode is a key for a different account.
+    let usableSecret = secret;
+    if (codeType === 'steam') {
+      usableSecret = steamSecretToBase32(secret) || secret;
+    }
+
+    if (!validateSecret(usableSecret)) {
       setError(t('addAccount.errorInvalidSecret'));
       return;
     }
@@ -98,18 +125,32 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
       return;
     }
 
-    const account: Account = {
-      id: Date.now().toString() + Math.random().toString(36).substring(7),
-      name,
-      issuer: issuer || name,
-      secret: cleanSecret(secret),
-      algorithm,
-      digits,
-      period,
-      createdAt: Date.now(),
-      color: generateRandomColor(),
-      ...typedGroup,
-    };
+    const account: Account = codeType === 'steam'
+      ? {
+          id: Date.now().toString() + Math.random().toString(36).substring(7),
+          name,
+          issuer: issuer || 'Steam',
+          secret: cleanSecret(usableSecret),
+          algorithm: 'SHA1',
+          digits: 5,
+          period: 30,
+          type: 'steam',
+          createdAt: Date.now(),
+          color: generateRandomColor(),
+          ...typedGroup,
+        }
+      : {
+          id: Date.now().toString() + Math.random().toString(36).substring(7),
+          name,
+          issuer: issuer || name,
+          secret: cleanSecret(usableSecret),
+          algorithm,
+          digits,
+          period,
+          createdAt: Date.now(),
+          color: generateRandomColor(),
+          ...typedGroup,
+        };
 
     // Awaited, and its failure shown.
     //
@@ -122,7 +163,9 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
     // only the hand-typed path did not.
     setSaving(true);
     try {
-      await onAdd(account);
+      // False: the free limit stopped it and the paywall was closed without
+      // Pro. The screen stays, with what was typed, for after the upgrade.
+      if ((await onAdd(account)) === false) return;
       onClose();
     } catch (err) {
       console.error('Could not save the account:', err);
@@ -167,10 +210,17 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
       // it is not a name to put in front of the user as if they had typed it.
       setIssuer(parsed.issuer === 'Unknown' ? '' : parsed.issuer);
       setSecret(parsed.secret);
+      setError('');
+      if (parsed.type === 'steam') {
+        // Opened for the same reason as below: the code type just changed.
+        setCodeType('steam');
+        setShowAdvanced(true);
+        return;
+      }
+      setCodeType('totp');
       setAlgorithm(parsed.algorithm);
       setDigits(parsed.digits);
       setPeriod(parsed.period);
-      setError('');
       // Opened, not applied silently: a link carrying 8 digits or a 60-second
       // period has just changed settings the user never touched, and finding
       // that out later — from codes that do not work — is worse than seeing it.
@@ -178,8 +228,8 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
         setShowAdvanced(true);
       }
     } catch (error) {
-      // Understood and refused, not unreadable: the existing message says so.
-      if (error instanceof UnsupportedOTPTypeError) setError(t('addAccount.errorHotp'));
+      // Understood and refused, not unreadable: say which refusal it was.
+      if (error instanceof UnsupportedOTPTypeError) setError(t(qrFailureKey(trimmed, error)));
     }
   };
 
@@ -216,6 +266,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
             algorithm: accountData.algorithm,
             digits: accountData.digits,
             period: accountData.period,
+            ...(accountData.type ? { type: accountData.type } : {}),
             createdAt: Date.now() + index,
             color: generateRandomColor(),
             ...filteredGroup,
@@ -223,7 +274,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
 
           // Add all accounts through onAdd to ensure state updates
           try {
-            await onAdd(accountsToAdd, parsed.batch, parsed.skipped ?? 0);
+            if ((await onAdd(accountsToAdd, parsed.batch, parsed.skipped ?? 0)) === false) return;
           } catch (err) {
             console.error('Could not save the scanned accounts:', err);
             setError(saveErrorMessage(err, t));
@@ -244,12 +295,13 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
           algorithm: accountData.algorithm,
           digits: accountData.digits,
           period: accountData.period,
+          ...(accountData.type ? { type: accountData.type } : {}),
           createdAt: Date.now(),
           color: generateRandomColor(),
           ...filteredGroup,
         };
         try {
-          await onAdd(account);
+          if ((await onAdd(account, undefined, undefined, 'qr')) === false) return;
         } catch (err) {
           console.error('Could not save the scanned account:', err);
           setError(saveErrorMessage(err, t));
@@ -266,12 +318,13 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
         // a crafted code a hundred characters of attacker-chosen text inside
         // the extension's own chrome.
         console.error('Failed to parse QR code (content withheld)');
-        setError(t('addAccount.errorInvalidQR'));
+        // Ours but unreadable says so; "invalid QR" is for everything else.
+        setError(t(qrFailureKey(result)));
       }
     } catch (err) {
       console.error('QR scan error:', err);
       if (err instanceof UnsupportedOTPTypeError) {
-        setError(t('addAccount.errorHotp'));
+        setError(t(qrFailureKey('', err)));
         return;
       }
       // Only decoding is left in this try — saving has its own — so this is an
@@ -280,10 +333,29 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
     }
   };
 
+  /** Run one image import at a time; a second request while one runs is dropped. */
+  const readExclusively = async (work: () => Promise<void>) => {
+    if (reading.current) return;
+    reading.current = true;
+    setBusyReading(true);
+    try {
+      await work();
+    } finally {
+      reading.current = false;
+      setBusyReading(false);
+    }
+  };
+
   const handleQRUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const input = e.target;
+    const file = input.files?.[0];
+    // Cleared straight away: a file input fires no change for the file it
+    // already holds, so choosing the same image again — after fixing the
+    // reason it failed, or after "no QR found" on a photo worth a second try —
+    // did nothing at all.
+    input.value = '';
     if (!file) return;
-    await processQRFile(file);
+    await readExclusively(() => processQRFile(file));
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -305,35 +377,36 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
 
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
-      await processQRFile(file);
+      await readExclusively(() => processQRFile(file));
     } else {
       setError(t('addAccount.errorDropImage'));
     }
   };
 
 
-  const handleScanFromScreen = async () => {
-    try {
-      setError('');
-      setScanning(true);
-      const dataUrl = await captureCurrentTab();
+  const handleScanFromScreen = () =>
+    readExclusively(async () => {
+      try {
+        setError('');
+        setScanning(true);
+        const dataUrl = await captureCurrentTab();
 
-      // Convert the captured data URL into a File for the QR decoder.
-      const response = await fetch(dataUrl);
-      const blob = await response.blob();
-      const file = new File([blob], 'screenshot.png', { type: 'image/png' });
+        // Convert the captured data URL into a File for the QR decoder.
+        const response = await fetch(dataUrl);
+        const blob = await response.blob();
+        const file = new File([blob], 'screenshot.png', { type: 'image/png' });
 
-      await processQRFile(file);
-    } catch (err) {
-      console.error('Screen scan failed:', err);
-      // captureVisibleTab throws on restricted pages (chrome://, Web Store,
-      // PDFs, other extensions). Show an actionable hint instead of the raw
-      // system error, which reads as "it just broke".
-      setError(t('addAccount.errorScreenHint'));
-    } finally {
-      setScanning(false);
-    }
-  };
+        await processQRFile(file);
+      } catch (err) {
+        console.error('Screen scan failed:', err);
+        // captureVisibleTab throws on restricted pages (chrome://, Web Store,
+        // PDFs, other extensions). Show an actionable hint instead of the raw
+        // system error, which reads as "it just broke".
+        setError(t('addAccount.errorScreenHint'));
+      } finally {
+        setScanning(false);
+      }
+    });
 
   // Prevent default drag behavior on the entire modal to avoid browser opening the file
   const handleModalDragOver = (e: React.DragEvent) => {
@@ -366,6 +439,11 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
             {([['manual', 'addAccount.manual'], ['qr', 'addAccount.qrCode']] as const).map(([id, key]) => (
               <button
                 key={id}
+                type="button"
+                // A two-way switch rather than ARIA tabs: the panels are not
+                // kept mounted side by side, and tab semantics promise arrow-key
+                // navigation this control does not have. Pressed says which.
+                aria-pressed={tab === id}
                 onClick={() => handleTabChange(id)}
                 className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
                   tab === id
@@ -381,10 +459,11 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
           {tab === 'manual' ? (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                <label htmlFor={`${ids}-name`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                   {t('addAccount.accountName')}
                 </label>
                 <input
+                  id={`${ids}-name`}
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -394,10 +473,11 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                <label htmlFor={`${ids}-secret`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                   {t('addAccount.secretKey')}
                 </label>
                 <input
+                  id={`${ids}-secret`}
                   type="text"
                   value={secret}
                   onChange={(e) => handleSecretChange(e.target.value)}
@@ -410,7 +490,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                 <button
                   type="button"
                   onClick={() => setShowKeyHelp(!showKeyHelp)}
-                  className="mt-2 flex items-center gap-1 text-xs font-medium text-[#4285F4] transition-colors hover:text-[#3367D6]"
+                  className="mt-2 flex items-center gap-1 text-xs font-medium text-[#1a73e8] dark:text-[#669DF6] transition-colors hover:text-[#1967D2] dark:hover:text-[#8AB4F8]"
                 >
                   <ChevronDown
                     size={13}
@@ -454,10 +534,11 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
               {showAdvanced && (
                 <div className="space-y-4 pt-2">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    <label htmlFor={`${ids}-issuer`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                       {t('addAccount.issuer')}
                     </label>
                     <input
+                      id={`${ids}-issuer`}
                       type="text"
                       value={issuer}
                       onChange={(e) => setIssuer(e.target.value)}
@@ -466,12 +547,31 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                     />
                   </div>
 
+                  <div>
+                    <label htmlFor={`${ids}-type`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                      {t('addAccount.codeType')}
+                    </label>
+                    <select
+                      id={`${ids}-type`}
+                      value={codeType}
+                      onChange={(e) => setCodeType(e.target.value as 'totp' | 'steam')}
+                      className={FIELD}
+                    >
+                      <option value="totp">{t('addAccount.codeTypeTotp')}</option>
+                      <option value="steam">{t('addAccount.codeTypeSteam')}</option>
+                    </select>
+                  </div>
+
+                  {/* Steam fixes all three. Showing them would invite a change
+                      that the generator then ignores. */}
+                  {codeType === 'totp' && (
                   <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    <label htmlFor={`${ids}-algorithm`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                       {t('addAccount.algorithm')}
                     </label>
                     <select
+                      id={`${ids}-algorithm`}
                       value={algorithm}
                       onChange={(e) => setAlgorithm(e.target.value as any)}
                       className={FIELD}
@@ -483,10 +583,11 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    <label htmlFor={`${ids}-digits`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                       {t('addAccount.digits')}
                     </label>
                     <select
+                      id={`${ids}-digits`}
                       value={digits}
                       onChange={(e) => setDigits(parseInt(e.target.value))}
                       className={FIELD}
@@ -498,10 +599,11 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    <label htmlFor={`${ids}-period`} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                       {t('addAccount.period')}
                     </label>
                     <input
+                      id={`${ids}-period`}
                       type="number"
                       value={period}
                       onChange={(e) => setPeriod(parseInt(e.target.value))}
@@ -509,6 +611,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                     />
                   </div>
                   </div>
+                  )}
                 </div>
               )}
 
@@ -524,7 +627,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
               />
 
               {error && (
-                <div ref={errorRef} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+                <div ref={errorRef} role="alert" className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
                   <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
                 </div>
               )}
@@ -532,7 +635,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
               <button
                 type="submit"
                 disabled={saving}
-                className="w-full bg-[#4285F4] hover:bg-[#3367D6] disabled:opacity-60 text-white font-medium text-sm py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
+                className="w-full bg-[#1a73e8] hover:bg-[#1967D2] disabled:opacity-60 text-white font-medium text-sm py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
               >
                 {saving && <Loader2 size={16} className="animate-spin" />}
                 {t('addAccount.add')}
@@ -552,7 +655,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                     : 'border-gray-300 dark:border-dark-500 hover:border-gray-400 dark:hover:border-dark-400'
                 }`}
               >
-                <Upload className="mx-auto mb-2 text-gray-400 dark:text-gray-500" size={28} />
+                <Upload className="mx-auto mb-2 text-gray-500 dark:text-gray-400" size={28} />
                 <p className="text-gray-600 dark:text-gray-300 text-sm mb-1 font-medium">
                   {isDragging ? t('addAccount.dragDropQR') : t('addAccount.uploadQR')}
                 </p>
@@ -573,7 +676,8 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="inline-block bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-1.5 px-5 rounded-lg transition-colors"
+                  disabled={busyReading}
+                  className="inline-block disabled:opacity-60 bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-1.5 px-5 rounded-lg transition-colors"
                 >
                   {t('addAccount.chooseImage')}
                 </button>
@@ -597,7 +701,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
 
               <button
                 onClick={handleScanFromScreen}
-                disabled={scanning}
+                disabled={scanning || busyReading}
                 className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 hover:bg-gray-50 dark:hover:bg-dark-600 text-gray-700 dark:text-gray-200 font-medium text-sm transition-all disabled:opacity-50"
               >
                 {scanning ? (
@@ -617,7 +721,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
 
               {/* Error Display */}
               {error && (
-                <div ref={errorRef} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+                <div ref={errorRef} role="alert" className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
                   <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
                 </div>
               )}

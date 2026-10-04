@@ -7,7 +7,7 @@
 // the .txt this extension had just written for them and was told it was not a
 // backup file. What this suite pins down is that the doors agree.
 
-import { check, resetState, scenario } from './harness';
+import { check, resetState, scenario, USER_ADD } from './harness';
 
 const SECRET = 'JBSWY3DPEHPK3PXP';
 
@@ -29,13 +29,13 @@ export async function run(): Promise<void> {
     { ...base, id: '2', name: 'b@x.com', issuer: 'AWS', secret: 'KRSXG5CTMVRXEZLU', createdAt: 2 },
   ] as any);
 
-  const first = await uriImport.importURIList(exported.text, 'en');
+  const first = await uriImport.importURIList(exported.text, 'en', USER_ADD);
   check('both accounts land', first.added === 2, JSON.stringify(first));
   check('and it reports success', first.kind === 'success', first.kind);
   check('storage really holds them', (await storage.getAccounts()).length === 2);
 
   scenario('Importing the same list twice adds nothing the second time');
-  const second = await uriImport.importURIList(exported.text, 'en');
+  const second = await uriImport.importURIList(exported.text, 'en', USER_ADD);
   check('nothing new is written', second.added === 0, JSON.stringify(second));
   // Not an error: the file was read fine, the accounts were simply already here.
   check('and it is not reported as a failure', second.kind === 'info', second.kind);
@@ -43,7 +43,7 @@ export async function run(): Promise<void> {
 
   scenario('A file with nothing usable in it fails without writing');
   await resetState();
-  const nothing = await uriImport.importURIList('not a link\nnor this one', 'en');
+  const nothing = await uriImport.importURIList('not a link\nnor this one', 'en', USER_ADD);
   check('reported as an error', nothing.kind === 'error', nothing.kind);
   check('nothing was written', nothing.added === undefined && (await storage.getAccounts()).length === 0);
 
@@ -87,7 +87,7 @@ export async function run(): Promise<void> {
   // unlocked key lives, and clearing it alone leaves the session copy behind —
   // which is why the first draft of this scenario "passed" by importing fine.
   await vault.lock();
-  const locked = await uriImport.importURIList(`${link('locked@x.com')}\n`, 'en');
+  const locked = await uriImport.importURIList(`${link('locked@x.com')}\n`, 'en', USER_ADD);
   check('reported as an error', locked.kind === 'error', locked.kind);
   check('and nothing was written', locked.added === undefined, JSON.stringify(locked));
 
@@ -114,7 +114,7 @@ const RFC = {
   },
 } as const;
 
-const STORED_FIELDS = new Set(['id', 'name', 'issuer', 'secret', 'algorithm', 'digits', 'period', 'createdAt', 'color', 'group']);
+const STORED_FIELDS = new Set(['id', 'name', 'issuer', 'secret', 'algorithm', 'digits', 'period', 'createdAt', 'color', 'group', 'type']);
 
 async function otherAppsFiles(): Promise<void> {
   const fixtures = (await import('./fixtures/import-formats.json')).default as Record<string, unknown>;
@@ -183,13 +183,15 @@ async function otherAppsFiles(): Promise<void> {
   const binary = await importFile(' SQLite format 3  encrypted blob');
   check('a file that is not JSON gets the same answer', binary.error?.reason === 'unknown-format', String(binary.error?.message));
 
-  scenario('andOTP: label is the account, HOTP and Steam are refused and counted');
+  scenario('andOTP: label is the account, Steam is kept, HOTP is refused and counted');
   await resetState();
   const andOtp = await importFile(fixtures.andOtp);
   const andOtpList = await storage.getAccounts();
-  check('two TOTP accounts written', andOtpList.length === 2, JSON.stringify(andOtpList.map(a => a.issuer)));
-  check('the HOTP and Steam entries are counted as unsupported', andOtp.report?.unsupported === 2, JSON.stringify(andOtp.report));
-  check('and the message names them', /2 use a code type/.test(andOtp.report ? EI.importResultMessage(andOtp.report, 'en') : ''));
+  check('two TOTP accounts and the Steam one written', andOtpList.length === 3, JSON.stringify(andOtpList.map(a => a.issuer)));
+  check('the Steam one as Steam', find(andOtpList, 'MFRGGZDFMZTWQ2LK')?.type === 'steam');
+  check('the HOTP entry is counted as unsupported', andOtp.report?.unsupported === 1, JSON.stringify(andOtp.report));
+  // Singular since the tables learned plurals: "1 uses", not "1 use".
+  check('and the message names it', /1 uses a code type/.test(andOtp.report ? EI.importResultMessage(andOtp.report, 'en') : ''));
   check('the account name comes from `label`', find(andOtpList, RFC.SHA1.secret)?.name === 'alice@example.com', find(andOtpList, RFC.SHA1.secret)?.name);
   check('a 60-second period is kept', find(andOtpList, 'KRSXG5CTMVRXEZLU')?.period === 60);
   check('the first tag becomes the group', find(andOtpList, RFC.SHA1.secret)?.group === 'Work');
@@ -213,8 +215,9 @@ async function otherAppsFiles(): Promise<void> {
   await resetState();
   const aegis = await importFile(fixtures.aegis);
   const aegisList = await storage.getAccounts();
-  check('three accounts written', aegisList.length === 3, JSON.stringify(aegis.report ?? aegis.error?.message));
-  check('HOTP and Steam counted as unsupported', aegis.report?.unsupported === 2, JSON.stringify(aegis.report));
+  check('three TOTP accounts and the Steam one written', aegisList.length === 4, JSON.stringify(aegis.report ?? aegis.error?.message));
+  check('the Steam one as Steam', aegisList.filter(a => a.type === 'steam').length === 1);
+  check('HOTP counted as unsupported', aegis.report?.unsupported === 1, JSON.stringify(aegis.report));
   check('names and issuers', find(aegisList, RFC.SHA1.secret)?.name === 'alice@example.com' && find(aegisList, RFC.SHA1.secret)?.issuer === 'GitHub');
   check('the group is resolved from its uuid', find(aegisList, RFC.SHA1.secret)?.group === 'Work');
   checkRfc(aegisList, ['SHA1', 'SHA256', 'SHA512']);
@@ -226,12 +229,13 @@ async function otherAppsFiles(): Promise<void> {
   check('the message says to export without encryption', /Aegis.*encrypted.*Export it again/.test(aegisSealed.error ? importErrorMessage(aegisSealed.error) : ''));
   check('nothing written', (await storage.getAccounts()).length === 0);
 
-  scenario('2FAS: account and issuer from `otp`, HOTP and Steam refused');
+  scenario('2FAS: account and issuer from `otp`, Steam kept, HOTP refused');
   await resetState();
   const twoFas = await importFile(fixtures.twoFas);
   const twoFasList = await storage.getAccounts();
-  check('two accounts written', twoFasList.length === 2, JSON.stringify(twoFas.report ?? twoFas.error?.message));
-  check('two counted as unsupported', twoFas.report?.unsupported === 2, JSON.stringify(twoFas.report));
+  check('two TOTP accounts and the Steam one written', twoFasList.length === 3, JSON.stringify(twoFas.report ?? twoFas.error?.message));
+  check('the Steam one as Steam', twoFasList.filter(a => a.type === 'steam').length === 1);
+  check('HOTP counted as unsupported', twoFas.report?.unsupported === 1, JSON.stringify(twoFas.report));
   check('account name from otp.account', find(twoFasList, RFC.SHA1.secret)?.name === 'alice@example.com');
   check('issuer falls back to the service name', find(twoFasList, RFC.SHA256.secret)?.issuer === 'Bank');
   check('group resolved by id', find(twoFasList, RFC.SHA1.secret)?.group === 'Work');
@@ -246,9 +250,9 @@ async function otherAppsFiles(): Promise<void> {
   await resetState();
   const bitwarden = await importFile(fixtures.bitwarden);
   const bitwardenList = await storage.getAccounts();
-  check('two accounts written', bitwardenList.length === 2, JSON.stringify(bitwarden.report ?? bitwarden.error?.message));
+  check('two TOTP accounts and the Steam one written', bitwardenList.length === 3, JSON.stringify(bitwarden.report ?? bitwarden.error?.message));
   check('logins without TOTP are neither imported nor counted', bitwarden.report?.unreadable === 0);
-  check('a steam:// code is counted as unsupported', bitwarden.report?.unsupported === 1, JSON.stringify(bitwarden.report));
+  check('a steam:// code is imported as Steam', bitwarden.report?.unsupported === 0 && bitwardenList.filter(a => a.type === 'steam').length === 1, JSON.stringify(bitwarden.report));
   check('the otpauth link is read', find(bitwardenList, RFC.SHA1.secret)?.name === 'alice@example.com' && find(bitwardenList, RFC.SHA1.secret)?.digits === 8);
   check('a bare secret takes its name from the username', find(bitwardenList, RFC.SHA256.secret)?.name === 'bob@example.com' && find(bitwardenList, RFC.SHA256.secret)?.issuer === 'Bank');
   checkRfc(bitwardenList, ['SHA1']);
@@ -306,7 +310,7 @@ async function otherAppsFiles(): Promise<void> {
   const pasted = await uriImport.importURIList(
     qr.buildOTPAuthURL({ name: 'a', issuer: 'B', secret: RFC.SHA1.secret, algorithm: 'SHA1', digits: 8, period: 30 }),
     'en'
-  );
+  , USER_ADD);
   check('it says what was added', /1 account/.test(pasted.message), pasted.message);
   check('and never mentions a QR code', !/QR/.test(pasted.message), pasted.message);
 

@@ -1,6 +1,6 @@
 {
   "name": "authenticator-extension",
-  "version": "1.13.3",
+  "version": "1.14.0",
   "description": "Modern Authenticator Chrome Extension",
   "type": "module",
   "scripts": {
@@ -12,20 +12,24 @@
     "checksums": "node scripts/checksums.js",
     "test": "tsx test/run.ts",
     "check:deps": "tsx scripts/check-deps.ts",
+    "check:bundle": "tsx scripts/check-bundle.ts",
+    "build:e2e": "BILLING_ENV=test BILLING_API=http://127.0.0.1:3199 BILLING_RELEASE=2026-01-01 vite build --outDir .e2e-build --emptyOutDir && tsx scripts/check-bundle.ts .e2e-build",
+    "test:e2e": "npm run build:e2e && playwright test",
+    "test:stack": "playwright test --config playwright.stack.config.ts",
     "verify": "npm run typecheck && npm test && npm run check:deps",
-    "typecheck": "tsc --noEmit -p tsconfig.test.json"
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "dev:billing": "BILLING_ENV=preview BILLING_API=http://localhost:3100 BILLING_RELEASE=2026-01-01 vite build --watch --mode development"
   },
   "dependencies": {
-    "framer-motion": "^12.31.1",
     "jsqr": "^1.4.0",
     "lucide-react": "^0.300.0",
-    "otpauth": "^9.2.3",
+    "otpauth": "^9.5.2",
     "qrcode-generator": "^2.0.4",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "zustand": "^4.4.7"
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/chrome": "^0.0.258",
     "@types/node": "^26.2.0",
     "@types/react": "^18.2.45",
@@ -33,7 +37,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.32",
-    "sharp": "^0.34.5",
+    "sharp": "^0.35.5",
     "tailwindcss": "^3.4.0",
     "tsx": "^4.23.1",
     "typescript": "^5.3.3",

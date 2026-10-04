@@ -1,7 +1,8 @@
 import { useCallback, useState, useMemo, useRef, useEffect } from 'react';
-import { Plus, Settings, AlertTriangle, HelpCircle, Moon, Sun, Sparkles, ArrowLeft } from 'lucide-react';
+import { Plus, Settings, AlertTriangle, HelpCircle, Lightbulb, Moon, Sun, Sparkles, ArrowLeft } from 'lucide-react';
 import { useAccounts } from '@/hooks/useAccounts';
 import { useVault } from '@/hooks/useVault';
+import { useFinishQuickFill } from '@/hooks/useFinishQuickFill';
 import { AccountCard, type ViewMode } from '@/components/AccountCard';
 import { SearchBar } from '@/components/SearchBar';
 import { AddAccountModal } from '@/components/AddAccountModal';
@@ -15,36 +16,61 @@ import { UpdateModal } from '@/components/UpdateModal';
 import { PromoBanner } from '@/components/PromoBanner';
 import { ReviewPrompt } from '@/components/ReviewPrompt';
 import { Logo } from '@/components/Logo';
-import { LanguageSelector } from '@/components/LanguageSelector';
 import { SettingToggle } from '@/components/SettingToggle';
+import { SettingRow, SettingsSection, settingsButton } from '@/components/SettingsSection';
 import { LockScreen } from '@/components/LockScreen';
 import { VaultPrompt } from '@/components/VaultPrompt';
 import { VaultSettings } from '@/components/VaultSettings';
 import { VaultSetupModal } from '@/components/VaultSetupModal';
-import { EmptyStateGuide } from '@/components/EmptyStateGuide';
+import { EmptyStateGuide, type GuidePath } from '@/components/EmptyStateGuide';
 import { AccountsUnavailable } from '@/components/AccountsUnavailable';
 import { RestoreBackups, RestoreOffer } from '@/components/RestoreBackups';
 import { GroupFilter } from '@/components/GroupFilter';
 import { SupportFooter } from '@/components/SupportFooter';
-import { getTimeSyncNotice, dismissTimeNotice, getClockStatus, recheckClock, type ClockStatus } from '@/utils/time-sync';
+import {
+  getTimeSyncNotice,
+  dismissTimeNotice,
+  checkTimeSync,
+  clockStatusOf,
+  noticeFor,
+  recheckClock,
+  watchClock,
+  type ClockStatus,
+} from '@/utils/time-sync';
 import { applyDocumentLanguage, createT, loadLanguage, resolveLanguage, type Language } from '@/utils/i18n';
 import { settingsFromChanges } from '@/utils/settings-watch';
-import { chooseListView, matchesSearch } from '@/utils/list-view';
+import {
+  chooseListView,
+  matchesSearch,
+  readSortOrder,
+  restoredOrder,
+  sortAccounts,
+  SORT_ORDER_KEY,
+  type SortOrder,
+} from '@/utils/list-view';
 import { addMultipleAccounts, getAccounts } from '@/utils/storage';
 import { listBackupSummaries, type BackupSummary } from '@/utils/auto-backup';
 import { shouldShowBackupReminder, markBackupDone } from '@/utils/backup-reminder';
 import { shouldShowVaultPrompt, markVaultPromptShown } from '@/utils/vault-prompt';
 import { describeImport, importErrorMessage } from '@/utils/import-message';
-import { confirmDialog, promptDialog, toast } from '@/utils/ui-feedback';
+import { confirmDialog, dismissToast, promptDialog, subscribe as subscribeFeedback, toast } from '@/utils/ui-feedback';
+import { useStableCallback } from '@/hooks/useStableCallback';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { FeedbackHost } from '@/components/FeedbackHost';
+import { PaywallHost } from '@/components/PaywallHost';
+import { ProSettings } from '@/components/ProSettings';
+import { addWithLimit } from '@/billing/add';
+import { subscribePaywall } from '@/billing/bridge';
+import { dismissHeldAdd, finishHeldAdd, heldAddToMention } from '@/billing/held-add';
+import { BILLING_KEYS, recentlySawPaywall } from '@/billing/state';
+import { countOpen } from '@/billing/opens';
+import { hasPendingCheckout, syncBilling } from '@/billing/sync';
 import { shouldShowPromoBanner, recordFirstOpen } from '@/utils/promo-banner';
 import { recordOpen, shouldShowReviewPrompt, snoozeReviewPrompt } from '@/utils/review-prompt';
 import { clearUpdateBadge } from '@/utils/update-badge';
-import { productHuntDue } from '@/utils/product-hunt';
-import { ProductHuntBanner } from '@/components/ProductHuntBanner';
 import { readActiveGroup, rememberActiveGroup, forgetActiveGroup } from '@/utils/active-group';
-import { helpUrl } from '@/utils/links';
-import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/utils/qr-parser';
+import { FEATURE_REQUEST_URL, helpUrl } from '@/utils/links';
+import { parseQRCode, generateRandomColor, qrFailureKey } from '@/utils/qr-parser';
 import { saveErrorMessage } from '@/utils/save-error';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, loadTimeOffset } from '@/utils/totp';
@@ -127,7 +153,12 @@ function App() {
   // null — every account; '' — the ungrouped chip; otherwise a group name.
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  // Which tab the add form opens on: the QR one, unless the way in asked for the key.
+  const [addTab, setAddTab] = useState<'manual' | 'qr'>('qr');
   const [showSettings, setShowSettings] = useState(false);
+  // Which branch of the first-run guide is open. Lives here, not in the guide,
+  // because the header names it and holds the way back, as it does for Settings.
+  const [openGuidePath, setOpenGuidePath] = useState<GuidePath | null>(null);
   const [timeOffsetSec, setTimeOffsetSec] = useState<number | null>(null);
   // Separate from the banner's state on purpose: the banner appears only for a
   // measured, uncorrected-looking clock, while this carries all three outcomes
@@ -157,6 +188,10 @@ function App() {
   // compact row it also costs the account name 24px of the width this release
   // just spent getting back.
   const [showAvatars, setShowAvatars] = useState(false);
+  const [sortOrder, setSortOrder] = useState<SortOrder>('manual');
+  /** A confirmation or prompt is up — the page under it goes inert like under any overlay. */
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [paywallOpen, setPaywallOpen] = useState(false);
   // Seeded from the synchronous mirror so the window opens at the chosen size
   // instead of resizing once chrome.storage answers.
   const [popupSize, setPopupSize] = useState<PopupSize>(cachedPopupSize);
@@ -167,17 +202,24 @@ function App() {
   const [showPromoBanner, setShowPromoBanner] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [openCount, setOpenCount] = useState<number | null>(null);
-  const [showProductHunt, setShowProductHunt] = useState(false);
   const [showReviewPrompt, setShowReviewPrompt] = useState(false);
   const draggedIdRef = useRef<string | null>(null);
   /** The last account reported gone, so the save path and the effect below do not both say it. */
   const goneAccountRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const headerBackRef = useRef<HTMLButtonElement>(null);
+  /** The "Deleted · Undo" toast on screen, if any — it holds a whole account, secret included. */
+  const undoToastRef = useRef<number | null>(null);
+  /** The last single add the free limit stopped — still on the add screen when the page outlived Checkout. */
+  const blockedAddIdRef = useRef<string | null>(null);
+  /** The first billing check-in of this page has had its answer: what is still waiting can be said. */
+  const firstBillingSyncDone = useRef(false);
 
   // Load saved preferences
   useEffect(() => {
-    chrome.storage.local.get(['language', 'darkMode', 'viewMode', 'popupSize', 'showAvatars'], (result) => {
+    chrome.storage.local.get(['language', 'darkMode', 'viewMode', 'popupSize', 'showAvatars', SORT_ORDER_KEY], (result) => {
       // A stored language is a choice the user made and outranks everything.
       // Without one, follow the browser: twenty translated interfaces were
       // reachable only from a dropdown, so every install began in English no
@@ -192,6 +234,7 @@ function App() {
         setDarkMode(true);
       }
       setShowAvatars(result.showAvatars === true);
+      setSortOrder(readSortOrder(result[SORT_ORDER_KEY]));
       if (result.viewMode) {
         setViewMode(result.viewMode);
       }
@@ -221,6 +264,25 @@ function App() {
     if (HOST === 'window') void claimPopoutWindow();
   }, []);
 
+  // Counted for the admin's "opened the extension" (billing/opens.ts): every
+  // open of the popup, and a side panel or window coming back into view after
+  // half an hour away — those stay open for days, and coming back is a use.
+  useEffect(() => {
+    void countOpen();
+    if (HOST === 'popup') return;
+    let hiddenAt: number | null = null;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+        return;
+      }
+      if (hiddenAt !== null && Date.now() - hiddenAt >= 30 * 60_000) void countOpen();
+      hiddenAt = null;
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
   // Separate from the preferences read above: where this one lives depends on
   // whether a vault is configured, so it goes through its own module.
   useEffect(() => {
@@ -248,6 +310,7 @@ function App() {
       if (patch.darkMode !== undefined) setDarkMode(patch.darkMode);
       if (patch.viewMode) setViewMode(patch.viewMode);
       if (patch.showAvatars !== undefined) setShowAvatars(patch.showAvatars);
+      if (patch.sortOrder) setSortOrder(patch.sortOrder);
       if (patch.popupSize) {
         setPopupSize(patch.popupSize);
         rememberPopupSize(patch.popupSize);
@@ -312,17 +375,42 @@ function App() {
 
   // The service worker watches this key and adds or removes the menu item
   // itself, so nothing here has to reach into it.
+  //
+  // A refused write puts the switch back and says so. It used to be left
+  // showing the new position over a store that still held the old one, and
+  // the rejection went nowhere — the first sign was the next open disagreeing.
   const handleQuickFillToggle = async () => {
     const next = !quickFillOn;
     setQuickFillOn(next);
-    await setQuickFillEnabled(next);
+    try {
+      await setQuickFillEnabled(next);
+    } catch (error) {
+      console.error('Could not change the quick fill setting:', error);
+      setQuickFillOn(!next);
+      toast('error', t('settings.saveFailed'));
+    }
   };
 
   const handleSuggestionsToggle = async () => {
     const next = !suggestionsOn;
     setSuggestionsOn(next);
-    await setSuggestionsEnabled(next);
+    try {
+      await setSuggestionsEnabled(next);
+    } catch (error) {
+      console.error('Could not change the suggestions setting:', error);
+      setSuggestionsOn(!next);
+      toast('error', t('settings.saveFailed'));
+      return;
+    }
     if (!next) setSuggestedAccountId(null);
+  };
+
+  const handleSortOrderChange = (order: SortOrder) => {
+    setSortOrder(order);
+    // Only the choice is written — never the sorted list, nor anything about
+    // the services in it — so it can sit in plain local storage beside the
+    // view mode even when the accounts themselves are behind a password.
+    chrome.storage.local.set({ [SORT_ORDER_KEY]: order }).catch(() => {});
   };
 
   // The search box is not rendered without accounts, and a query typed before
@@ -438,6 +526,10 @@ function App() {
 
   const t = createT(language);
 
+  // A quick fill that stopped at the lock screen goes into the page once the
+  // list is readable, instead of leaving the user to copy and paste it.
+  useFinishQuickFill(accounts, vault.enabled !== null && !(vault.enabled && vault.locked) && !loading, t);
+
   // Groups are derived from the accounts rather than stored alongside them:
   // nothing to migrate, nothing to keep in sync, and a group disappears by
   // itself once its last account is gone.
@@ -468,12 +560,16 @@ function App() {
       list = list.filter(acc => matchesSearch(acc, searchQuery));
     }
 
-    return list;
-  }, [accounts, searchQuery, activeGroup]);
+    return sortAccounts(list, sortOrder, language);
+  }, [accounts, searchQuery, activeGroup, sortOrder, language]);
 
   // A filter is a claim about the whole list, so the pinned suggestion — which
   // ignores it — is dropped while one is active, the same as during a search.
   const isFiltered = Boolean(searchQuery) || activeGroup !== null;
+
+  // Dragging rewrites the manual order, so it is only offered while that order
+  // is the one on screen. See handleDrop for why it is also off while filtered.
+  const canReorder = !isFiltered && sortOrder === 'manual';
 
   const listView = chooseListView({
     loading,
@@ -482,6 +578,22 @@ function App() {
     failed: Boolean(error),
     held: heldCount,
   });
+
+  // Only while the guide itself is what is on screen: Settings has the header
+  // to itself, and the branch stays open underneath for the way back.
+  const guidePath = !showSettings && listView === 'empty' ? openGuidePath : null;
+
+  // The row that opened the branch is gone once its steps are up, so focus
+  // moves to the way out instead of falling back to <body>.
+  useEffect(() => {
+    if (openGuidePath) headerBackRef.current?.focus();
+  }, [openGuidePath]);
+
+  // The guide is for an empty list. Once something is stored the branch is
+  // over, and an emptied list later should start from the question again.
+  useEffect(() => {
+    if (accounts.length > 0) setOpenGuidePath(null);
+  }, [accounts.length]);
 
   // Pinning a duplicate on top only pays off when the list is long enough to
   // scroll; with few accounts the badge highlight in the list is enough.
@@ -544,13 +656,20 @@ function App() {
     }
   }, [loading, activeGroup, groups, ungroupedCount, vaultHidingAccounts]);
 
+  /**
+   * False when the free limit stopped the add and the person left the
+   * paywall without Pro: the add screen stays open with what they typed.
+   */
   const handleAddAccount = async (
     account: Account | Account[],
     batch?: { index: number; total: number },
-    unsupported = 0
-  ) => {
+    unsupported = 0,
+    via: 'form' | 'qr' = 'form'
+  ): Promise<boolean> => {
     if (Array.isArray(account)) {
-      const result = { ...(await addMultipleAccounts(account)), unsupported };
+      const added = await addWithLimit('migration', origin => addMultipleAccounts(account, origin));
+      if (!added) return false;
+      const result = { ...added, unsupported };
       reload();
       revealAccount(account[0]);
       // One batch carries one group, so the first entry speaks for all of them.
@@ -564,21 +683,73 @@ function App() {
         result.added > 0 ? 'success' : 'info',
         describeImport(result, language, account[0]?.group) + more
       );
-    } else {
-      // A seed already in the list is skipped, and saying "Account added" over
-      // a list that did not change sends the user looking for a row that is
-      // not there.
-      if (!(await addAccount(account))) {
-        toast('info', t('accounts.alreadyExists'));
-        return;
+      return true;
+    }
+    // Kept if the person goes on to Checkout, and added once Pro is on: in the
+    // popup this page is gone by then, and with it what was typed or scanned.
+    const added = await addWithLimit(via, origin => addAccount(account, origin), { hold: [account] });
+    if (added === null) {
+      blockedAddIdRef.current = account.id;
+      return false;
+    }
+    // A seed already in the list is skipped, and saying "Account added" over
+    // a list that did not change sends the user looking for a row that is
+    // not there.
+    if (!added) {
+      toast('info', t('accounts.alreadyExists'));
+      return true;
+    }
+    revealAccount(account);
+    toast('success', account.group ? t('accounts.addedToGroup', account.group) : t('accounts.added'));
+    return true;
+  };
+
+  /**
+   * The + button and the empty list's "Add account". Opens even with no room
+   * left: the limit is met on Add, once the account is typed or scanned
+   * (handleAddAccount), and nothing on the way there mentions it.
+   */
+  const openAddAccount = (tab: 'manual' | 'qr' = 'qr') => {
+    setAddTab(tab);
+    setShowAddModal(true);
+  };
+
+  /**
+   * Put a deleted account back, where it was.
+   *
+   * Through the same add as any other account, so the tombstone the delete
+   * left is lifted by the write itself (writeAccounts forgets the markers of
+   * whatever a save adds) — no second path into storage that could disagree
+   * with the first. Same id, name, group, colour and creation time: it is the
+   * object the list held. Then the manual order is put back around it.
+   */
+  const undoDelete = async (account: Account, previousIds: string[]) => {
+    try {
+      // Never counted against the limit: putting back what was just deleted.
+      const added = await addAccount(account, { kind: 'undo' });
+      if (added) {
+        const order = restoredOrder((await getAccounts()).map(a => a.id), account.id, previousIds);
+        // Best-effort: the account is back either way, and at the bottom of the
+        // list is a smaller problem than a failure message over a success.
+        if (order) await reorderAccounts(order).catch(error => console.warn('Could not restore the position:', error));
       }
       revealAccount(account);
-      toast('success', account.group ? t('accounts.addedToGroup', account.group) : t('accounts.added'));
+      toast('success', t('accounts.restored'));
+    } catch (error) {
+      // A vault locked in the meantime, a refused write. The offer is made
+      // again rather than lost with the toast that carried it.
+      console.error('Could not undo the delete:', error);
+      undoToastRef.current = toast('error', t('accounts.undoFailed'), {
+        action: { label: t('recovery.retry'), run: () => void undoDelete(account, previousIds) },
+      });
     }
   };
 
-  const handleDeleteAccount = async (id: string) => {
+  const handleDeleteAccount = useStableCallback(async (id: string) => {
     const account = accounts.find(a => a.id === id);
+    // Taken before the dialog: the list can change while it is open, and the
+    // position to restore is the one the user saw.
+    const previousIds = accounts.map(a => a.id);
     const confirmed = await confirmDialog({
       title: t('accounts.deleteAccount'),
       body: t('accounts.deleteConfirmMsg', account ? accountLabel(account) : ''),
@@ -592,13 +763,30 @@ function App() {
     if (!confirmed) return;
     try {
       await deleteAccount(id);
-      toast('success', t('accounts.deleted'));
     } catch (error) {
       // Silence here read as a delete that worked and an account that came back.
       console.error('Could not delete the account:', error);
       toast('error', t('accounts.deleteFailed'));
+      return;
     }
-  };
+
+    // Deleting is one click from an account the user may have no other way
+    // back into — the site's 2FA stays on — so it can be taken back for a few
+    // seconds. Without the object in hand (a row that was never in this list)
+    // there is nothing to put back, and the plain notice is all there is.
+    if (undoToastRef.current !== null) dismissToast(undoToastRef.current);
+    undoToastRef.current = account
+      ? toast('success', t('accounts.deleted'), {
+          action: {
+            label: t('common.undo'),
+            run: () => {
+              undoToastRef.current = null;
+              void undoDelete(account, previousIds);
+            },
+          },
+        })
+      : toast('success', t('accounts.deleted'));
+  });
 
   const handleEditAccount = async (id: string, updates: Partial<Account>) => {
     let found: boolean | void;
@@ -624,17 +812,30 @@ function App() {
     toast('success', t('accounts.updated'));
   };
 
-  const handleDragStart = (_e: React.DragEvent, id: string) => {
+  // Stable for the life of the page, so the memoised rows are not all redrawn
+  // on every render of the popup. They took inline arrows before — a new
+  // function per row per render — which made AccountCard's memo a no-op.
+  const handleDragStart = useCallback((_e: React.DragEvent, id: string) => {
     draggedIdRef.current = id;
-  };
+  }, []);
+
+  const handleDragOver = useCallback((_e: React.DragEvent, id: string) => {
+    // The same id again on every pointer move: setState with an unchanged
+    // value is dropped by React, so this does not re-render per event.
+    setDragOverId(id);
+  }, []);
+
+  const handleDragLeave = useCallback((id: string) => {
+    setDragOverId(current => (current === id ? null : current));
+  }, []);
 
   /** Whichever way a drag ends — a drop, a drop outside the list, Esc. */
-  const handleDragEnd = () => {
+  const handleDragEnd = useCallback(() => {
     draggedIdRef.current = null;
     setDragOverId(null);
-  };
+  }, []);
 
-  const handleDrop = async (_e: React.DragEvent, targetId: string) => {
+  const handleDrop = useStableCallback(async (_e: React.DragEvent, targetId: string) => {
     const draggedId = draggedIdRef.current;
     // Cleared before the write rather than after it: the write can take a
     // moment, and it can fail — either way the marker must not outlive the drop.
@@ -657,7 +858,7 @@ function App() {
       toast('error', t('accounts.reorderFailed'));
       reload();
     }
-  };
+  });
 
   const handleImportClick = () => {
     importInputRef.current?.click();
@@ -666,7 +867,48 @@ function App() {
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Cleared on every way out, so the same file can be picked again — after
+    // turning on Pro in the paywall it stopped, the likeliest next step.
+    const input = e.target;
+    try {
+      await importFile(file);
+    } finally {
+      input.value = '';
+    }
+  };
 
+  const importLinks = async (text: string) => {
+    const outcome = await addWithLimit('uri', origin => importURIList(text, language, origin));
+    if (!outcome) return;
+    if (outcome.added !== undefined) {
+      await markBackupDone((await getAccounts()).length);
+      setShowBackupReminder(false);
+      reload();
+    }
+    toast(outcome.kind, outcome.message);
+  };
+
+  // The first-run guide's own way to the box Settings → Paste links opens: the
+  // same dialog, so that nobody holding a list of links has to find Settings first.
+  const handlePasteLinks = async () => {
+    const text = await promptDialog({
+      title: t('import.pasteTitle'),
+      body: t('import.pasteBody'),
+      placeholder: 'otpauth://totp/…',
+      multiline: true,
+      confirmLabel: t('settings.import'),
+      cancelLabel: t('common.cancel'),
+    });
+    if (!text || !text.trim()) return;
+    try {
+      await importLinks(text);
+    } catch (error) {
+      console.error('Import failed:', error);
+      toast('error', importErrorMessage(error, language));
+    }
+  };
+
+  const importFile = async (file: File) => {
     let text = '';
 
     try {
@@ -675,13 +917,7 @@ function App() {
       } else if (((text = await file.text()), looksLikeURIList(text))) {
         // The .txt this extension writes has to come back in through the input
         // the onboarding points at, not only through the one in Settings.
-        const outcome = await importURIList(text, language);
-        if (outcome.added !== undefined) {
-          await markBackupDone((await getAccounts()).length);
-          setShowBackupReminder(false);
-          reload();
-        }
-        toast(outcome.kind, outcome.message);
+        await importLinks(text);
       } else {
         const imported = await importBackupText(text, () =>
           promptDialog({
@@ -690,7 +926,8 @@ function App() {
             password: true,
             confirmLabel: t('common.ok'),
             cancelLabel: t('common.cancel'),
-          })
+          }),
+          file.name
         );
         if (imported) {
           const currentAccounts = await getAccounts();
@@ -709,8 +946,6 @@ function App() {
       // export, or an Alibaba Cloud backup, each needs its own next step.
       toast('error', importErrorMessage(error, language));
     }
-
-    e.target.value = '';
   };
 
   const handleQRImport = async (file: File) => {
@@ -738,11 +973,11 @@ function App() {
       console.error('QR import failed:', error);
       // Understood, and refused on purpose — saying "invalid QR" here would
       // send the user off to re-export a code that can never work.
-      toast('error', t(error instanceof UnsupportedOTPTypeError ? 'addAccount.errorHotp' : 'addAccount.errorInvalidQR'));
+      toast('error', t(qrFailureKey(text, error)));
       return;
     }
     if (!parsed) {
-      toast('error', t('addAccount.errorInvalidQR'));
+      toast('error', t(qrFailureKey(text)));
       return;
     }
 
@@ -754,13 +989,19 @@ function App() {
       algorithm: accountData.algorithm,
       digits: accountData.digits,
       period: accountData.period,
+      ...(accountData.type ? { type: accountData.type } : {}),
       createdAt: Date.now() + index,
       color: generateRandomColor(),
     }));
 
     let result;
     try {
-      result = { ...(await addMultipleAccounts(accountsToAdd)), unsupported: parsed.skipped ?? 0 };
+      const migration = parsed.type === 'migration';
+      const added = await addWithLimit(migration ? 'migration' : 'qr', origin => addMultipleAccounts(accountsToAdd, origin), {
+        hold: migration ? undefined : accountsToAdd,
+      });
+      if (!added) return;
+      result = { ...added, unsupported: parsed.skipped ?? 0 };
     } catch (error) {
       console.error('Could not save the scanned accounts:', error);
       toast('error', saveErrorMessage(error, t));
@@ -781,18 +1022,43 @@ function App() {
   // into a search box hidden behind the What's New modal, and `inert`, which
   // keeps Tab and the mouse out of the list underneath — without it a second
   // full-screen view could be opened on top of the first from behind it.
+  //
+  // A confirmation counts too. It is drawn over everything, but the page under
+  // it stayed live: Tab walked out of "Delete account?" into the list behind
+  // it, and a screen reader could read and press the rows it was covering.
   const overlayOpen = Boolean(
-    showAddModal || editingAccount || sharingAccount || showVaultSetup || whatsNewVersion
+    showAddModal || editingAccount || sharingAccount || showVaultSetup || whatsNewVersion || dialogOpen || paywallOpen
+  );
+
+  useEffect(() => subscribeFeedback(state => setDialogOpen(state.dialog !== null)), []);
+  useEffect(
+    () =>
+      subscribePaywall(request => {
+        setPaywallOpen(request !== null);
+        // No rating or cross-promotion ask right after the money ask — also
+        // when one was already on screen before the paywall opened.
+        if (request) {
+          setShowReviewPrompt(false);
+          setShowPromoBanner(false);
+        }
+      }),
+    []
   );
 
   // Edit and Share each hold a whole decrypted account for as long as they are
   // open — secret included — and an idle lock in a window or side panel
   // arrives while one of them is. useAccounts drops its own copies; these are
   // the two nobody else owns.
+  //
+  // The Undo toast is a third: it holds the account it would put back.
   useEffect(() => {
     if (vault.enabled === true && vault.locked) {
       setEditingAccount(null);
       setSharingAccount(null);
+      if (undoToastRef.current !== null) {
+        dismissToast(undoToastRef.current);
+        undoToastRef.current = null;
+      }
     }
   }, [vault.enabled, vault.locked]);
 
@@ -849,38 +1115,11 @@ function App() {
   // exactly like "never finished setup", which is who the prompt must skip.
   useEffect(() => {
     if (loading || openCount === null) return;
-    shouldShowReviewPrompt(openCount, accounts.length).then(setShowReviewPrompt);
-  }, [loading, openCount, accounts.length]);
-
-  // The Product Hunt banner — see product-hunt.ts for when and why. Same
-  // readiness as the review ask above: while loading, and behind a locked
-  // vault, the list is empty and says nothing about the person holding it.
-  //
-  // Asked again every minute and whenever the page comes back into view, not
-  // only when the account count changes: a side panel or a floating window
-  // stays open for days, and one opened during the launch kept announcing it
-  // long after the day was over — and after it was dismissed in another window.
-  useEffect(() => {
-    if (loading || openCount === null || accounts.length === 0) return;
-    let cancelled = false;
-    const check = () => {
-      productHuntDue()
-        .then(due => {
-          if (!cancelled) setShowProductHunt(due);
-        })
-        .catch(() => {});
-    };
-    check();
-    const timer = window.setInterval(check, 60_000);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') check();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
+    // Not in the week after a paywall: asking for a rating straight after
+    // asking for money reads as the same request twice.
+    Promise.all([shouldShowReviewPrompt(openCount, accounts.length), recentlySawPaywall()]).then(([due, paywalled]) =>
+      setShowReviewPrompt(due && !paywalled)
+    );
   }, [loading, openCount, accounts.length]);
 
   const handleSnoozeReview = async () => {
@@ -892,8 +1131,8 @@ function App() {
   // box. Asking for a rating inside the popup and then routing only the happy
   // answers to the store is review gating — the kind of thing an extension
   // holding people's 2FA secrets cannot afford to be delisted over. Whoever
-  // wants to complain still has "Help & support" and "Request a feature" in the
-  // footer of every screen.
+  // wants to complain still has "Help & support" in the footer, and "Request a
+  // feature" at the end of Settings.
   const handleRate = async () => {
     setReviewDismissed(true);
     setShowReviewPrompt(false);
@@ -924,12 +1163,12 @@ function App() {
   }, [loading, accounts.length, vault.enabled]);
 
   // The vault offer is the notice up top that gives way to all the others — an
-  // error, the clock warning, the backup reminder, the Product Hunt banner — so
+  // error, the clock warning, the backup reminder — so
   // its three showings are counted when it is on screen, not when it is due.
   // Counted when due, someone with a backup reminder up on every open spent all
   // three without once seeing the offer.
   const vaultPromptVisible =
-    showVaultPrompt && !showBackupReminder && !showProductHunt && !error && timeOffsetSec === null && !showSettings;
+    showVaultPrompt && !showBackupReminder && !error && timeOffsetSec === null && !showSettings;
   const vaultPromptCounted = useRef(false);
   useEffect(() => {
     if (!vaultPromptVisible || vaultPromptCounted.current) return;
@@ -937,9 +1176,82 @@ function App() {
     markVaultPromptShown();
   }, [vaultPromptVisible]);
 
+  /**
+   * The account a blocked add was adding when the person went to Checkout
+   * (billing/held-add.ts): added once Pro is on, and said so. Until then,
+   * after this page's first check-in, the person is told once that it is
+   * waiting, with the way to let it go. Nothing while the vault is locked —
+   * the add waits for the unlock.
+   */
+  const settleHeldAdd = useStableCallback(async () => {
+    if (vault.enabled === null || (vault.enabled && vault.locked)) return;
+    const done = await finishHeldAdd();
+    if (done) {
+      if (done.added + done.updated === 0) return;
+      reload();
+      revealAccount(done.accounts[0]);
+      // Still on the add screen with that same account (side panel, floating
+      // window): it is in the list now, so the screen has done its job.
+      if (showAddModal && done.accounts.some(a => a.id === blockedAddIdRef.current)) setShowAddModal(false);
+      toast('success', t('billing.heldAdded', accountLabel(done.accounts[0]!)));
+      return;
+    }
+    if (!firstBillingSyncDone.current) return;
+    const waiting = await heldAddToMention();
+    if (!waiting) return;
+    toast('info', t('billing.heldWaiting', accountLabel(waiting[0]!)), {
+      action: { label: t('billing.heldDiscard'), run: () => void dismissHeldAdd() },
+    });
+  });
+
+  // Pro arriving — from this page's check-in, a key typed in another window,
+  // the service worker — is what finishes it.
+  useEffect(() => {
+    if (!chrome.storage?.onChanged?.addListener) return;
+    const onChanged = (changes: Record<string, { newValue?: unknown }>, areaName: string) => {
+      if (areaName === 'local' && changes[BILLING_KEYS.entitlement]?.newValue) void settleHeldAdd();
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, [settleHeldAdd]);
+
+  // And so is an unlock, if Pro came while the vault was locked.
+  useEffect(() => {
+    if (vault.enabled === false || (vault.enabled === true && !vault.locked)) void settleHeldAdd();
+  }, [vault.enabled, vault.locked, settleHeldAdd]);
+
+  // The daily billing check-in, after the list is on screen — never before it.
+  // A purchase started from this install is looked for on every open for a
+  // day, and again whenever this page comes back into view: in the side panel
+  // or the floating window the person returns here from the checkout tab.
+  useEffect(() => {
+    const run = async () => {
+      await syncBilling({ force: await hasPendingCheckout() });
+      firstBillingSyncDone.current = true;
+      await settleHeldAdd();
+    };
+    const idle = (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
+    const handle = idle ? idle(() => void run()) : window.setTimeout(() => void run(), 500);
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      void hasPendingCheckout().then(pending => {
+        if (pending) void syncBilling({ force: true });
+      });
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      if (!idle) window.clearTimeout(handle);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, []);
+
   // Cross-promo banner — only for users active for at least a week
   useEffect(() => {
-    recordFirstOpen().then(() => shouldShowPromoBanner().then(setShowPromoBanner));
+    recordFirstOpen().then(() =>
+      Promise.all([shouldShowPromoBanner(), recentlySawPaywall()]).then(([due, paywalled]) => setShowPromoBanner(due && !paywalled))
+    );
   }, []);
 
   // Opens the settings panel rather than exporting straight away: since 1.10.0
@@ -951,12 +1263,31 @@ function App() {
   };
 
   useEffect(() => {
+    // Every reading lands here, not only the one taken on open: the side panel
+    // and the floating window stay open for days, and watchClock goes on
+    // measuring for them — again after a failure, when the network returns,
+    // when the page is shown. Read once on mount, the banner and the Settings
+    // line described the clock as it was when the page opened, and a failed
+    // check on open left them saying "unknown" for good.
+    let cancelled = false;
+    const stopWatching = watchClock((result) => {
+      if (cancelled) return;
+      setClockStatus(clockStatusOf(result));
+      noticeFor(result)
+        .then((notice) => {
+          if (!cancelled) setTimeOffsetSec(notice);
+        })
+        .catch(() => {});
+    });
     // Restore any persisted clock correction first so codes are already adjusted,
     // then run the network re-check which refines/clears it and decides the notice.
-    loadTimeOffset().then(() => {
-      getTimeSyncNotice().then(setTimeOffsetSec);
-      getClockStatus().then(setClockStatus);
-    });
+    loadTimeOffset()
+      .then(() => checkTimeSync())
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      stopWatching();
+    };
   }, []);
 
   // Which site to suggest an account for, and where that comes from differs by
@@ -1026,24 +1357,26 @@ function App() {
                   146, uk 140, fr 137. The logo is 20px rather than 24 for the same
                   budget, and because 24px next to 18px text reads as hanging low. */}
               <div className="flex items-center gap-2 min-w-0">
-                <Logo size={20} className="flex-shrink-0" />
-                <h1 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">{t('app.title')}</h1>
+                <Logo bare size={20} className="flex-shrink-0" />
+                <h1 className="truncate text-lg font-semibold tracking-[-0.02em] text-gray-900 dark:text-gray-100">{t('app.title')}</h1>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
                 <button
                   onClick={handleThemeToggle}
                   className="p-1.5 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
                   title={t('theme.toggle')}
+                  aria-label={t('theme.toggle')}
+                  aria-pressed={darkMode}
                 >
                   {darkMode ? <Sun className="text-yellow-400" size={18} /> : <Moon className="text-gray-600" size={18} />}
                 </button>
-                <LanguageSelector language={language} onLanguageChange={handleLanguageChange} />
               </div>
             </div>
           </div>
           <LockScreen language={language} onUnlock={vault.unlock} onRecovered={vault.refresh} />
-          <SupportFooter language={language} />
+          <SupportFooter language={language} onLanguageChange={handleLanguageChange} />
           <FeedbackHost />
+          <PaywallHost language={language} />
         </div>
       </div>
     );
@@ -1070,18 +1403,36 @@ function App() {
           {/* min-w-0 + truncate + flex-shrink-0, all three: nothing here could
               shrink and nothing could ellipsize, so a long title pushed the icon
               row past the right edge and the root's overflow-hidden cut the gear
-              off. At the 320px popup the title has ~124px, which "Authenticator"
-              fills to 118. Four locales need more, measured: tr 151, ru
-              146, uk 140, fr 137. The logo is 20px rather than 24 for the same
-              budget, and because 24px next to 18px text reads as hanging low. */}
+              off. At the 320px popup the title had ~124px beside four icons,
+              which "Authenticator" fills to 118, and four locales need more,
+              measured: tr 151, ru 146, uk 140, fr 137. With the language moved
+              to the footer there are three icons and 34px more, which is what
+              lets those four through. The logo is 20px rather than 24 for the
+              same budget, and because 24px next to 18px text reads as hanging
+              low. It is the bare disc: on the white header the logo's white
+              tile only shrank the visible mark to 17px. */}
           {/* Settings is a screen, not an overlay, so the header says which
               screen you are on and offers the way back. A gear that stays lit
               does not read as "press again to leave" — people looked for a
-              back control and there wasn't one. */}
+              back control and there wasn't one.
+
+              An open branch of the first-run guide is the same kind of place,
+              so it gets the same header: the row that was picked becomes the
+              title, instead of repeating itself in a smaller one below. */}
           <div className="flex items-center gap-2 min-w-0">
-            {showSettings ? (
+            {showSettings || guidePath ? (
               <button
-                onClick={() => setShowSettings(false)}
+                ref={headerBackRef}
+                onClick={() => {
+                  if (!showSettings) {
+                    setOpenGuidePath(null);
+                    return;
+                  }
+                  setShowSettings(false);
+                  // The arrow goes with the screen; the gear that opened it
+                  // stays, and is where the keyboard picks up again.
+                  settingsButtonRef.current?.focus();
+                }}
                 aria-label={t('common.back')}
                 title={t('common.back')}
                 className="-ms-1 -me-1 flex-shrink-0 rounded-lg p-1 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-dark-700 dark:hover:text-gray-100"
@@ -1089,39 +1440,61 @@ function App() {
                 <ArrowLeft size={20} className="rtl:rotate-180" />
               </button>
             ) : (
-              <Logo size={20} className="flex-shrink-0" />
+              <Logo bare size={20} className="flex-shrink-0" />
             )}
-            <h1 className="truncate text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {showSettings ? t('header.settings') : t('app.title')}
+            {/* A guide row is a sentence, not a name. With three icons beside it
+                the title had 242px at the default 400px popup, and two lines at
+                16px held 79 of the 80 rows there (4 rows, 20 languages,
+                measured); the theme switch now steps aside on these screens
+                (see below), which gives the title 34px more. What still does
+                not fit, mostly at 320px, ends in an ellipsis rather than
+                pushing the gear out — which two of the branches send people to.
+                The negative margin keeps the header the height it has with one
+                line, so opening a branch does not move everything under it. */}
+            <h1
+              className={`font-semibold text-gray-900 dark:text-gray-100 ${
+                guidePath ? '-my-1.5 line-clamp-2 text-base leading-tight' : 'truncate text-lg tracking-[-0.02em]'
+              }`}
+              title={guidePath ? t(guidePath.label) : undefined}
+            >
+              {showSettings ? t('header.settings') : guidePath ? t(guidePath.label) : t('app.title')}
             </h1>
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
-            <button
-              onClick={handleThemeToggle}
-              className="p-1.5 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
-              title={t('theme.toggle')}
-            >
-              {darkMode ? (
-                <Sun className="text-yellow-400" size={18} />
-              ) : (
-                <Moon className="text-gray-600" size={18} />
-              )}
-            </button>
-            <LanguageSelector
-              language={language}
-              onLanguageChange={handleLanguageChange}
-            />
+            {/* Not while a branch of the guide is open: someone following steps
+                with a phone in the other hand is not choosing a theme, and the
+                title — a whole sentence there — needs the room. Help and
+                Settings stay: the steps send people to both. */}
+            {!guidePath && (
+              <button
+                onClick={handleThemeToggle}
+                className="p-1.5 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
+                title={t('theme.toggle')}
+                aria-label={t('theme.toggle')}
+                aria-pressed={darkMode}
+              >
+                {darkMode ? (
+                  <Sun className="text-yellow-400" size={18} />
+                ) : (
+                  <Moon className="text-gray-600" size={18} />
+                )}
+              </button>
+            )}
             {/* Opens the help page rather than a panel: the answers live on the
                 site now, in the reader's own language and with room to be read. */}
             <button
               onClick={() => chrome.tabs.create({ url: helpUrl(language) })}
               className="p-1.5 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
               title={t('header.faq')}
+              aria-label={t('header.faq')}
             >
               <HelpCircle className="text-gray-600 dark:text-gray-400" size={18} />
             </button>
             <button
+              ref={settingsButtonRef}
               onClick={() => setShowSettings(!showSettings)}
+              aria-label={t('header.settings')}
+              aria-pressed={showSettings}
               className={`p-1.5 rounded-lg transition-colors ${
                 showSettings ? 'bg-gray-200 dark:bg-dark-600' : 'hover:bg-gray-100 dark:hover:bg-dark-700'
               }`}
@@ -1134,7 +1507,7 @@ function App() {
 
         {/* Nothing to search until something is stored, and in the empty
             state the box is 44px of the pane the setup guide needs. */}
-        {!showSettings && accounts.length > 0 && <SearchBar ref={searchInputRef} className="mt-3" value={searchQuery} onChange={setSearchQuery} placeholder={t('search.placeholder')} />}
+        {!showSettings && accounts.length > 0 && <SearchBar ref={searchInputRef} className="mt-3" value={searchQuery} onChange={setSearchQuery} placeholder={t('search.placeholder')} clearLabel={t('search.clear')} />}
       </div>
 
       {/* Error/Warning Messages */}
@@ -1189,20 +1562,10 @@ function App() {
         </div>
       )}
 
-      {/* The Product Hunt launch, for the day it lasts. Above the codes rather
-          than in a modal: someone opening this mid-login is not stopped, and the
-          ask is still the first thing they see. For that one day it outranks the
-          backup reminder and the vault offer, which are back the day after, and
-          it gives way to an error and the clock warning — those are about the
-          codes being wrong. */}
-      {showProductHunt && !error && timeOffsetSec === null && !showSettings && (
-        <ProductHuntBanner language={language} onDismiss={() => setShowProductHunt(false)} />
-      )}
-
       {/* Backup Reminder */}
       {/* Not over Settings: its own Export button is on that screen, four lines
           below, and the strip's button only opens the screen you are on. */}
-      {showBackupReminder && !showProductHunt && !error && timeOffsetSec === null && !showSettings && (
+      {showBackupReminder && !error && timeOffsetSec === null && !showSettings && (
         <BackupReminder
           language={language}
           onExport={handleBackupFromReminder}
@@ -1227,192 +1590,224 @@ function App() {
           sharing one scroll made the popup read as a single long page. */}
       {showSettings && (
         <div className="flex-1 flex flex-col min-h-0 bg-gray-50 dark:bg-dark-800">
-          <div className="flex-1 overflow-y-auto p-4">
-          <h3 className="text-gray-900 dark:text-gray-100 font-medium mb-3 text-sm">{t('settings.backupRestore')}</h3>
-          <ExportImport onImportComplete={reload} onExportComplete={() => setShowBackupReminder(false)} language={language} />
+          {/* Sections run from what protects the codes, through what keeps them,
+              to how they look and where they show up — and every one is built
+              from the same parts (see SettingsSection). A new setting goes into
+              the section it belongs to, not onto the end. */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-5">
+            {/* First, and only when there is something to say (see ProSettings). */}
+            <ProSettings language={language} />
 
-          {/* Always here, whatever state the list is in: the copies are most
-              useful to someone who knew about them before they needed them. */}
-          <RestoreBackups backups={backups} language={language} onRestored={handleRestored} />
-
-          <SettingToggle
-            label={t('settings.sync')}
-            hint={t('settings.syncHint')}
-            checked={syncOn}
-            onChange={handleSyncToggle}
-          />
-
-          {syncOn && syncOverflow && (
-            <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-yellow-700 dark:text-yellow-500">
-              <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
-              {t('settings.syncOverflow')}
-            </p>
-          )}
-
-          {/* The clock, stated plainly — including when we could not check it.
-              Codes depend on it, and a check that quietly stopped running is
-              indistinguishable from a healthy one without a line like this. */}
-          <div className="mt-4 flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <span className="text-sm text-gray-700 dark:text-gray-300">{t('settings.clock')}</span>
-              <p
-                className={`mt-0.5 text-[11px] ${
-                  clockStatus?.state === 'off'
-                    ? 'text-yellow-700 dark:text-yellow-500'
-                    : 'text-gray-500 dark:text-gray-400'
-                }`}
-              >
-                {clockChecking
-                  ? t('settings.clockChecking')
-                  : clockStatus === null || clockStatus.state === 'unknown'
-                    ? t('settings.clockUnknown')
-                    : clockStatus.state === 'ok'
-                      ? t('settings.clockOk')
-                      : t(
-                          clockStatus.corrected ? 'settings.clockOff' : 'settings.clockOffUncorrected',
-                          Math.max(1, Math.round(Math.abs(clockStatus.offsetSeconds) / 60))
-                        )}
-              </p>
-            </div>
-            <button
-              onClick={async () => {
-                setClockChecking(true);
-                try {
-                  const status = await recheckClock();
-                  setClockStatus(status);
-                  setTimeOffsetSec(await getTimeSyncNotice());
-                } finally {
-                  setClockChecking(false);
-                }
+            <VaultSettings
+              language={language}
+              enabled={vault.enabled === true}
+              autoLockMinutes={vault.autoLockMinutes}
+              onEnableClick={() => setShowVaultSetup(true)}
+              onChanged={() => {
+                vault.refresh();
+                reload();
               }}
-              disabled={clockChecking}
-              className="mt-0.5 flex-shrink-0 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
-            >
-              {t('settings.clockRecheck')}
-            </button>
-          </div>
+              onLock={() => vault.lock()}
+              onAutoLockChange={vault.setAutoLockMinutes}
+            />
 
-          <SettingToggle
-            label={t('settings.avatars')}
-            hint={t('settings.avatarsHint')}
-            checked={showAvatars}
-            onChange={() => {
-              const next = !showAvatars;
-              setShowAvatars(next);
-              chrome.storage.local.set({ showAvatars: next });
-            }}
-          />
-
-          <SettingToggle
-            label={t('settings.suggested')}
-            hint={t('settings.suggestedHint')}
-            checked={suggestionsOn}
-            onChange={handleSuggestionsToggle}
-          />
-
-          <SettingToggle
-            label={t('settings.quickFill')}
-            hint={t('settings.quickFillHint')}
-            checked={quickFillOn}
-            onChange={handleQuickFillToggle}
-          />
-
-          <div className="mt-4 flex items-center justify-between">
-            <span className="text-sm text-gray-700 dark:text-gray-300">{t('settings.viewMode')}</span>
-            <div className="flex bg-gray-200 dark:bg-dark-600 rounded-lg p-0.5">
-              {([['normal', 'settings.viewNormal'], ['compact', 'settings.viewCompact'], ['hidden', 'settings.viewHidden']] as const).map(([mode, key]) => (
-                <button
-                  key={mode}
-                  onClick={() => { setViewMode(mode as ViewMode); chrome.storage.local.set({ viewMode: mode }); }}
-                  className={`text-xs font-medium px-2.5 py-1 rounded-md transition-colors ${
-                    viewMode === mode ? 'bg-white dark:bg-dark-800 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400'
-                  }`}
-                >
-                  {t(key)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-700 dark:text-gray-300">{t('settings.openIn')}</span>
-              <div className="flex bg-gray-200 dark:bg-dark-600 rounded-lg p-0.5">
-                {(
-                  [
-                    ['popup', 'settings.openInPopup'],
-                    ['window', 'settings.openInWindow'],
-                    // Chrome 114 added the side panel; older browsers are not
-                    // offered a mode that would leave the icon doing nothing.
-                    ...(sidePanelAvailable() ? [['sidepanel', 'settings.openInSidePanel'] as const] : []),
-                  ] as const
-                ).map(([mode, key]) => (
-                  <button
-                    key={mode}
-                    onClick={() => handleOpenModeChange(mode as OpenMode)}
-                    className={`text-xs font-medium px-2.5 py-1 rounded-md transition-colors ${
-                      openMode === mode
-                        ? 'bg-white dark:bg-dark-800 text-gray-900 dark:text-gray-100 shadow-sm'
-                        : 'text-gray-500 dark:text-gray-400'
-                    }`}
-                  >
-                    {t(key)}
-                  </button>
-                ))}
+            <SettingsSection title={t('settings.backupRestore')}>
+              <div className="p-3">
+                <ExportImport onImportComplete={reload} onExportComplete={() => setShowBackupReminder(false)} language={language} />
               </div>
-            </div>
-            <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{t('settings.openInHint')}</p>
-          </div>
 
-          {/* Only the popup is sized by its document; the other two are sized by
-              dragging their edges, so the preset would control nothing there. */}
-          {HOST === 'popup' && (
-          <div className="mt-4 flex items-center justify-between">
-            <span className="text-sm text-gray-700 dark:text-gray-300">{t('settings.popupSize')}</span>
-            <div className="flex bg-gray-200 dark:bg-dark-600 rounded-lg p-0.5">
-              {([['small', 'settings.sizeSmall'], ['medium', 'settings.sizeMedium'], ['large', 'settings.sizeLarge']] as const).map(([size, key]) => (
-                <button
-                  key={size}
-                  onClick={() => handlePopupSizeChange(size)}
-                  className={`text-xs font-medium px-2.5 py-1 rounded-md transition-colors ${
-                    popupSize === size ? 'bg-white dark:bg-dark-800 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400'
-                  }`}
-                >
-                  {t(key)}
-                </button>
-              ))}
-            </div>
-          </div>
-          )}
+              {/* Always here, whatever state the list is in: the copies are most
+                  useful to someone who knew about them before they needed them. */}
+              <RestoreBackups backups={backups} language={language} onRestored={handleRestored} />
 
-          <VaultSettings
-            language={language}
-            enabled={vault.enabled === true}
-            autoLockMinutes={vault.autoLockMinutes}
-            onEnableClick={() => setShowVaultSetup(true)}
-            onChanged={() => {
-              vault.refresh();
-              reload();
-            }}
-            onLock={() => vault.lock()}
-            onAutoLockChange={vault.setAutoLockMinutes}
-          />
-
-          {/* Selectable on purpose: the first thing a support reply asks for is
-              the version, and reading it off chrome://extensions means leaving
-              the popup to answer. */}
-          {APP_VERSION && (
-            <p className="mt-5 select-text text-center text-[11px] text-gray-400 dark:text-gray-500">
-              {t('settings.version', APP_VERSION)}
-              <span aria-hidden="true"> · </span>
-              <button
-                onClick={handleRate}
-                className="underline hover:text-gray-600 dark:hover:text-gray-300"
+              <SettingToggle
+                label={t('settings.sync')}
+                hint={t('settings.syncHint')}
+                checked={syncOn}
+                onChange={handleSyncToggle}
               >
-                {t('settings.rateUs')}
+                {syncOn && syncOverflow && (
+                  <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-yellow-700 dark:text-yellow-500">
+                    <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+                    {t('settings.syncOverflow')}
+                  </p>
+                )}
+              </SettingToggle>
+            </SettingsSection>
+
+            <SettingsSection title={t('settings.sectionList')}>
+              <SettingRow
+                label={t('settings.viewMode')}
+                control={
+                  <SegmentedControl
+                    label={t('settings.viewMode')}
+                    value={viewMode}
+                    options={[
+                      ['normal', t('settings.viewNormal')],
+                      ['compact', t('settings.viewCompact')],
+                      ['hidden', t('settings.viewHidden')],
+                    ]}
+                    onChange={mode => {
+                      setViewMode(mode);
+                      chrome.storage.local.set({ viewMode: mode });
+                    }}
+                  />
+                }
+              />
+
+              {/* The hint is said here, where the choice is made: a drag handle
+                  that simply stops appearing reads as a bug. */}
+              <SettingRow
+                label={t('settings.sort')}
+                hint={t('settings.sortHint')}
+                control={
+                  <SegmentedControl
+                    label={t('settings.sort')}
+                    value={sortOrder}
+                    options={[
+                      ['manual', t('settings.sortManual')],
+                      ['service', t('settings.sortService')],
+                      ['name', t('settings.sortName')],
+                    ]}
+                    onChange={handleSortOrderChange}
+                  />
+                }
+              />
+
+              <SettingToggle
+                label={t('settings.avatars')}
+                hint={t('settings.avatarsHint')}
+                checked={showAvatars}
+                onChange={() => {
+                  const next = !showAvatars;
+                  setShowAvatars(next);
+                  chrome.storage.local.set({ showAvatars: next });
+                }}
+              />
+            </SettingsSection>
+
+            <SettingsSection title={t('settings.sectionBrowser')}>
+              <SettingRow
+                label={t('settings.openIn')}
+                hint={t('settings.openInHint')}
+                control={
+                  <SegmentedControl
+                    label={t('settings.openIn')}
+                    value={openMode}
+                    options={[
+                      ['popup', t('settings.openInPopup')],
+                      ['window', t('settings.openInWindow')],
+                      // Chrome 114 added the side panel; older browsers are not
+                      // offered a mode that would leave the icon doing nothing.
+                      ...(sidePanelAvailable() ? [['sidepanel', t('settings.openInSidePanel')] as const] : []),
+                    ]}
+                    onChange={mode => void handleOpenModeChange(mode)}
+                  />
+                }
+              />
+
+              {/* Only the popup is sized by its document; the other two are sized by
+                  dragging their edges, so the preset would control nothing there. */}
+              {HOST === 'popup' && (
+                <SettingRow
+                  label={t('settings.popupSize')}
+                  control={
+                    <SegmentedControl
+                      label={t('settings.popupSize')}
+                      value={popupSize}
+                      options={[
+                        ['small', t('settings.sizeSmall')],
+                        ['medium', t('settings.sizeMedium')],
+                        ['large', t('settings.sizeLarge')],
+                      ]}
+                      onChange={handlePopupSizeChange}
+                    />
+                  }
+                />
+              )}
+
+              <SettingToggle
+                label={t('settings.suggested')}
+                hint={t('settings.suggestedHint')}
+                checked={suggestionsOn}
+                onChange={handleSuggestionsToggle}
+              />
+
+              <SettingToggle
+                label={t('settings.quickFill')}
+                hint={t('settings.quickFillHint')}
+                checked={quickFillOn}
+                onChange={handleQuickFillToggle}
+              />
+            </SettingsSection>
+
+            {/* The clock, stated plainly — including when we could not check it.
+                Codes depend on it, and a check that quietly stopped running is
+                indistinguishable from a healthy one without a line like this. */}
+            <SettingsSection title={t('settings.sectionDiagnostics')}>
+              <SettingRow
+                label={t('settings.clock')}
+                tone={clockStatus?.state === 'off' ? 'warn' : undefined}
+                hint={
+                  clockChecking
+                    ? t('settings.clockChecking')
+                    : clockStatus === null || clockStatus.state === 'unknown'
+                      ? t('settings.clockUnknown')
+                      : clockStatus.state === 'ok'
+                        ? t('settings.clockOk')
+                        : t(
+                            clockStatus.corrected ? 'settings.clockOff' : 'settings.clockOffUncorrected',
+                            Math.max(1, Math.round(Math.abs(clockStatus.offsetSeconds) / 60))
+                          )
+                }
+                control={
+                  <button
+                    onClick={async () => {
+                      setClockChecking(true);
+                      try {
+                        const status = await recheckClock();
+                        setClockStatus(status);
+                        setTimeOffsetSec(await getTimeSyncNotice());
+                      } finally {
+                        setClockChecking(false);
+                      }
+                    }}
+                    disabled={clockChecking}
+                    className={settingsButton.link}
+                  >
+                    {t('settings.clockRecheck')}
+                  </button>
+                }
+              />
+            </SettingsSection>
+
+            {/* The last thing on the screen: the public board for ideas. It
+                used to be in the footer of every screen. */}
+            <div className="space-y-2 text-center">
+              <button
+                onClick={() => chrome.tabs.create({ url: FEATURE_REQUEST_URL })}
+                className={`${settingsButton.link} inline-flex items-center gap-1.5`}
+              >
+                <Lightbulb size={13} />
+                {t('common.requestFeature')}
               </button>
-            </p>
-          )}
+
+              {/* Selectable on purpose: the first thing a support reply asks for is
+                  the version, and reading it off chrome://extensions means leaving
+                  the popup to answer. */}
+              {APP_VERSION && (
+                <p className="select-text text-[11px] text-gray-500 dark:text-gray-400">
+                  {t('settings.version', APP_VERSION)}
+                  <span aria-hidden="true"> · </span>
+                  <button
+                    onClick={handleRate}
+                    className="underline hover:text-gray-600 dark:hover:text-gray-300"
+                  >
+                    {t('settings.rateUs')}
+                  </button>
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1433,7 +1828,18 @@ function App() {
 
       {/* Accounts List */}
       {!showSettings && (
-      <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-dark-900">
+      // A column under the setup guide only, so an open branch can grow to the
+      // pane's height and keep its buttons on the bottom edge. A percentage
+      // height would not do it: the popup's root has a min and a max height
+      // and no height, so there is nothing for a percentage to resolve against.
+      // For the same reason the list's white cannot stretch itself down to the
+      // FAB, so the pane takes the list's colour: two codes otherwise sat on a
+      // white strip over a grey void.
+      <div
+        className={`flex-1 overflow-y-auto ${
+          listView === 'list' ? 'bg-white dark:bg-dark-800' : 'bg-gray-50 dark:bg-dark-900'
+        } ${listView === 'empty' ? 'flex flex-col' : ''}`}
+      >
         {listView === 'loading' ? (
           <div className="flex items-center justify-center h-full">
             <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 dark:border-dark-600 border-t-gray-900 dark:border-t-gray-300"></div>
@@ -1480,7 +1886,7 @@ function App() {
                   setSearchQuery('');
                   handleGroupChange(null);
                 }}
-                className="text-xs font-medium text-[#4285F4] hover:underline"
+                className="text-xs font-medium text-[#1a73e8] dark:text-[#669DF6] hover:underline"
               >
                 {t('accounts.clearFilters')}
               </button>
@@ -1498,8 +1904,13 @@ function App() {
               )}
               <EmptyStateGuide
                 language={language}
-                onAddAccount={() => setShowAddModal(true)}
+                openPath={openGuidePath}
+                onOpenPath={setOpenGuidePath}
+                onBack={() => setOpenGuidePath(null)}
+                onAddAccount={() => openAddAccount()}
+                onEnterKey={() => openAddAccount('manual')}
                 onImport={handleImportClick}
+                onPasteLinks={() => void handlePasteLinks()}
                 onScanWithCamera={() =>
                   chrome.tabs.create({ url: chrome.runtime.getURL('scan.html') })
                 }
@@ -1513,11 +1924,11 @@ function App() {
                 {/* AccountCard must stay the last child so its own `last:after:hidden`
                     divider rule kicks in — the section strip below handles separation. */}
                 <div>
-                  <div className="px-4 pt-2.5 pb-1 flex items-center gap-1.5 text-[11px] font-medium text-[#4285F4]">
+                  <div className="px-4 pt-2.5 pb-1 flex items-center gap-1.5 text-[11px] font-medium text-[#1a73e8] dark:text-[#669DF6]">
                     <Sparkles size={12} />
                     <span>{t('accounts.suggested')}</span>
                     {currentDomain && (
-                      <span className="text-gray-400 dark:text-gray-500 font-normal truncate">
+                      <span className="text-gray-500 dark:text-gray-400 font-normal truncate">
                         · {getBaseDomain(currentDomain)}
                       </span>
                     )}
@@ -1554,12 +1965,14 @@ function App() {
                 showAvatar={showAvatars}
                 // handleDrop rewrites the order of the full list, so dragging
                 // inside a filtered view would reorder against indices the user
-                // cannot see. Off while filtered, as it already is while searching.
-                draggable={!isFiltered}
+                // cannot see. Off while filtered, as it already is while searching,
+                // and off while the list is sorted — a drop there would move a
+                // row the sort puts straight back.
+                draggable={canReorder}
                 onDragStart={handleDragStart}
-                onDragOver={() => setDragOverId(account.id)}
+                onDragOver={handleDragOver}
                 onDrop={handleDrop}
-                onDragLeave={id => setDragOverId(current => (current === id ? null : current))}
+                onDragLeave={handleDragLeave}
                 onDragEnd={handleDragEnd}
                 isDragOver={dragOverId === account.id}
                 currentDomain={currentDomain}
@@ -1579,7 +1992,7 @@ function App() {
                 pitch, so the card behind it is the identical ask twice on one
                 screen — and on the 1.11.0 rollout that modal opens for everyone
                 at once. */}
-            {!isFiltered && whatsNewVersion === null && !showProductHunt &&
+            {!isFiltered && whatsNewVersion === null &&
               (showReviewPrompt ? (
                 <ReviewPrompt language={language} onRate={handleRate} onSnooze={handleSnoozeReview} />
               ) : showPromoBanner ? (
@@ -1594,17 +2007,18 @@ function App() {
           takes space from them. It belongs where someone is likely to be stuck —
           an empty list, settings, and the lock screen. */}
       {(accounts.length === 0 || showSettings) && (
-        <SupportFooter language={language} />
+        <SupportFooter language={language} onLanguageChange={handleLanguageChange} />
       )}
 
       {/* Add Button (Floating Action Button) */}
       {!showSettings && accounts.length > 0 && (
         <button
-          onClick={() => setShowAddModal(true)}
-          className="fixed bottom-4 end-4 w-14 h-14 bg-[#4285F4] hover:bg-[#3367D6] text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center"
+          onClick={() => openAddAccount()}
+          className="fixed bottom-4 end-4 w-14 h-14 bg-[#1a73e8] hover:bg-[#1967D2] text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center"
           title={t('accounts.addAccount')}
+          aria-label={t('accounts.addAccount')}
         >
-          <Plus size={24} />
+          <Plus size={24} aria-hidden />
         </button>
       )}
       </div>
@@ -1617,6 +2031,7 @@ function App() {
           language={language}
           groups={groups.map(group => group.name)}
           defaultGroup={activeGroup ?? ''}
+          initialTab={addTab}
         />
       )}
 
@@ -1670,12 +2085,13 @@ function App() {
       <input
         ref={importInputRef}
         type="file"
-        accept="application/json,text/plain,image/*"
+        accept="application/json,text/plain,image/*,.maFile"
         onChange={handleImportFile}
         className="hidden"
       />
 
       <FeedbackHost />
+      <PaywallHost language={language} />
       </div>
     </div>
   );

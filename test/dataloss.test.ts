@@ -10,9 +10,10 @@ import {
   resetState,
   resetStateFreshProfile,
   scenario,
+  SYNC_QUOTA_BYTES_PER_ITEM,
   syncAccountKeys,
-  throwsNamed,
-} from './harness';
+  syncItemBytes,
+  throwsNamed, USER_ADD } from './harness';
 
 const PASSWORD = 'correct horse battery staple';
 
@@ -62,7 +63,7 @@ export async function run(): Promise<void> {
   areas.local.authenticator_accounts = [...ACCOUNTS.map(a => ({ ...a })), ...respelled];
   check('the duplicates are folded for display', (await storage.getAccounts()).length === 3);
   let addError: unknown = null;
-  await storage.addAccount(extra as any).catch(e => { addError = e; });
+  await storage.addAccount(extra as any, USER_ADD).catch(e => { addError = e; });
   check('adding an account succeeds', addError === null, String(addError));
   check('the new account is there', (await storage.getAccounts()).some(a => a.id === 'a4'));
   check('writing fewer than the visible accounts is still refused',
@@ -73,7 +74,7 @@ export async function run(): Promise<void> {
   scenario('Replaying a held push keeps the accounts that arrived from sync');
   await resetStateFreshProfile();
   await storage.getAccounts();
-  await storage.addAccount({ ...extra, id: 'fresh' } as any);
+  await storage.addAccount({ ...extra, id: 'fresh' } as any, USER_ADD);
   await flush();
   const fromOldMachine = Array.from({ length: 30 }, (_, i) => ({
     ...ACCOUNTS[0], id: `o${i}`, name: 'x'.repeat(300), secret: 'JBSWY3DPEHPK3PX' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[i],
@@ -95,7 +96,7 @@ export async function run(): Promise<void> {
     { ...extra, id: 'a1' },                                         // new seed, taken id
     { ...extra, id: 'x2', secret: extra.secret.toLowerCase() },     // same seed again
   ];
-  const imported = await storage.importAccounts(JSON.stringify(importFile));
+  const imported = await storage.importAccounts(JSON.stringify(importFile), USER_ADD);
   const afterImport = await storage.getAccounts();
   check('one account is reported added', imported.added === 1, String(imported.added));
   check('one record is written', (areas.local.authenticator_accounts as any[]).length === 4,
@@ -104,9 +105,9 @@ export async function run(): Promise<void> {
   check('the original a1 is untouched', afterImport.find(a => a.id === 'a1')?.secret === ACCOUNTS[0].secret);
 
   scenario('Adding a seed that is already here says so');
-  check('a new seed reports added', await storage.addAccount({ ...extra, id: 'y1', secret: 'KRUGS4ZANFZSAYJA' } as any));
+  check('a new seed reports added', await storage.addAccount({ ...extra, id: 'y1', secret: 'KRUGS4ZANFZSAYJA' } as any, USER_ADD));
   check('the same seed again reports not added',
-    !(await storage.addAccount({ ...extra, id: 'y2', secret: 'kruGS4ZA NFZSAYJA' } as any)));
+    !(await storage.addAccount({ ...extra, id: 'y2', secret: 'kruGS4ZA NFZSAYJA' } as any, USER_ADD)));
 
   // A drag in the popup used to delete anything the stale React state had not
   // mentioned — e.g. an account the scanner tab had just added.
@@ -169,8 +170,14 @@ export async function run(): Promise<void> {
   // accounts — ~22 once encryption roughly doubles each record.
   scenario('Large collections still reach sync');
   await resetState();
+  //
+  // Names in Cyrillic and CJK on purpose. Chrome charges UTF-8 bytes of key
+  // plus value, and `String.length` counts UTF-16 units: a Cyrillic letter is
+  // two bytes for one unit, a CJK one three. Measured the old way, ASCII-only
+  // names could never show a chunk sized by the wrong ruler.
+  const scripts = ['почта.иванов@пример.рф', '北京总部财务部门工作邮箱张伟的账户', 'ユーザー田中太郎の会社アカウント'];
   const many = Array.from({ length: 120 }, (_, i) => ({
-    id: `m${i}`, name: `user${i}@example.com`, issuer: 'Some Service',
+    id: `m${i}`, name: `${scripts[i % 3]} ${i}`, issuer: i % 2 ? 'Госуслуги' : '支付宝 Alipay',
     secret: `JBSWY3DPEHPK3PX${String(i).padStart(3, '0')}`,
     algorithm: 'SHA1', digits: 6, period: 30, createdAt: 1700000000000 + i, color: '#4285f4',
   })) as any[];
@@ -178,10 +185,11 @@ export async function run(): Promise<void> {
   await flush();
 
   const syncKeys = syncAccountKeys();
+  const itemBytes = syncKeys.map(k => syncItemBytes(k, areas.sync[k]));
   check('the accounts are split across several keys', syncKeys.length > 1, `${syncKeys.length} key(s)`);
-  check('no single key exceeds the 8 KB limit',
-    syncKeys.every(k => JSON.stringify(areas.sync[k]).length < 8192),
-    `largest ${Math.max(...syncKeys.map(k => JSON.stringify(areas.sync[k]).length))} bytes`);
+  check('no single key exceeds the 8 KB limit, in UTF-8 bytes',
+    itemBytes.every(bytes => bytes <= SYNC_QUOTA_BYTES_PER_ITEM),
+    `largest ${Math.max(...itemBytes)} bytes`);
   const roundTripped = syncKeys
     .filter(k => /_\d+$/.test(k))
     .sort((a, b) => Number(a.split('_').pop()) - Number(b.split('_').pop()))
@@ -189,8 +197,12 @@ export async function run(): Promise<void> {
   check('every account is present in sync', roundTripped.length === 120, `${roundTripped.length}`);
   check('no overflow was recorded', !(await storage.hasSyncOverflowed()));
 
+  // Shrunk by deleting, the way the list really shrinks. A bare save of a
+  // shorter list no longer takes accounts out of sync: every push merges what
+  // sync holds, so only what this device marked deleted is left behind — which
+  // is what keeps a push from wiping an account another device just added.
   scenario('Shrinking the list clears the leftover chunks');
-  await storage.saveAccounts(many.slice(0, 10), { allowShrink: true });
+  for (const gone of many.slice(10)) await storage.deleteAccount(gone.id);
   await flush();
   const afterShrink = syncAccountKeys();
   check('stale chunks are removed', afterShrink.length < syncKeys.length, `${afterShrink.length} left`);
@@ -254,7 +266,7 @@ export async function run(): Promise<void> {
   await storage.addAccount({
     id: 'late', name: 'added-during-setup', issuer: 'Scanner',
     secret: 'NBSWY3DPEHPK3PXQ', algorithm: 'SHA1', digits: 6, period: 30, createdAt: 99,
-  } as any);
+  } as any, USER_ADD);
   await pending.commit();
   await flush();
   const afterLate = await storage.getAccounts();
@@ -348,7 +360,7 @@ export async function run(): Promise<void> {
     const here = (await storage.getAccounts()).map(a => a.id).join();
     check('its accounts are not pulled onto this device', here === 'a1', here);
     await storage.updateAccount('a1', { name: 'renamed' });
-    await storage.addAccount({ ...ACCOUNTS[0], id: 'a4', secret: 'NBSWY3DPEB3W64TM' });
+    await storage.addAccount({ ...ACCOUNTS[0], id: 'a4', secret: 'NBSWY3DPEB3W64TM' }, USER_ADD);
     await flush();
     check('and a save here does not delete them from sync', syncAccountKeys().length === 1 && (areas.sync.authenticator_accounts_0 as any[]).length === 2);
   }
@@ -390,7 +402,7 @@ export async function run(): Promise<void> {
     // Held, but not an account under some other password — the banner that
     // says so sent people with protection off looking for one.
     check('and not counted as locked away', storage.lockedAwayCount() === 0, String(storage.lockedAwayCount()));
-    const added = await storage.addAccount({ ...ACCOUNTS[0], id: 'a4', secret: 'NBSWY3DPEB3W64TM' }).catch(error => error);
+    const added = await storage.addAccount({ ...ACCOUNTS[0], id: 'a4', secret: 'NBSWY3DPEB3W64TM' }, USER_ADD).catch(error => error);
     check('an account can still be added', added === true, String(added));
     const kept = areas.local.authenticator_accounts as any[];
     check('a save keeps what it could not read', kept.includes(null) && kept.includes('garbage'), JSON.stringify(kept.slice(-5)));
@@ -479,6 +491,138 @@ export async function run(): Promise<void> {
     const ids = (await storage.getAccounts()).map(a => a.id).join();
     faults.failSyncSet = false;
     check('neither copy comes back', ids === 'a2', ids);
+  }
+
+  // The marker used to name a seed only in the form it was stored in when it
+  // was deleted: the secret with protection off, the fingerprint with it on.
+  // Switch protection over, and another device's copy arrives in the other
+  // form — and came back.
+  {
+    const crypto = await import('@/utils/crypto');
+    /** Another device's copy of an account, sealed under this device's vault. */
+    const sealed = async (account: any) => {
+      const meta = await vault.getVaultMeta();
+      const { dataKey, fingerprintKey } = await vault.deriveKeys((await vault.getMasterKeyBytes())!);
+      const { id, ...fields } = account;
+      return {
+        id,
+        v: meta!.vaultId,
+        fp: await crypto.fingerprintSecret(fingerprintKey, account.secret),
+        enc: await crypto.encryptJson(fields, dataKey),
+      };
+    };
+
+    scenario('An account deleted before protection was switched on stays deleted after');
+    await resetState();
+    await storage.saveAccounts([ACCOUNTS[0], ACCOUNTS[1]]);
+    await flush();
+    await storage.deleteAccount('a1');
+    await flush();
+    areas.sync.authenticator_accounts_0 = [ACCOUNTS[0], ACCOUNTS[1]];
+    check('a cleartext copy is kept out', (await storage.getAccounts()).map(a => a.id).join() === 'a2');
+    await (await storage.prepareVault(PASSWORD)).commit();
+    await flush();
+    areas.sync.authenticator_accounts_0 = [await sealed(ACCOUNTS[0]), await sealed(ACCOUNTS[1])];
+    await vault.lock();
+    // Locked, the copy cannot be opened to see which seed it is — and a
+    // fingerprint no marker names is not the same as "not deleted".
+    await storage.getStoredAccounts().catch(() => {});
+    await vault.unlockWithPassword(PASSWORD);
+    {
+      const ids = (await storage.getAccounts()).map(a => a.id).join();
+      check('an encrypted copy is kept out too', ids === 'a2', ids);
+    }
+
+    scenario('An account deleted under protection stays deleted once it is off');
+    await resetState();
+    await storage.saveAccounts([ACCOUNTS[0], ACCOUNTS[1]]);
+    await (await storage.prepareVault(PASSWORD)).commit();
+    await flush();
+    await storage.deleteAccount('a1');
+    await flush();
+    // An older device still pushing cleartext, while protection is on here…
+    areas.sync.authenticator_accounts_0 = [{ ...ACCOUNTS[0], secret: 'jbsw y3dp ehpk 3pxp' }];
+    {
+      const ids = (await storage.getAccounts()).map(a => a.id).join();
+      check('a cleartext copy is kept out under the vault', ids === 'a2', ids);
+    }
+    // …and after it is switched off.
+    await storage.disableVault(PASSWORD);
+    await flush();
+    areas.sync.authenticator_accounts_0 = [ACCOUNTS[0], ACCOUNTS[1]];
+    {
+      const ids = (await storage.getAccounts()).map(a => a.id).join();
+      check('and with the vault off', ids === 'a2', ids);
+    }
+
+    // What 1.13.3 recorded for a delete under a vault: the fingerprint alone.
+    scenario('A deletion recorded by an older build as a fingerprint still keeps cleartext out');
+    await resetState();
+    await storage.saveAccounts([ACCOUNTS[1]]);
+    await (await storage.prepareVault(PASSWORD)).commit();
+    await flush();
+    const tombstones = await import('@/utils/tombstones');
+    await tombstones.markDeleted([(await sealed(ACCOUNTS[0])).fp]);
+    areas.sync.authenticator_accounts_0 = [ACCOUNTS[0]];
+    {
+      const ids = (await storage.getAccounts()).map(a => a.id).join();
+      check('the cleartext copy is kept out', ids === 'a2', ids);
+    }
+    await storage.addAccount(ACCOUNTS[0], USER_ADD);
+    {
+      const ids = (await storage.getAccounts()).map(a => a.id).sort().join();
+      check('and adding it back here still works', ids === 'a1,a2', ids);
+    }
+  }
+
+  // Replacing an "Invalid key" changes the seed under the same card. The old
+  // seed's sync copy is still up there — for good, when sync writes are being
+  // refused — and with no marker the next read took it for another device's
+  // account: the broken card, back beside the repaired one.
+  scenario('A replaced key does not come back from sync as a second card');
+  await resetState();
+  {
+    const broken = { ...ACCOUNTS[1], id: 'bad', secret: 'AB1' };
+    await storage.saveAccounts([ACCOUNTS[0], broken]);
+    await flush();
+    faults.failSyncSet = true;
+    await storage.updateAccount('bad', { secret: 'MFRGGZDFMZTWQ2LK' });
+    await flush();
+    const loaded = (await storage.getAccounts()).map(a => `${a.id}:${a.secret}`).join();
+    faults.failSyncSet = false;
+    check('only the repaired card is there', loaded === 'a1:JBSWY3DPEHPK3PXP,bad:MFRGGZDFMZTWQ2LK', loaded);
+  }
+
+  // A save's push used to send local alone and prune every chunk beyond it.
+  // An account another device wrote to sync after this one's last read was
+  // not in local, so the push overwrote it — and it never reached local
+  // either. Here the other device's write lands the moment this one saves.
+  scenario("A save's push keeps an account another device has just put in sync");
+  await resetState();
+  await storage.saveAccounts([ACCOUNTS[0]]);
+  await flush();
+  {
+    const local: any = chrome.storage.local;
+    const set = local.set;
+    let landed = false;
+    local.set = async (items: Record<string, unknown>, ...rest: unknown[]) => {
+      const result = await set.call(local, items, ...rest);
+      if (!landed && 'authenticator_accounts' in items) {
+        landed = true;
+        areas.sync.authenticator_accounts_0 = [...(areas.sync.authenticator_accounts_0 as any[]), ACCOUNTS[2]];
+      }
+      return result;
+    };
+    try {
+      await storage.updateAccount('a1', { name: 'renamed' });
+      await flush();
+    } finally {
+      local.set = set;
+    }
+    const inSync = (areas.sync.authenticator_accounts_0 as any[]).map(r => r.id).sort().join();
+    check('the other device\'s account is still in sync', inSync === 'a1,a3', inSync);
+    const ids = (await storage.getAccounts()).map(a => a.id).sort().join();
+    check('and reaches this device', ids === 'a1,a3', ids);
   }
 
   scenario('Editing an account that is already gone says so');

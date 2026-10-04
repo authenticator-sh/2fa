@@ -112,6 +112,37 @@ export async function run(): Promise<void> {
   check('round-trips exactly', JSON.stringify(await backupFile.readEncryptedBackupFile(file, 'file password')) === JSON.stringify(accounts));
   check('a plain export is not mistaken for an encrypted one', !backupFile.isEncryptedBackupFile(backupFile.buildPlainBackupFile(accounts)));
 
+  // The count comes from the file and PBKDF2 runs on the popup's thread: a
+  // crafted file with iterations 1e10 froze the popup for hours.
+  scenario('An encrypted export cannot ask for an absurd amount of work');
+  const parsed = JSON.parse(file);
+  check('what every version wrote is accepted',
+    parsed.iterations === 600_000 &&
+      parsed.iterations >= backupFile.MIN_BACKUP_ITERATIONS &&
+      parsed.iterations <= backupFile.MAX_BACKUP_ITERATIONS);
+  const withIterations = (iterations: unknown) => JSON.stringify({ ...parsed, iterations });
+  const refusedFast = async (iterations: unknown) => {
+    const outcome = await Promise.race([
+      backupFile.readEncryptedBackupFile(withIterations(iterations), 'file password').then(
+        () => 'opened',
+        (error: Error) => error.name
+      ),
+      new Promise<string>(resolve => setTimeout(() => resolve('still deriving'), 2_000)),
+    ]);
+    return outcome === 'DamagedBackupFileError';
+  };
+  check('ten billion is refused before any derivation', await refusedFast(1e10));
+  check('so is just past the ceiling', await refusedFast(backupFile.MAX_BACKUP_ITERATIONS + 1));
+  // Before the bounds these came back as "wrong password" — for the right one.
+  check('and a count too low to be ours', await refusedFast(1));
+  check('and one that is not a whole number', await refusedFast(600_000.5));
+  check('and a missing one', await refusedFast(undefined));
+  check('and one written as a string', await refusedFast('600000'));
+  const messages = await import('@/utils/import-message');
+  const damagedText = messages.importErrorMessage(new backupFile.DamagedBackupFileError('x'), 'en');
+  check('the refusal is said as such, not as "check the file format"',
+    /damaged or was made by a newer version/.test(damagedText), damagedText);
+
   // --- disabling ---------------------------------------------------------
   scenario('Disabling the vault');
   check('a wrong password cannot disable it', await throwsNamed('WrongPasswordError', () => storage.disableVault('nope')));
@@ -175,6 +206,93 @@ export async function run(): Promise<void> {
   await flush();
   check('the key is gone from the session', !areas.session.vault_session);
   check('and the vault reads as locked', !(await vault.isUnlocked()));
+
+  // "Every time" used to change the setting and nothing else: the key stayed
+  // in session storage, where 0 checks no deadline, so the next popup — hours
+  // later — opened without a password, and quick fill in the service worker
+  // could read the key all along.
+  scenario('Switching to "password every time" takes the key out of shared storage');
+  await vault.lock();
+  await vault.setAutoLockMinutes(15);
+  await vault.unlockWithPassword(PASSWORD);
+  await flush();
+  check('unlocked on 15 minutes, the key is in session storage', !!areas.session.vault_session);
+  await vault.setAutoLockMinutes(0);
+  await flush();
+  check('switching to 0 removes it', !areas.session.vault_session);
+  check('this page stays open — the user is looking at it', await vault.isUnlocked());
+  check('and reading the key keeps it out of storage', !areas.session.vault_session);
+
+  const otherContext = () =>
+    import(new URL(`../src/utils/vault.ts?ctx=autolock-${Math.random()}`, import.meta.url).href) as Promise<
+      typeof import('@/utils/vault')
+    >;
+  const realNow = Date.now;
+  try {
+    Date.now = () => realNow() + 5 * 3600_000;
+    const later = await otherContext();
+    check('a popup opened five hours later asks for the password', !(await later.isUnlocked()));
+    check('and so does anything else reading the key — quick fill included',
+      (await later.getMasterKeyBytes()) === null);
+  } finally {
+    Date.now = realNow;
+  }
+
+  scenario('A key left in session storage on "every time" is treated as expired');
+  const leftover = { mk: Buffer.from((await vault.getMasterKeyBytes())!).toString('base64'), lastActivity: Date.now() };
+  areas.session.vault_session = leftover; // written before the switch, or by a racing context
+  const fresh = await otherContext();
+  check('another context does not take it, however recent', (await fresh.getMasterKeyBytes()) === null);
+  check('and it is cleared rather than left behind', !areas.session.vault_session);
+  check('the page that switched still has its own copy', await vault.isUnlocked());
+
+  scenario('"Until the browser closes" is untouched');
+  await vault.lock();
+  await vault.setAutoLockMinutes(-1);
+  await vault.unlockWithPassword(PASSWORD);
+  await flush();
+  check('the key is shared with other contexts', !!areas.session.vault_session);
+  areas.session.vault_session = { ...(areas.session.vault_session as any), lastActivity: Date.now() - 5 * 3600_000 };
+  check('and still opens them hours later', await (await otherContext()).isUnlocked());
+  await vault.lock();
+  await vault.setAutoLockMinutes(15);
+
+  scenario('Recovery codes: same shape, no modulo bias');
+  const { generateRecoveryCode, normalizeRecoveryCode } = await import('@/utils/crypto');
+  const shape = /^[A-NP-Z2-9]{5}(-[A-NP-Z2-9]{5}){3}$/;
+  const codes = Array.from({ length: 3000 }, () => generateRecoveryCode());
+  check('four groups of five from the same 33 symbols', codes.every(code => shape.test(code)), codes.find(c => !shape.test(c)));
+  check('normalised the way old codes are', normalizeRecoveryCode(codes[0].toLowerCase()) === codes[0].replace(/-/g, ''));
+  // `byte % 33` gave the first 24 symbols 8/256 each and the last 9 7/256: over
+  // 60 000 symbols that is ~1875 against ~1641, a 14% gap. Uniform sampling
+  // leaves a gap well under 3%; the noise at this size is about 1%.
+  const alphabet = 'ABCDEFGHIJKLMNPQRSTUVWXYZ23456789';
+  const counts = new Array(alphabet.length).fill(0);
+  for (const code of codes) for (const ch of code.replace(/-/g, '')) counts[alphabet.indexOf(ch)]++;
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const head = mean(counts.slice(0, 24));
+  const tail = mean(counts.slice(24));
+  check('the last nine symbols are drawn as often as the rest', Math.abs(head - tail) / tail < 0.03,
+    `first 24: ${head.toFixed(0)}, last 9: ${tail.toFixed(0)}`);
+  const realRandom = crypto.getRandomValues.bind(crypto);
+  let calls = 0;
+  try {
+    // First draw: every byte in the rejected zone. Then zeros.
+    (crypto as any).getRandomValues = (array: Uint8Array) => {
+      array.fill(calls++ === 0 ? 255 : 0);
+      return array;
+    };
+    check('a byte of 231 or more never picks a symbol', generateRecoveryCode() === 'AAAAA-AAAAA-AAAAA-AAAAA');
+  } finally {
+    (crypto as any).getRandomValues = realRandom;
+  }
+
+  scenario('A share link password has the export password floor');
+  const { sharePasswordTooShort } = await import('@/components/ShareModal');
+  check('no password is still allowed', !sharePasswordTooShort(''));
+  check('a short one is refused', sharePasswordTooShort('abc'));
+  check('seven characters is still short', sharePasswordTooShort('1234567'));
+  check('eight is enough', !sharePasswordTooShort('12345678'));
 
   scenario('An account added elsewhere reaches an open list');
   check('a write to the primary copy is a reason to reload',

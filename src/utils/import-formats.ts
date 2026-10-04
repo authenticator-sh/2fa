@@ -12,8 +12,9 @@
 // successful!" on top.
 //
 // So every entry now goes through one gate, whatever file it came from:
-// - an entry that is not TOTP is refused and COUNTED as unsupported. A counter
-//   or a Steam token stored as TOTP shows a healthy code that never works.
+// - an entry that is neither TOTP nor Steam Guard is refused and COUNTED as
+//   unsupported. A counter stored as TOTP shows a healthy code that never
+//   works; so did a Steam token, until Steam got a generator of its own.
 // - an entry whose secret cannot produce a code is refused and counted as
 //   unreadable. Never stored: a broken card is worse than a missing one,
 //   because it looks like the account is still there.
@@ -22,7 +23,16 @@
 //   they cost quota on every device and were never read.
 
 import type { Account } from '@/types';
-import { parseQRCode, UnsupportedOTPTypeError } from './qr-parser';
+import {
+  clampLabel,
+  parseQRCode,
+  readAlgorithm,
+  readDigits,
+  readPeriod,
+  UnsupportedOTPTypeError,
+  withinSecretLimit,
+  type ParsedOTPAuth,
+} from './qr-parser';
 import { cleanSecret, isUsableSecret } from './totp';
 
 /** What one import did, in the terms the user needs to hear it. */
@@ -33,7 +43,7 @@ export interface ImportReport {
   alreadyHere: number;
   /** Entries with no secret a code can be generated from. */
   unreadable: number;
-  /** Entries understood and refused: counter-based, Steam, and the like. */
+  /** Entries understood and refused: counter-based and the like. */
   unsupported: number;
 }
 
@@ -45,7 +55,9 @@ export type ImportRejection =
   /** Every entry is a kind of code this app does not generate. */
   | 'only-unsupported'
   /** Another app's backup, encrypted with that app's own password. */
-  | 'encrypted';
+  | 'encrypted'
+  /** A Steam Desktop Authenticator maFile (or its manifest) with SDA's encryption on. */
+  | 'steam-encrypted';
 
 /**
  * The file was read and refused as a whole. Carries the reason so the message
@@ -85,6 +97,11 @@ export interface ImportFile {
 // in totp.ts). Storing a value generation would then repair means the record
 // and the code disagree about the account, and the next export writes the
 // unrepaired one out for another app to trust.
+//
+// These REPAIR, and are for records that are already ours: the export of a
+// stored account, and our own backups coming back. Another app's value goes
+// through readAlgorithm / readDigits / readPeriod (qr-parser.ts), which refuse
+// a stated value we cannot generate with instead of replacing it.
 
 export function normalizeAlgorithm(value: unknown): Account['algorithm'] {
   const text = typeof value === 'string' ? value.toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
@@ -163,12 +180,12 @@ export function normalizeEntry(entry: unknown, index: number): NormalizedEntry {
   if (!raw) return { skipped: 'unreadable' };
 
   const kind = declaredKind(raw);
-  if (kind && kind !== 'totp') return { skipped: 'unsupported' };
+  if (kind && kind !== 'totp' && kind !== 'steam') return { skipped: 'unsupported' };
 
   // Authy dumps and Bitwarden logins carry the whole account as a link. Read
   // through the same parser a scanned QR goes through, so a link means the
   // same thing whichever door it came in by.
-  let fromLink: { name: string; issuer: string; secret: string; algorithm: string; digits: number; period: number } | null = null;
+  let fromLink: ParsedOTPAuth | null = null;
   const link = text(raw.uri) || text(raw.url) || text(raw.otpauth);
   if (/^otpauth:\/\//i.test(link)) {
     try {
@@ -186,19 +203,48 @@ export function normalizeEntry(entry: unknown, index: number): NormalizedEntry {
   // uppercased and stored, which turned it into a card that can never show a
   // code. Unreadable is the honest answer: a guess at the encoding that is
   // wrong produces a code that looks right and is not.
-  if (!isUsableSecret(secret)) return { skipped: 'unreadable' };
+  //
+  // An absurdly long one is refused the same way: see MAX_SECRET_LENGTH.
+  if (!isUsableSecret(secret) || !withinSecretLimit(secret)) return { skipped: 'unreadable' };
 
-  const issuer = (fromLink?.issuer || text(raw.issuer)).trim();
+  const issuer = clampLabel((fromLink?.issuer || text(raw.issuer)).trim());
   // `label` is andOTP's name for the account, `account` Raivo's, `username`
   // Bitwarden's. Ignoring them named every andOTP account after its issuer.
-  const name =
+  const name = clampLabel(
     fromLink?.name ||
-    text(raw.name) ||
-    text(raw.label) ||
-    text(raw.account) ||
-    text(raw.username) ||
-    issuer ||
-    'Unknown';
+      text(raw.name) ||
+      text(raw.label) ||
+      text(raw.account) ||
+      text(raw.username) ||
+      issuer ||
+      'Unknown'
+  );
+
+  const steam = kind === 'steam' || fromLink?.type === 'steam';
+
+  // Raivo calls the period `timer`. Ignoring it read a 60-second account at
+  // 30, which is a code that is right half the time.
+  const statedAlgorithm = raw.algorithm ?? raw.algo;
+  const statedPeriod = raw.period ?? raw.timer;
+
+  // Our own records are repaired, as they always were; everyone else's are
+  // read strictly. A record of ours with an out-of-range value was already
+  // generating with the repaired one — that is the code the user has been
+  // typing — so restoring it the same way keeps their account exactly as it
+  // was, where refusing would drop it from their own backup. Another app's
+  // `MD5` or `digits: 4` is a statement about a different key schedule, and
+  // storing a guess instead is a card that is wrong every time.
+  const repair = looksLikeOurs(raw);
+  const algorithm = fromLink
+    ? fromLink.algorithm
+    : repair
+      ? normalizeAlgorithm(statedAlgorithm)
+      : readAlgorithm(statedAlgorithm);
+  const digits = fromLink ? fromLink.digits : repair ? normalizeDigits(raw.digits) : readDigits(raw.digits);
+  const period = fromLink ? fromLink.period : repair ? normalizePeriod(statedPeriod) : readPeriod(statedPeriod);
+  // Steam's parameters are its own and are overwritten below, so what the
+  // file says about them cannot make a Steam entry unsupported.
+  if (!steam && (algorithm === null || digits === null || period === null)) return { skipped: 'unsupported' };
 
   const account: Account = {
     id: typeof raw.id === 'string' && raw.id ? raw.id : `imported-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
@@ -207,16 +253,25 @@ export function normalizeEntry(entry: unknown, index: number): NormalizedEntry {
     // Normalised on the way in, like every parser does, so the stored spelling
     // is the one the duplicate check and the sync merge compare against.
     secret,
-    algorithm: normalizeAlgorithm(fromLink ? fromLink.algorithm : raw.algorithm ?? raw.algo),
-    digits: fromLink ? fromLink.digits : normalizeDigits(raw.digits),
-    // Raivo calls the period `timer`. Ignoring it read a 60-second account at
-    // 30, which is a code that is right half the time.
-    period: fromLink ? fromLink.period : normalizePeriod(raw.period ?? raw.timer),
+    algorithm: algorithm ?? 'SHA1',
+    digits: digits ?? 6,
+    period: period ?? 30,
     createdAt:
       typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt) && raw.createdAt > 0
         ? raw.createdAt
         : Date.now() + index,
   };
+
+  // Steam's parameters are fixed, and generation ignores the stored ones. They
+  // are written as Steam's anyway so the record, the export and any other app
+  // reading that export agree about the account: 2FAS and Aegis write 5
+  // digits, andOTP sometimes 6, and normalizeDigits would round 5 up to 6.
+  if (steam) {
+    account.type = 'steam';
+    account.algorithm = 'SHA1';
+    account.digits = 5;
+    account.period = 30;
+  }
 
   if (typeof raw.color === 'string' && COLOR.test(raw.color)) account.color = raw.color;
 
@@ -233,11 +288,20 @@ export function normalizeEntry(entry: unknown, index: number): NormalizedEntry {
   return { account };
 }
 
+/**
+ * A record in the shape we store: an `id` string and a numeric `createdAt`,
+ * which is every account this app has written since the first release and no
+ * other app's backup format.
+ */
+function looksLikeOurs(raw: Record<string, unknown>): boolean {
+  return typeof raw.id === 'string' && typeof raw.createdAt === 'number';
+}
+
 /** An entry that could only have been written by us, andOTP or Raivo. */
 function looksLikeKnownEntry(entry: unknown): boolean {
   const raw = record(entry);
   if (!raw) return false;
-  const ours = typeof raw.id === 'string' && typeof raw.createdAt === 'number';
+  const ours = looksLikeOurs(raw);
   const andOtp = typeof raw.label === 'string' && typeof raw.type === 'string';
   const raivo = typeof raw.kind === 'string' && raw.timer !== undefined;
   const authy = typeof raw.uri === 'string';
@@ -352,15 +416,20 @@ function readTwoFas(file: Record<string, unknown>): ImportFile {
 function readBitwarden(file: Record<string, unknown>): ImportFile {
   if (file.encrypted === true) throw new ImportRejectedError('encrypted', 'Bitwarden');
   const entries: unknown[] = [];
-  let unsupported = 0;
   for (const item of Array.isArray(file.items) ? file.items : []) {
     const raw = record(item);
     const login = record(raw?.login);
     const totp = text(login?.totp);
     if (!raw || !login || !totp) continue;
-    // Bitwarden's own spelling of a Steam Guard code.
+    // Bitwarden's own spelling of a Steam Guard code: the Base32 secret after
+    // the scheme, nothing else.
     if (/^steam:\/\//i.test(totp)) {
-      unsupported++;
+      entries.push({
+        type: 'steam',
+        secret: totp.replace(/^steam:\/\//i, ''),
+        name: text(login.username) || text(raw.name),
+        issuer: text(raw.name) || 'Steam',
+      });
       continue;
     }
     const isLink = /^otpauth:\/\//i.test(totp);
@@ -371,7 +440,150 @@ function readBitwarden(file: Record<string, unknown>): ImportFile {
       issuer: text(raw.name),
     });
   }
-  return { entries, unreadable: 0, unsupported, recognised: true };
+  return { entries, unreadable: 0, unsupported: 0, recognised: true };
+}
+
+/**
+ * Base64 to our Base32, or '' when it is not Base64 of a plausible key. Steam
+ * Desktop Authenticator stores `shared_secret` this way.
+ *
+ * Tolerant of the two ways a pasted key arrives changed: wrapped across lines
+ * (whitespace is removed, as atob itself would) and in the URL-safe alphabet,
+ * `-` and `_` for `+` and `/`, which some export tools write. Both used to be
+ * refused outright, leaving the user with a key they could not add.
+ */
+export function base64ToBase32(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const normalized = value.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(normalized)) return '';
+  let binary: string;
+  try {
+    binary = atob(normalized);
+  } catch {
+    return '';
+  }
+  // Steam's secrets are 20 bytes. Anything under 10 is not a key, and encoding
+  // it would store an account that generates codes for nothing.
+  if (binary.length < 10) return '';
+  return toBase32(Array.from(binary, ch => ch.charCodeAt(0)));
+}
+
+/** Steam's shared secret, in bytes, whatever encoding it arrives in. */
+const STEAM_SECRET_BYTES = 20;
+
+function base32Bytes(base32: string): number {
+  return Math.floor((base32.replace(/=+$/, '').length * 5) / 8);
+}
+
+/**
+ * A Steam key as typed or pasted, in our Base32, or '' when it reads as
+ * neither encoding.
+ *
+ * A maFile holds Base64; other authenticators export Base32. The two overlap:
+ * Base64 with no `+`, `/`, `0`, `1`, `8` or `9` in it also passes as Base32
+ * once uppercased — about one maFile key in fourteen. Asking "is it Base32?"
+ * first stored those keys unconverted, and every code they produced was wrong
+ * with nothing to say so. The length settles it instead: Steam's 20 bytes are
+ * 32 characters of Base32 and 27–28 of Base64, so whichever reading comes to
+ * 20 bytes is the one the user meant.
+ */
+export function steamSecretToBase32(value: string): string {
+  const asBase32 = cleanSecret(value);
+  const base32Ok = isUsableSecret(asBase32);
+  if (base32Ok && base32Bytes(asBase32) === STEAM_SECRET_BYTES) return asBase32;
+
+  // Base32 written in groups — `ABCD-EFGH-…`, `ABCD EFGH …` — is how other
+  // apps display a key, and since base64ToBase32 accepts URL-safe `-` and drops
+  // whitespace, a grouped key of an odd length could otherwise decode as
+  // exactly 20 bytes of Base64 and be stored as a different key. Evenly
+  // grouped Base32 letters are a display format, not Base64.
+  if (base32Ok && groupedBase32(value)) return asBase32;
+
+  const fromBase64 = base64ToBase32(value);
+  if (fromBase64 && base32Bytes(fromBase64) === STEAM_SECRET_BYTES) return fromBase64;
+
+  // Neither is a Steam-sized key. Base32 first, as before: a key someone
+  // typed from another app's screen is the likelier of two odd cases.
+  return base32Ok ? asBase32 : fromBase64;
+}
+
+/** Base32 letters in two or more even groups of 3–8, split by spaces or hyphens. */
+function groupedBase32(value: string): boolean {
+  const groups = value.trim().replace(/=+$/, '').split(/[\s-]+/);
+  if (groups.length < 2 || !groups.every(group => /^[A-Za-z2-7]+$/.test(group))) return false;
+  const size = groups[0].length;
+  return (
+    size >= 3 &&
+    size <= 8 &&
+    groups.slice(0, -1).every(group => group.length === size) &&
+    groups[groups.length - 1].length <= size
+  );
+}
+
+/**
+ * A Steam Desktop Authenticator `.maFile` that SDA has encrypted.
+ *
+ * With encryption on, SDA writes each maFile as one Base64 string of AES-CBC
+ * ciphertext — not JSON — and every such file used to be told "this isn't a
+ * format we can read", with the Alibaba Cloud advice attached. The fix is in
+ * SDA: remove the encryption there and the same file imports.
+ *
+ * Judged on the file name as well as the content, deliberately. Base64 of a
+ * whole number of AES blocks is also what other apps' sealed backups look
+ * like, and naming Steam Desktop Authenticator to someone holding one of those
+ * would send them to an app they have never used. `.maFile` is SDA's own
+ * extension; nothing else writes it.
+ */
+export function isEncryptedMaFile(text: string, fileName?: string): boolean {
+  if (!fileName || !/\.mafile$/i.test(fileName.trim())) return false;
+  const body = text.replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(body) || body.length % 4 !== 0) return false;
+  const bytes = (body.length / 4) * 3 - (body.match(/=*$/)?.[0].length ?? 0);
+  // A whole number of 16-byte blocks, and at least a couple of them: an
+  // account's JSON is well over a kilobyte, so a few bytes is not one.
+  return bytes >= 64 && bytes % 16 === 0;
+}
+
+/**
+ * Steam Desktop Authenticator's `manifest.json`, which sits next to the
+ * maFiles: `{encrypted, first_run, entries: [{filename, encryption_iv, …}]}`.
+ * It holds no secrets itself — but with `encrypted: true` it was read as a
+ * password-protected Bitwarden export, and the user was told to re-export from
+ * Bitwarden.
+ */
+function isSteamManifest(file: Record<string, unknown>): boolean {
+  return (
+    typeof file.encrypted === 'boolean' &&
+    Array.isArray(file.entries) &&
+    file.entries.some(entry => {
+      const raw = record(entry);
+      return typeof raw?.filename === 'string' && /\.mafile$/i.test(raw.filename);
+    })
+  );
+}
+
+/**
+ * A Steam Desktop Authenticator `.maFile`: one Steam account per file, with
+ * `shared_secret` in Base64. Its other keys — identity_secret, revocation_code,
+ * the session — are not ours to keep and are not read.
+ *
+ * This is where most people's Steam secret actually is: Steam's own app never
+ * shows it, so a maFile or another authenticator's backup is how anyone has one.
+ */
+function readSteamMaFile(file: Record<string, unknown>): ImportFile {
+  return {
+    entries: [
+      {
+        type: 'steam',
+        name: text(file.account_name) || 'Steam',
+        issuer: 'Steam',
+        secret: base64ToBase32(file.shared_secret),
+      },
+    ],
+    unreadable: 0,
+    unsupported: 0,
+    recognised: true,
+  };
 }
 
 /** FreeOTP+: `{tokens: [{secret: [signed bytes], issuerExt, label, algo, digits, period, type}]}`. */
@@ -418,6 +630,11 @@ export function readImportFile(parsed: unknown): ImportFile {
   if ('db' in file && 'header' in file) return readAegis(file);
   if (Array.isArray(file.services) || 'servicesEncrypted' in file) return readTwoFas(file);
   if (Array.isArray(file.tokens)) return readFreeOtp(file);
+  if (typeof file.shared_secret === 'string' && 'account_name' in file) return readSteamMaFile(file);
+  // Before Bitwarden, which also keys on a boolean `encrypted`.
+  if (isSteamManifest(file)) {
+    throw new ImportRejectedError(file.encrypted ? 'steam-encrypted' : 'unknown-format');
+  }
   // A password-protected Bitwarden export has no `items` at all, only `data`.
   if (typeof file.encrypted === 'boolean' && (Array.isArray(file.items) || file.encrypted)) {
     return readBitwarden(file);

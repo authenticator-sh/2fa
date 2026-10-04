@@ -40,6 +40,8 @@ type TranslationKeys = {
   'accounts.or': string;
   'accounts.importFromBackup': string;
   'accounts.copied': string;
+  'accounts.copyFailed': string;
+  'accounts.checkingTime': string;
   'accounts.invalidSecret': string;
   'scan.batchMore': string;
   'scan.batchBody': string;
@@ -58,15 +60,21 @@ type TranslationKeys = {
   'onboarding.title': string;
   'onboarding.question': string;
   'onboarding.ga.label': string;
+  'onboarding.ga.sub': string;
   'onboarding.ga.steps': string;
   'onboarding.ga.more': string;
   'onboarding.new.label': string;
+  'onboarding.new.sub': string;
   'onboarding.new.steps': string;
   'onboarding.new.more': string;
   'onboarding.other.label': string;
+  'onboarding.other.sub': string;
   'onboarding.other.steps': string;
   'onboarding.other.more': string;
+  'onboarding.manual.label': string;
+  'onboarding.manual.sub': string;
   'onboarding.key.label': string;
+  'onboarding.key.sub': string;
   'onboarding.key.steps': string;
   'onboarding.key.more': string;
 
@@ -98,6 +106,10 @@ type TranslationKeys = {
   'addAccount.errorInvalidSecret': string;
   'addAccount.errorInvalidQR': string;
   'addAccount.errorHotp': string;
+  /** A code understood and refused: an OTP kind or parameters (MD5, 4 digits) we cannot generate */
+  'addAccount.errorUnsupportedCode': string;
+  /** An otpauth:// or migration QR whose payload cannot be read */
+  'addAccount.errorDamagedQR': string;
   'addAccount.pastedMigration': string;
   'addAccount.errorScanFailed': string;
   'addAccount.errorNoQr': string;
@@ -141,6 +153,9 @@ type TranslationKeys = {
   'addAccount.algorithm': string;
   'addAccount.digits': string;
   'addAccount.period': string;
+  'addAccount.codeType': string;
+  'addAccount.codeTypeTotp': string;
+  'addAccount.codeTypeSteam': string;
   'addAccount.cancel': string;
   'addAccount.add': string;
   'addAccount.uploadQR': string;
@@ -163,11 +178,6 @@ type TranslationKeys = {
   'review.pitch': string;
   'review.rateStars': string;
   'review.later': string;
-
-  // Product Hunt launch banner
-  'productHunt.body': string;
-  'productHunt.visit': string;
-  'productHunt.notNow': string;
 
   // Theme
   'theme.toggle': string;
@@ -199,6 +209,7 @@ type TranslationKeys = {
   'quickFill.copied': string;
   'quickFill.manual': string;
   'quickFill.openApp': string;
+  'quickFill.inserted': string;
 
   // Edit account
   'edit.title': string;
@@ -280,6 +291,7 @@ type VaultTranslationKeys = {
   'vault.recover.invalid': string;
   'vault.recover.back': string;
   'vault.recover.rotated': string;
+  'vault.recover.passkeyRemoved': string;
 
   'vault.settings.title': string;
   'vault.settings.on': string;
@@ -311,11 +323,14 @@ type VaultTranslationKeys = {
   'export.uri': string;
   'export.uriHint': string;
   'export.uriSkipped': string;
+  /** "{0}" accounts written to a CXF file, "{1}" Steam Guard accounts CXF cannot carry */
+  'export.cxfSkippedSteam': string;
   'import.paste': string;
   'import.pasteTitle': string;
   'import.pasteBody': string;
   'import.uriUnreadable': string;
   'import.uriHotp': string;
+  'import.uriUnsupported': string;
   'import.uriBatchSkipped': string;
   'import.uriCapped': string;
   'import.uriNothing': string;
@@ -325,6 +340,7 @@ type VaultTranslationKeys = {
   'import.passwordTitle': string;
   'import.passwordText': string;
   'import.wrongPassword': string;
+  'import.backupDamaged': string;
 
   'common.cancel': string;
   'common.back': string;
@@ -403,6 +419,7 @@ type VaultTranslationKeys = {
   'share.passwordReminder': string;
   'share.caution': string;
   'share.failed': string;
+  'share.periodTooShort': string;
   'share.done': string;
   // Restoring from the automatic daily snapshots
   'restore.title': string;
@@ -445,23 +462,143 @@ type VaultTranslationKeys = {
   /** "Camera {0}" — a camera the browser reports without a name */
   'scan.cameraN': string;
   'recovery.saveCopyFailed': string;
-  /** "{0} account(s) added." — a file or a pasted list, never a QR */
+  /** "{0} accounts added." — a file or a pasted list, never a QR */
   'import.fileAdded': string;
   /** "{0}" accounts in the file the list already held */
   'import.fileAlreadyHere': string;
   'import.fileEmpty': string;
   /** "{0}" entries with no usable secret */
   'import.fileUnreadable': string;
-  /** "{0}" entries of a code type we refuse: HOTP, Steam */
+  /** "{0}" entries of a code type or parameters we refuse: HOTP, MD5, 4 digits… */
   'import.fileUnsupported': string;
   'import.unknownFormat': string;
   'import.nothingReadable': string;
   'import.onlyUnsupported': string;
   /** "{0}" — the app that encrypted the file: Aegis, 2FAS, Bitwarden */
   'import.encryptedElsewhere': string;
+  /** An encrypted Steam Desktop Authenticator .maFile or manifest */
+  'import.steamEncrypted': string;
+  /** Accounts already in the list that an import switched from TOTP to Steam Guard codes. */
+  'import.steamUpdated': string;
+
+  // Deleting can be taken back for a few seconds
+  'common.undo': string;
+  'accounts.restored': string;
+  'accounts.undoFailed': string;
+
+  // Names for controls that are only an icon — read out by screen readers
+  'common.close': string;
+  'a11y.showPassword': string;
+  'a11y.showKey': string;
+  'search.clear': string;
+
+  /** Placeholder of the second field in the password-protected export. */
+  'export.passwordConfirm': string;
+
+  // The order of the account list
+  'settings.sort': string;
+  'settings.sortManual': string;
+  'settings.sortService': string;
+  'settings.sortName': string;
+  'settings.sortHint': string;
+
+  /** A switch in Settings whose new value could not be written. */
+  'settings.saveFailed': string;
+
+  // The titles over the groups in Settings. Backup uses settings.backupRestore.
+  'settings.sectionSecurity': string;
+  'settings.sectionList': string;
+  'settings.sectionBrowser': string;
+  'settings.sectionDiagnostics': string;
+};
+
+// Strings that count something carry plural blocks —
+// "{0, plural, one {# account} other {# accounts}}" — rather than "account(s)";
+// see parsePluralBlocks in i18n.ts. They are still one string per key, so every
+// language must still define every key.
+
+
+/** The paywall, Pro in Settings and the free-limit hints (billing/). */
+type BillingTranslationKeys = {
+  'paywall.back': string;
+  'paywall.default.title': string;
+  'paywall.default.body': string;
+  'paywall.support.title': string;
+  'paywall.support.body': string;
+  'paywall.private.title': string;
+  'paywall.private.body': string;
+  'paywall.everything.title': string;
+  'paywall.everything.body': string;
+  'paywall.importOver': string;
+  'paywall.importNoRoom': string;
+  'paywall.benefitUnlimited': string;
+  'paywall.benefitBrowsers': string;
+  'paywall.benefitQuickFill': string;
+  'paywall.trust': string;
+  'paywall.planMonth': string;
+  'paywall.planYear': string;
+  'paywall.planLife': string;
+  'paywall.planPass': string;
+  'paywall.perMonth': string;
+  'paywall.perYear': string;
+  'paywall.once': string;
+  'paywall.yearNote': string;
+  'paywall.lifeNote': string;
+  'paywall.passNote': string;
+  'paywall.monthNote': string;
+  'paywall.save': string;
+  'paywall.trial': string;
+  'paywall.continue': string;
+  'paywall.opening': string;
+  'paywall.checkoutOpened': string;
+  'paywall.addFree': string;
+  'paywall.haveKey': string;
+  'paywall.keyPlaceholder': string;
+  'paywall.activate': string;
+  'paywall.restore': string;
+  'paywall.restoreHint': string;
+  'paywall.emailPlaceholder': string;
+  'paywall.send': string;
+  'paywall.restoreSent': string;
+  'paywall.legal': string;
+  'paywall.unavailable': string;
+  'paywall.retry': string;
+  'billing.error.network': string;
+  'billing.error.invalidKey': string;
+  'billing.error.inactive': string;
+  'billing.error.deviceLimit': string;
+  'billing.error.payments': string;
+  'billing.error.rateLimited': string;
+  'billing.error.generic': string;
+  'billing.activated': string;
+  'paywall.priceChanged': string;
+  'billing.heldAdded': string;
+  'billing.heldWaiting': string;
+  'billing.heldDiscard': string;
+  'pro.title': string;
+  'pro.statusFree': string;
+  'pro.statusUnlimitedFree': string;
+  'pro.statusLife': string;
+  'pro.statusSub': string;
+  'pro.statusPass': string;
+  'pro.statusComp': string;
+  'pro.keyHint': string;
+  'pro.get': string;
+  'pro.support': string;
+  'pro.supportHint': string;
+  'pro.manage': string;
+  'pro.removeHere': string;
+  'pro.removeConfirmTitle': string;
+  'pro.removeConfirmBody': string;
+  'pro.removeConfirm': string;
+  'pro.removed': string;
+  'pro.pending': string;
+  'pro.checkNow': string;
+  'scan.limitTitle': string;
+  'scan.limitBody': string;
 };
 
 /** A complete set of strings for one language. */
-export type TranslationStrings = TranslationKeys & VaultTranslationKeys;
+export type TranslationStrings = TranslationKeys & VaultTranslationKeys & BillingTranslationKeys;
 
 export type TranslationKey = keyof TranslationStrings;

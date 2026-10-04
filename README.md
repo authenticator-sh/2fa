@@ -5,7 +5,7 @@
   <img src=".github/assets/banner-light.png" alt="Authenticator" width="360">
 </picture>
 
-**TOTP codes in Chrome. No servers, no analytics, no host permissions.**
+**TOTP codes in Chrome. Your secrets never leave your device. No host permissions.**
 
 [![Chrome Web Store](https://img.shields.io/chrome-web-store/v/ebhcbenbgjmaebpgbldimndmfomjmphd?label=chrome%20web%20store&color=4285f4)](https://chromewebstore.google.com/detail/2FA/ebhcbenbgjmaebpgbldimndmfomjmphd)
 [![Users](https://img.shields.io/chrome-web-store/users/ebhcbenbgjmaebpgbldimndmfomjmphd?label=users&color=4285f4)](https://chromewebstore.google.com/detail/2FA/ebhcbenbgjmaebpgbldimndmfomjmphd)
@@ -26,7 +26,7 @@
 
 </div>
 
-A privacy-focused TOTP authenticator for Chrome. We receive none of your data on any path. Accounts are stored by the browser, and optionally synced through your own Google account — see [Where your data lives](#where-your-data-lives).
+A privacy-focused TOTP authenticator for Chrome. Your secrets, account names and codes never leave your device: accounts are stored by the browser, and optionally synced through your own Google account — see [Where your data lives](#where-your-data-lives). The extension does check in with our server once a day with an anonymous install id and a handful of numbers, for the free plan and Pro — see [What is sent to our server](#what-is-sent-to-our-server).
 
 ## Features
 
@@ -51,7 +51,8 @@ A privacy-focused TOTP authenticator for Chrome. We receive none of your data on
   [Credential Exchange Format](#credential-exchange-format) — the FIDO Alliance
   interchange format other password managers and authenticators can read
 - 20 UI languages, chosen from the browser's own language on first open and overridable in Settings
-- Works fully offline — the popup makes no network request to render
+- Works fully offline — codes never need a connection, and the popup renders before any network request
+- Free to use; new installations may have an account limit, which **Pro** removes (see [Free and Pro](#free-and-pro))
 
 ## Permissions
 
@@ -301,7 +302,31 @@ npm run dev
 
 ```bash
 npm test
+npm run verify      # typecheck + npm test + check:deps
 ```
+
+`npm run verify` needs internet access: its last step, `check:deps`, talks to
+the real time sources the extension depends on (that is its whole point — see
+`scripts/check-deps.ts`), so offline it fails even when the code is fine. Run
+`npm run typecheck && npm test` for the offline part.
+
+```bash
+npm run build && npm run check:bundle   # check the built package in dist/
+npm run test:e2e                        # the built extension in real Chromium
+```
+
+`check:bundle` reads the build rather than the source: it walks the service
+worker's static imports and fails if any file it reaches contains `import()`
+(Chrome refuses it in a service worker), and it checks that the manifest, the
+default locale, the icons and every HTML page the extension opens are in the
+package.
+
+`test:e2e` builds into `.e2e-build/` — never `dist/` — and loads that unpacked
+into Chromium with Playwright: adding an account and reading it back from
+`chrome.storage.local`, the code on screen against one computed independently,
+a delete seen from a second window, Undo, and a service worker that starts
+without errors. The first run needs the browser: `npx playwright install
+chromium`. External network is blocked inside the tests.
 
 End-to-end scenarios for the storage and vault paths — enabling, locking,
 password change, recovery-code reset, encrypted export, disabling — run against
@@ -375,12 +400,15 @@ src/
 
 ## Network Access
 
-The extension sends **nothing about you anywhere**. The only automatic request is the cached clock check below; everything else happens because you clicked something. In full, the outbound HTTPS calls are:
+The extension never sends your secrets, account names, issuers, codes or the sites you use them on. Two kinds of request happen automatically — the cached clock check and the daily billing check-in, both below; everything else happens because you clicked something. In full, the outbound HTTPS calls are:
 
 | URL                                         | When                          | Purpose                        |
 |---------------------------------------------|-------------------------------|--------------------------------|
 | `https://www.authenticator.sh/welcome`      | First install                 | Opens welcome page in a new tab |
-| `https://www.authenticator.sh/uninstall`    | After uninstall (Chrome API)  | Opens feedback page            |
+| `https://www.authenticator.sh/uninstall?i=<install id>` | After uninstall (Chrome API) | Opens feedback page, which reports the removal to our server by that id and links an optional answer to it |
+| `https://api.authenticator.sh/v1/sync`      | Once a day (browser start or popup open, after it has rendered) | Billing check-in — see [What is sent to our server](#what-is-sent-to-our-server) |
+| `https://api.authenticator.sh/v1/checkout`, `/v1/license/*`, `/v1/portal` | User starts a purchase, enters a key, restores a purchase or manages a subscription | Pro |
+| `https://checkout.stripe.com/…`, `https://billing.stripe.com/…` | User starts a purchase or manages a subscription | Stripe Checkout and customer portal, in a new tab |
 | `https://chromewebstore.google.com/.../reviews` | User takes the rating prompt | Opens the Web Store review form |
 | `https://www.authenticator.sh/support`      | User clicks "Help & support"  | Opens the support page         |
 | `https://www.authenticator.sh/faq` (or `/<lang>/faq`) | User clicks the help icon, or "How do I fix this?" on the clock warning | Opens the answers, in the popup's language |
@@ -401,14 +429,73 @@ does not disable the check — and when none of them can be reached, Settings
 says so rather than reporting a clock it never measured. No fonts, scripts, or styles are loaded from remote
 hosts — everything needed to render the popup is bundled.
 
+## Free and Pro
+
+Installations that existed before billing (1.14.0) keep **unlimited accounts**.
+New installations may have a limit on how many accounts they hold for free —
+our server decides whether there is one and how high it is; **Pro** removes
+it. The limit only ever stops *adding* an account: every account you have
+keeps working, exporting, backing up, restoring and syncing with or without
+Pro, and nothing is ever hidden or locked.
+
+- The limit is checked on your machine from the last policy our server
+  signed, so it works offline: a limit already received still applies without
+  a connection. Until the extension has reached our server once, nothing is
+  limited — and nothing is again once it has not reached it for 14 days, until
+  it does.
+- An account the limit stops on its way to Checkout is kept in memory (see
+  `chrome.storage.session` below) and added by itself once Pro turns on; it is
+  dropped after a day, when the browser closes, or when you choose not to add it.
+- Pro is a license signed by our server (ES256) and checked with WebCrypto
+  against the public key in `src/billing/keys.ts`. A subscription's signed
+  license lasts offline for up to 60 days at a time and is renewed silently
+  whenever the extension is online; it never runs past the paid period plus
+  two weeks (plus one day if renewal was cancelled). A lifetime license lasts
+  half a year at a time, renewed the same way.
+- When Pro is offered to an installation, it appears in **Settings → Pro**.
+  Buying happens on Stripe Checkout in a new tab; Stripe (through Link) is the
+  merchant of record. Pro turns on by itself in the browser you bought it in,
+  which is then sent the license key; while Chrome sync is on, the key goes to
+  Chrome Sync and your other Chrome profiles turn Pro on by themselves. On
+  another computer, enter the license key (`2FA-XXXXX-…`) from the success
+  page or the email under **Settings → Pro**.
+- The code is open source, so the limit is there for honest users — it is not
+  DRM, and a fork can remove it.
+
+## What is sent to our server
+
+Once a day, the extension sends `https://api.authenticator.sh/v1/sync` exactly
+these fields (`src/billing/sync.ts`, `buildSyncRequest`; a test holds it to the
+list):
+
+| Field | What it is |
+|---|---|
+| `iid` | A random id created by this installation. Not linked to your Google account, email or browser — unless you buy Pro: then the purchase record links the installation you bought from, and any installation where your license key is active, to the email you paid with |
+| `ver`, `ui_lang`, `browser_lang` | Extension version, interface language, browser language |
+| `installed_at`, `legacy`, `legacy_src` | When this installation appeared, and whether it predates billing |
+| `accounts` | **How many** accounts you have — a number, never which ones |
+| `vault`, `sync`, `open_mode` | Whether password protection and sync are on, and how the extension opens |
+| `pid`, `lid` | Which policy and license this installation currently holds |
+| `has_key`, `key_hint` | Whether this installation holds a license key, and the last four characters of it. The installation Pro was bought on is sent its key in the response (`key`) until those four characters match it — so a key bought later replaces an older one; one where a key was typed in already has it and is never sent one |
+| `opens` | How many times the extension was opened on each day since the last check-in (at most the last 14 days) — a count per day, nothing about what was looked at |
+| `events` | Up to 50 queued billing events from a closed list (`src/billing/events.ts`): the limit was reached, the paywall was shown or closed, a plan was chosen, a checkout or a key was tried |
+
+The server sees the request's country (from its edge, the IP address is not
+stored). If you buy Pro, Stripe gives us your email address, to send and
+restore your license key, and keeps the install id you bought from in the
+purchase's metadata. Retention and your rights are in the
+[privacy policy](https://www.authenticator.sh/privacy).
+
 ## Where your data lives
 
 | Store | Contents | Default |
 |-------|----------|---------|
 | `chrome.storage.local` | Accounts (encrypted when password protection is on), settings, and — only while password protection is off — the per-site usage history | Always used; primary |
-| `chrome.storage.session` | The unlocked master key, the selected group filter and the per-site usage history — memory only, cleared when the browser closes | Only while unlocked |
+| `chrome.storage.session` | The unlocked master key, the selected group filter and the per-site usage history; and an account the free limit stopped on the way to Checkout, until Pro turns on (sealed with the vault's key when password protection is on) — memory only, cleared when the browser closes | Only while unlocked; a stopped account for a day at most |
 | `chrome.storage.sync` | A copy of the accounts and the vault metadata, replicated by Chrome **through the user's own Google account** | On, switchable off |
 | IndexedDB | Seven rolling snapshots, in the same form as the primary store | Always used |
+| `chrome.storage.local` (`billing*`) | The install id, the last signed policy and license, the license key this installation holds — typed in, or received after buying on it — and queued billing events and daily open counts — no account data | Always used |
+| `chrome.storage.sync` (`billingLegacy`, `billingLicenseKey`) | Whether this person predates billing, and the license key this installation holds — so their other Chrome profiles pick both up and turn Pro on by themselves | Only while sync is on; removed with the rest when sync is switched off, and put back when it is switched on again |
 
 Two consequences worth stating plainly:
 
@@ -421,7 +508,7 @@ Two consequences worth stating plainly:
   collected. Enabling password protection deletes it, and it can be switched off
   independently.
 
-We operate no servers and receive no user data on any path.
+We never receive your secrets, account names or codes. What our billing server does receive is listed in [What is sent to our server](#what-is-sent-to-our-server).
 
 ## Security
 

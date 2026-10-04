@@ -1,16 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useId, useRef, useState } from 'react';
+import { useEscapeLayer } from '@/hooks/useLayer';
 import { ClipboardPaste, Download, Link2, Lock, Share2, Unlock, Upload } from 'lucide-react';
+import { settingsButton } from '@/components/SettingsSection';
 import {
   exportAccounts,
   getAccounts,
-  importAccounts,
   importAccountList,
   addMultipleAccounts,
   quarantinedCount,
 } from '@/utils/storage';
-import type { ImportReport } from '@/utils/import-formats';
+import { ImportRejectedError, isEncryptedMaFile, readImportFile, type ImportFile, type ImportReport } from '@/utils/import-formats';
+import { addWithLimit } from '@/billing/add';
+import { adoptLegacyFromBackup, backupPredatesBilling, installPredatesBilling } from '@/billing/legacy';
 import { markBackupDone } from '@/utils/backup-reminder';
-import { parseQRCode, generateRandomColor, UnsupportedOTPTypeError } from '@/utils/qr-parser';
+import { parseQRCode, generateRandomColor, qrFailureKey, UnsupportedOTPTypeError } from '@/utils/qr-parser';
 import { saveErrorMessage } from '@/utils/save-error';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret } from '@/utils/totp';
@@ -34,7 +37,7 @@ import {
   isEncryptedBackupFile,
   readEncryptedBackupFile,
 } from '@/utils/backup-file';
-import { buildCxfFile, cxfFileName, isCxfFile, readCxf } from '@/utils/cxf';
+import { buildCxfFile, cxfExportable, cxfFileName, isCxfFile, readCxf } from '@/utils/cxf';
 import type { Account } from '@/types';
 
 interface ExportImportProps {
@@ -58,27 +61,70 @@ interface ExportImportProps {
  */
 export async function importBackupText(
   text: string,
-  promptForPassword: () => Promise<string | null> | string | null
-): Promise<ImportReport | null> {
+  promptForPassword: () => Promise<string | null> | string | null,
+  /** Only to recognise an encrypted Steam Desktop Authenticator .maFile. */
+  fileName?: string
+): Promise<(ImportReport & { leftOut: number }) | null> {
+  const read = await readBackupText(text, promptForPassword, fileName);
+  if (!read) return null;
+  // Read (and decrypted) once, written through the limit: choosing "add the
+  // ones that fit" in the paywall runs the write again, not the password prompt.
+  if (read.predatesBilling) await adoptLegacyFromBackup();
+  return addWithLimit('file', origin => importAccountList(read.entries, origin, read.from));
+}
+
+/**
+ * A backup file's entries, decrypted if it needs a password, without writing
+ * anything. Null when the password prompt was dismissed.
+ */
+async function readBackupText(
+  text: string,
+  promptForPassword: () => Promise<string | null> | string | null,
+  fileName?: string
+): Promise<{ entries: unknown[]; from: Partial<Omit<ImportFile, 'entries'>>; predatesBilling: boolean } | null> {
+  // Checked first: it is not JSON, so every reader below would call it an
+  // unknown format, and the way out is a step in SDA, not in this app.
+  if (isEncryptedMaFile(text, fileName)) throw new ImportRejectedError('steam-encrypted');
+
   // Checked before our own plain format because a CXF document is also just
-  // JSON: importAccounts would find no `accounts` array, throw "invalid
+  // JSON: readImportFile would find no `accounts` array, throw "invalid
   // format", and tell someone migrating from another vendor that their file is
   // broken when it is the one file we most want to accept.
   if (isCxfFile(text)) {
     // With its count of unusable secrets: dropped silently, a file holding
     // nothing but those came back as an empty list and "Import successful!".
-    const { accounts, unreadable } = readCxf(text);
-    return await importAccountList(accounts, { unreadable });
+    const { accounts, unreadable, unsupported } = readCxf(text);
+    return { entries: accounts, from: { unreadable, unsupported }, predatesBilling: false };
   }
 
   if (!isEncryptedBackupFile(text)) {
-    return await importAccounts(text);
+    let file: ImportFile;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+      file = readImportFile(parsed);
+    } catch (error) {
+      // Not JSON at all is the likeliest shape of another app's sealed backup;
+      // the same message importAccounts gives (utils/storage.ts).
+      if (error instanceof ImportRejectedError) throw error;
+      throw new ImportRejectedError('unknown-format');
+    }
+    return { entries: file.entries, from: file, predatesBilling: backupPredatesBilling(parsed) };
   }
 
   const password = await promptForPassword();
   if (!password) return null;
-
-  return await importAccountList(await readEncryptedBackupFile(text, password));
+  let envelope: unknown = null;
+  try {
+    envelope = JSON.parse(text);
+  } catch {
+    // isEncryptedBackupFile already vouched for it; the date is only a hint.
+  }
+  return {
+    entries: await readEncryptedBackupFile(text, password),
+    from: {},
+    predatesBilling: backupPredatesBilling(envelope),
+  };
 }
 
 /**
@@ -109,7 +155,7 @@ export function qrImportErrorMessage(error: unknown, language: Language): string
   const t = createT(language);
   // Understood, and refused on purpose — saying "invalid QR" here would send
   // the user off to re-export a code that can never work.
-  if (error instanceof UnsupportedOTPTypeError) return t('addAccount.errorHotp');
+  if (error instanceof UnsupportedOTPTypeError) return t(qrFailureKey('', error));
   // What the browser's image decoder throws: a DOMException, named for the
   // decode failure rather than for anything the user did.
   const name = error && typeof error === 'object' ? String((error as { name?: unknown }).name ?? '') : '';
@@ -127,10 +173,22 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
 
   const [showExportChoice, setShowExportChoice] = useState(false);
   const [exportPassword, setExportPassword] = useState('');
+  const [exportPasswordConfirm, setExportPasswordConfirm] = useState('');
   const [exportError, setExportError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * Set synchronously, unlike `busy`: two Enters in the password field land in
+   * the same frame, before React has re-rendered with the button disabled, and
+   * each started its own export — two files, each encrypted separately.
+   */
+  const exporting = useRef(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const exportButtonRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
 
   const runExport = async (format: 'encrypted' | 'plain' | 'cxf' | 'uri') => {
+    if (exporting.current) return;
+    exporting.current = true;
     setBusy(true);
     setExportError(null);
     try {
@@ -174,14 +232,28 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
         if (!proceed) return;
       }
 
+      // CXF has no way to say "Steam Guard", so those accounts cannot go in.
+      // Asked before, like the text export, for the same reason.
+      const cxfSkipped = format === 'cxf' ? accounts.length - cxfExportable(accounts).length : 0;
+      if (cxfSkipped > 0) {
+        const proceed = await confirmDialog({
+          title: t('export.plainConfirmTitle'),
+          body: t('export.warningPartial', accounts.length - cxfSkipped, accounts.length),
+          confirmLabel: t('common.confirm'),
+          cancelLabel: t('common.cancel'),
+          danger: true,
+        });
+        if (!proceed) return;
+      }
+
       const contents =
         format === 'encrypted'
-          ? await buildEncryptedBackupFile(accounts, exportPassword)
+          ? await buildEncryptedBackupFile(accounts, exportPassword, { legacy: await installPredatesBilling() })
           : format === 'cxf'
             ? buildCxfFile(accounts)
             : uri
               ? uri.text
-              : buildPlainBackupFile(accounts);
+              : buildPlainBackupFile(accounts, { legacy: await installPredatesBilling() });
 
       downloadBackupFile(
         contents,
@@ -191,12 +263,13 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
 
       await markBackupDone(accounts.length);
       onExportComplete?.();
-      setShowExportChoice(false);
-      setExportPassword('');
+      closeExportChoice();
       if (uri && uri.skipped > 0) {
         // Said again after the fact, so the count survives into the toast the
         // user can still read once the dialog is gone.
         toast('info', t('export.uriSkipped', accounts.length - uri.skipped, uri.skipped));
+      } else if (cxfSkipped > 0) {
+        toast('info', t('export.cxfSkippedSteam', accounts.length - cxfSkipped, cxfSkipped));
       } else {
         toast(
           'success',
@@ -209,31 +282,37 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
       console.error('Export failed:', error);
       setExportError(t('export.failed'));
     } finally {
+      exporting.current = false;
       setBusy(false);
     }
   };
 
-  const closeExportChoice = () => {
+  function closeExportChoice() {
     setShowExportChoice(false);
     setExportPassword('');
+    setExportPasswordConfirm('');
     setExportError(null);
-  };
+    // Back to the button that opened it. The window is not a component of its
+    // own, so this is done here rather than by useReturnFocus.
+    setTimeout(() => exportButtonRef.current?.focus(), 0);
+  }
 
-  // Escape closes it, as it does every other dialog in the app (see
-  // FeedbackHost). Without this the only exit was a button that could be off
-  // screen.
-  useEffect(() => {
-    if (!showExportChoice) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeExportChoice();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [showExportChoice]);
+  // Escape closes it, as it does every other dialog in the app — as a layer, so
+  // an Escape meant for a confirmation raised over it closes only that.
+  // Without this the only exit was a button that could be off screen.
+  useEscapeLayer(closeExportChoice, showExportChoice);
 
   const handleEncryptedExport = () => {
+    if (exporting.current) return;
     if (exportPassword.length < MIN_PASSWORD_LENGTH) {
       setExportError(t('vault.setup.tooShort'));
+      return;
+    }
+    // Typed twice, as when protection is switched on: this password is the
+    // only way into the file, and one slipped key on a field of dots made a
+    // backup nobody could ever open — found out on the day it was needed.
+    if (exportPassword !== exportPasswordConfirm) {
+      setExportError(t('vault.setup.mismatch'));
       return;
     }
     runExport('encrypted');
@@ -250,7 +329,9 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
   // Thin: the work lives in uri-import so the other file input gets the same
   // behaviour instead of a second copy that drifts.
   const runURIImport = async (text: string): Promise<void> => {
-    const outcome = await importURIList(text, language);
+    const outcome = await addWithLimit('uri', origin => importURIList(text, language, origin));
+    // The limit stopped it and the person closed the paywall: nothing to report.
+    if (!outcome) return;
     if (outcome.added !== undefined) {
       // The count after the import, as the popup's own file input records it:
       // with 0 here, thirty days later every account read as added since the
@@ -295,7 +376,8 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
             password: true,
             confirmLabel: t('common.ok'),
             cancelLabel: t('common.cancel'),
-          })
+          }),
+          file.name
         );
         if (imported) {
           await getAccounts().then(list => markBackupDone(list.length)).catch(() => {});
@@ -340,6 +422,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
           algorithm: accountData.algorithm,
           digits: accountData.digits,
           period: accountData.period,
+          ...(accountData.type ? { type: accountData.type } : {}),
           createdAt: Date.now() + index, // Ensure unique timestamps
           color: generateRandomColor(),
         }));
@@ -347,7 +430,11 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
         // Add all accounts at once
         let importResult;
         try {
-          importResult = { ...(await addMultipleAccounts(accountsToAdd)), unsupported: parsed.skipped ?? 0 };
+          const added = await addWithLimit(parsed.type === 'migration' ? 'migration' : 'qr', origin =>
+            addMultipleAccounts(accountsToAdd, origin)
+          );
+          if (!added) return;
+          importResult = { ...added, unsupported: parsed.skipped ?? 0 };
         } catch (error) {
           console.error('Could not save the scanned accounts:', error);
           toast('error', saveErrorMessage(error, t));
@@ -360,7 +447,8 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
           : '';
         toast(importResult.added > 0 ? 'success' : 'info', summary + more);
       } else {
-        toast('error', t('addAccount.errorInvalidQR'));
+        // An authenticator code whose payload is damaged is not "invalid".
+        toast('error', t(qrFailureKey(result)));
       }
     } catch (error) {
       console.error('QR import failed:', error);
@@ -372,30 +460,41 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
     <>
       <div className="flex gap-2">
         <button
+          ref={exportButtonRef}
           onClick={() => setShowExportChoice(true)}
-          className="flex-1 flex items-center justify-center gap-1.5 bg-white dark:bg-dark-700 hover:bg-gray-50 dark:hover:bg-dark-600 text-gray-700 dark:text-gray-200 font-medium text-sm py-2 px-3 rounded-lg border border-gray-300 dark:border-dark-500 hover:border-gray-400 dark:hover:border-dark-400 transition-all"
+          className={`${settingsButton.secondary} flex-1 py-2`}
         >
-          <Upload size={16} />
+          <Upload size={14} />
           {t('settings.export')}
         </button>
 
-        <label className="flex-1 flex items-center justify-center gap-1.5 bg-white dark:bg-dark-700 hover:bg-gray-50 dark:hover:bg-dark-600 text-gray-700 dark:text-gray-200 font-medium text-sm py-2 px-3 rounded-lg border border-gray-300 dark:border-dark-500 hover:border-gray-400 dark:hover:border-dark-400 transition-all cursor-pointer">
-          <Download size={16} />
+        {/* A real button, as on the Add screen and the scanner page: a label
+            around a display:none input takes no focus, so Import could not be
+            reached from the keyboard at all. */}
+        <button
+          type="button"
+          onClick={() => importInputRef.current?.click()}
+          className={`${settingsButton.secondary} flex-1 py-2`}
+        >
+          <Download size={14} />
           {t('settings.import')}
-          <input
-            type="file"
-            accept="application/json,text/plain,image/*"
-            onChange={handleImport}
-            className="hidden"
-          />
-        </label>
+        </button>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept="application/json,text/plain,image/*,.maFile"
+          onChange={handleImport}
+          className="hidden"
+          tabIndex={-1}
+          aria-hidden="true"
+        />
       </div>
 
       {/* Third input, and the one the other two could not cover: a link that
           arrived as text. Until now it had to be taken apart by hand. */}
       <button
         onClick={handlePasteImport}
-        className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 py-1.5 transition-colors"
+        className={`${settingsButton.link} mx-auto mt-2.5 flex items-center gap-1.5`}
       >
         <ClipboardPaste size={14} />
         {t('import.paste')}
@@ -412,10 +511,13 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
               once, so the title and Cancel both left the screen and neither
               could be scrolled to. */}
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
             onClick={event => event.stopPropagation()}
             className="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 max-w-sm w-full max-h-full overflow-y-auto shadow-xl p-5"
           >
-            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-3">
+            <h2 id={titleId} className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-3">
               {t('export.chooseTitle')}
             </h2>
 
@@ -430,16 +532,34 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
               <input
                 type="password"
                 value={exportPassword}
-                onChange={e => setExportPassword(e.target.value)}
+                onChange={e => {
+                  setExportPassword(e.target.value);
+                  if (exportError) setExportError(null);
+                }}
                 onKeyDown={e => e.key === 'Enter' && handleEncryptedExport()}
                 placeholder={t('export.password')}
+                aria-label={t('export.password')}
+                autoComplete="new-password"
                 autoFocus
+                className="w-full px-2.5 py-1.5 text-xs rounded-md border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-[#4285F4] mb-2"
+              />
+              <input
+                type="password"
+                value={exportPasswordConfirm}
+                onChange={e => {
+                  setExportPasswordConfirm(e.target.value);
+                  if (exportError) setExportError(null);
+                }}
+                onKeyDown={e => e.key === 'Enter' && handleEncryptedExport()}
+                placeholder={t('export.passwordConfirm')}
+                aria-label={t('export.passwordConfirm')}
+                autoComplete="new-password"
                 className="w-full px-2.5 py-1.5 text-xs rounded-md border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-[#4285F4] mb-2"
               />
               <button
                 onClick={handleEncryptedExport}
-                disabled={busy || !exportPassword}
-                className="w-full bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-xs py-1.5 rounded-md transition-colors disabled:opacity-50"
+                disabled={busy || !exportPassword || !exportPasswordConfirm}
+                className="w-full bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-xs py-1.5 rounded-md transition-colors disabled:opacity-50"
               >
                 {t('settings.export')}
               </button>
@@ -447,7 +567,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
 
             <div className="border border-gray-200 dark:border-dark-600 rounded-lg p-3 mb-3">
               <div className="flex items-center gap-1.5 mb-1">
-                <Unlock className="text-gray-400" size={14} />
+                <Unlock className="text-gray-500 dark:text-gray-400" size={14} />
                 <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                   {t('export.plain')}
                 </span>
@@ -464,7 +584,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
 
             <div className="border border-gray-200 dark:border-dark-600 rounded-lg p-3 mb-3">
               <div className="flex items-center gap-1.5 mb-1">
-                <Link2 className="text-gray-400" size={14} />
+                <Link2 className="text-gray-500 dark:text-gray-400" size={14} />
                 <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                   {t('export.uri')}
                 </span>
@@ -481,7 +601,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
 
             <div className="border border-gray-200 dark:border-dark-600 rounded-lg p-3 mb-3">
               <div className="flex items-center gap-1.5 mb-1">
-                <Share2 className="text-gray-400" size={14} />
+                <Share2 className="text-gray-500 dark:text-gray-400" size={14} />
                 <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                   {t('export.cxf')}
                 </span>
@@ -496,7 +616,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
               </button>
             </div>
 
-            {exportError && <p className="text-xs text-red-600 dark:text-red-400 mb-2">{exportError}</p>}
+            {exportError && <p role="alert" className="text-xs text-red-600 dark:text-red-400 mb-2">{exportError}</p>}
 
             <button
               onClick={closeExportChoice}

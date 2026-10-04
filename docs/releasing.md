@@ -20,10 +20,25 @@ true; the order is not cosmetic.
   announces**. Whoever arrives from GitHub sees only this file — no site page,
   no modal. In 1.12.0 the headline feature was missing from it entirely.
 - `src/utils/update-notes.ts` has an entry for the version: one short line per
-  change, biggest first.
+  change, biggest first — unless the release is deliberately quiet (1.14.0 has
+  none: Pro is not announced inside the extension before it is switched on).
 - The site is ready in the same release: `EXTENSION_VERSION` and
   `RELEASE_VERSIONS` in `src/product.ts` / `src/releases.ts`, and
   `src/i18n/whats-new/<version>/` in all twenty languages.
+- Billing (since 1.14.0):
+  - `dist/` is built **without** `BILLING_ENV`/`BILLING_API` in the environment.
+    A store build trusts the production signing key only and talks to
+    `https://api.authenticator.sh`; `check:bundle` fails a build that carries
+    the preview or test key or a local server address.
+  - For **1.14.0 only**: set `STORE_RELEASE_DATE` in `src/billing/config.ts`
+    to 00:00 UTC of the day the zip is uploaded — too early is safe, too late
+    is not. Backups exported before it, and accounts arriving through Chrome
+    sync that were made before it (and before this install existed), make an
+    install legacy.
+  - The server (`../server`) is deployed and `https://api.authenticator.sh/v1/health`
+    answers with the production `kid` that `src/billing/keys.ts` lists.
+  - The listing's privacy disclosures still match `README.md` → "What is sent
+    to our server" (see step 5).
 
 ## 1. One build pass, and no rebuild after it
 
@@ -96,6 +111,14 @@ store, but the tag must never lag the site.
 ## 5. Chrome Web Store
 
 Upload `authenticator-v<version>.zip` and submit for review.
+
+Since 1.14.0 the extension sends data to our server, and the item's
+**Privacy practices** tab must say so, in line with README → "What is sent to
+our server": *Personally identifiable information* (the email of a buyer, via
+Stripe), *Location* (country, from the request), *User activity* (the billing
+events), and the certification that the data is not sold or used for anything
+unrelated to the extension. Tick *This item offers in-app purchases* in the
+store listing tab.
 
 If the permissions in `public/manifest.json` changed, the form asks for a
 justification per permission and the review is a slower, human one — days to

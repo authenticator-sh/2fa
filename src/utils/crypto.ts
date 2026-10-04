@@ -16,7 +16,14 @@ export const PBKDF2_ITERATIONS = 600_000;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
 const MK_BYTES = 32;
-const RECOVERY_BYTES = 20; // 160 bits -> 32 Base32 chars
+/**
+ * Symbols in a recovery code: 20 from a 33-symbol alphabet, shown as four
+ * groups of five. log2(33^20) ≈ 100.9 bits. (This used to say "160 bits", the
+ * size of the 20 random bytes drawn, not what survived mapping them onto 33
+ * symbols.) Plenty against a guesser who must also pay 600 000 PBKDF2
+ * iterations per try, and short enough to copy onto paper.
+ */
+const RECOVERY_CHARS = 20;
 
 export type EncryptedPayload = string; // "v1.<b64 iv>.<b64 ciphertext>"
 
@@ -193,11 +200,26 @@ export async function unwrapMasterKey(wrapped: EncryptedPayload, wrappingKey: Cr
 // couple of bits of entropy we give up.
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNPQRSTUVWXYZ23456789'; // no O, 0, 1
 
+/**
+ * Rejection sampling, not `byte % 33`. 256 is not a multiple of 33, so the
+ * modulo gave the first 24 symbols a 8/256 chance each and the last 9 a 7/256
+ * one — a skew that shaved entropy off every code and gave a guesser a better
+ * than uniform place to start. Bytes at or above 231 (the largest multiple of
+ * 33 that fits) are drawn again instead.
+ *
+ * Only the choice of symbol changed: same alphabet, same length, same
+ * grouping, so every code issued before still normalises and unlocks as it did.
+ */
 export function generateRecoveryCode(): string {
-  const bytes = randomBytes(RECOVERY_BYTES);
+  const n = BASE32_ALPHABET.length;
+  const limit = 256 - (256 % n);
   let output = '';
-  for (const byte of bytes) {
-    output += BASE32_ALPHABET[byte % BASE32_ALPHABET.length];
+  while (output.length < RECOVERY_CHARS) {
+    for (const byte of randomBytes(RECOVERY_CHARS)) {
+      if (byte >= limit) continue;
+      output += BASE32_ALPHABET[byte % n];
+      if (output.length === RECOVERY_CHARS) break;
+    }
   }
   return output.match(/.{1,5}/g)!.join('-');
 }

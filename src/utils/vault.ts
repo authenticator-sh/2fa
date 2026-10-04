@@ -177,13 +177,28 @@ function hasSessionStorage(): boolean {
   return typeof chrome !== 'undefined' && !!chrome.storage && !!chrome.storage.session;
 }
 
-async function readSession(): Promise<SessionState | null> {
-  if (memoryIsAuthoritative || !hasSessionStorage()) return memoryFallback;
+/**
+ * The session, and whether it came out of chrome.storage.session rather than
+ * this context's own memory. The distinction matters on auto-lock 0 only: there
+ * the key is never persisted, so one found in session storage is a leftover —
+ * see pastIdleDeadline.
+ */
+interface ReadSession {
+  state: SessionState;
+  persisted: boolean;
+}
+
+async function readSession(): Promise<ReadSession | null> {
+  const fromMemory = (): ReadSession | null =>
+    memoryFallback ? { state: memoryFallback, persisted: false } : null;
+
+  if (memoryIsAuthoritative || !hasSessionStorage()) return fromMemory();
   try {
     const result = await chrome.storage.session.get(SESSION_KEY);
-    return (result[SESSION_KEY] as SessionState) || null;
+    const state = (result[SESSION_KEY] as SessionState) || null;
+    return state ? { state, persisted: true } : null;
   } catch {
-    return memoryFallback;
+    return fromMemory();
   }
 }
 
@@ -231,12 +246,25 @@ async function writeSession(state: SessionState | null): Promise<void> {
 // which is memory-only, cleared when the browser closes and unreachable from
 // content scripts, and it expires.
 
-/** Hand the unlocked master key to the next context that asks, once. */
-export async function stageKeyHandoff(masterKeyBytes: Uint8Array): Promise<void> {
+/**
+ * What a staged key is for. A hand-off is only ever adopted by the context it
+ * was staged for.
+ *
+ * It used to carry no purpose, and every popup open consumed whatever was
+ * waiting. "Add a passkey" stages the key for the ceremony window and leaves it
+ * there for up to two minutes, so anyone who clicked the toolbar icon in that
+ * window — the user having walked away from the ceremony prompt, say — got the
+ * vault opened without a password. The ceremony page takes only 'register', a
+ * popup only 'unlock', and one never swallows the other's.
+ */
+export type HandoffPurpose = 'register' | 'unlock';
+
+/** Hand the unlocked master key to the next context that asks for `purpose`, once. */
+export async function stageKeyHandoff(masterKeyBytes: Uint8Array, purpose: HandoffPurpose): Promise<void> {
   if (!hasSessionStorage()) return;
   try {
     await chrome.storage.session.set({
-      [HANDOFF_KEY]: { mk: toBase64(masterKeyBytes), stagedAt: Date.now() },
+      [HANDOFF_KEY]: { mk: toBase64(masterKeyBytes), stagedAt: Date.now(), purpose },
     });
   } catch {
     // Nothing to fall back to, and nothing is lost: the caller either still
@@ -245,13 +273,19 @@ export async function stageKeyHandoff(masterKeyBytes: Uint8Array): Promise<void>
 }
 
 /**
- * Take a staged key, if one is waiting, and adopt it as this context's session.
- * Single use: the staged copy is removed whether or not it turned out valid.
+ * Take a staged key meant for `purpose`, if one is waiting. Single use: a
+ * matching copy is removed whether or not it turned out valid; one staged for
+ * the other purpose is left where it is for the context it belongs to.
+ *
+ * Only an 'unlock' hand-off is adopted as this context's session. A
+ * 'register' one is returned to the ceremony page and nothing more — linking a
+ * passkey is not an unlock, and must not leave that window holding an open
+ * vault it was never asked to open.
  */
-export async function consumeKeyHandoff(): Promise<Uint8Array | null> {
+export async function consumeKeyHandoff(purpose: HandoffPurpose): Promise<Uint8Array | null> {
   if (!hasSessionStorage()) return null;
 
-  let staged: { mk?: unknown; stagedAt?: unknown } | undefined;
+  let staged: { mk?: unknown; stagedAt?: unknown; purpose?: unknown } | undefined;
   try {
     staged = (await chrome.storage.session.get(HANDOFF_KEY))[HANDOFF_KEY];
   } catch {
@@ -259,18 +293,28 @@ export async function consumeKeyHandoff(): Promise<Uint8Array | null> {
   }
   if (!staged || typeof staged.mk !== 'string') return null;
 
+  // An unreadable or wound-back clock reads as expired. The failure direction
+  // here has to be "make them do it again", never "accept an old key".
+  const age = ageOf(typeof staged.stagedAt === 'number' ? staged.stagedAt : 0) ?? Infinity;
+  const expired = age > HANDOFF_TTL_MS;
+
+  // Not ours and still live: someone else's to take. A copy with no purpose at
+  // all can only have been staged by an older build, and belongs to nobody.
+  if (!expired && staged.purpose !== purpose && (staged.purpose === 'register' || staged.purpose === 'unlock')) {
+    return null;
+  }
+
   // Removed before use, and best-effort: a copy that cannot be deleted is worth
   // far less than an unlock that fails, and session storage dies with the
   // browser regardless.
   chrome.storage.session.remove(HANDOFF_KEY).catch(() => {});
 
-  // An unreadable or wound-back clock reads as expired. The failure direction
-  // here has to be "make them do it again", never "accept an old key".
-  const age = ageOf(typeof staged.stagedAt === 'number' ? staged.stagedAt : 0) ?? Infinity;
-  if (age > HANDOFF_TTL_MS) return null;
+  if (expired || staged.purpose !== purpose) return null;
 
   const masterKeyBytes = fromBase64(staged.mk);
-  await writeSession({ mk: staged.mk, lastActivity: Date.now() });
+  if (purpose === 'unlock') {
+    await writeSession({ mk: staged.mk, lastActivity: Date.now() });
+  }
   return masterKeyBytes;
 }
 
@@ -500,6 +544,26 @@ async function lockNow(): Promise<void> {
 
 // --- passkey unlock -------------------------------------------------------
 
+/**
+ * Prove the current password and stage the master key for the passkey
+ * ceremony page, which links the passkey in a window of its own.
+ *
+ * The password is asked even though the vault is open. A passkey is a new,
+ * permanent way in: linked from an unlocked vault on the strength of the
+ * session alone, anyone passing an unattended, unlocked browser could add
+ * their own authenticator in a few seconds and come back for the codes any
+ * time after — through every password change, since the passkey wraps the
+ * master key, not the password. Turning protection off asks for the password
+ * for the same reason.
+ *
+ * The key comes from the password wrapper, not the session, so this also
+ * works on auto-lock "every open", where no other context can read the key.
+ */
+export async function stagePasskeyRegistration(password: string): Promise<void> {
+  const masterKeyBytes = await verifyPassword(password);
+  await stageKeyHandoff(masterKeyBytes, 'register');
+}
+
 export async function getVaultPasskey(): Promise<VaultPasskey | null> {
   return (await getVaultMeta())?.passkey ?? null;
 }
@@ -602,7 +666,22 @@ export async function getAutoLockMinutes(): Promise<number> {
 }
 
 export async function setAutoLockMinutes(minutes: number): Promise<void> {
-  await chrome.storage.local.set({ [AUTO_LOCK_KEY]: minutes });
+  // Under the session lock, so a key read in another context cannot write the
+  // session back between the setting changing and the key leaving storage.
+  await withLock(SESSION_LOCK, async () => {
+    await chrome.storage.local.set({ [AUTO_LOCK_KEY]: minutes });
+    if (minutes !== 0) return;
+
+    // Choosing "every open" used to change the setting and nothing else. The
+    // key stayed in session storage, where 0 never looks for a deadline, so
+    // the next popup — hours later — opened without asking, and quick fill in
+    // the service worker went on reading it. The switch now does what the
+    // setting promises from then on: the key leaves shared storage, and only
+    // this page, the one the user is looking at, keeps it in memory — exactly
+    // the state an unlock on 0 produces.
+    const session = await readSession();
+    await writeSession(session ? session.state : null);
+  });
 }
 
 /**
@@ -628,24 +707,30 @@ export async function getMasterKeyBytes(): Promise<Uint8Array | null> {
       return null;
     }
 
-    await writeSession({ ...session, lastActivity: Date.now() });
-    return fromBase64(session.mk);
+    await writeSession({ ...session.state, lastActivity: Date.now() });
+    return fromBase64(session.state.mk);
   });
 }
 
-async function pastIdleDeadline(session: SessionState): Promise<boolean> {
+async function pastIdleDeadline({ state, persisted }: ReadSession): Promise<boolean> {
   const autoLockMinutes = await getAutoLockMinutes();
 
   // -1 keeps the key until the browser closes (session storage does that for
-  // us); 0 never persisted it in the first place. Only positive values need an
-  // idle deadline checked here.
-  if (autoLockMinutes <= 0) return false;
+  // us). Nothing to check.
+  if (autoLockMinutes < 0) return false;
+
+  // 0 never persists the key, so the copy in this page's memory is the only
+  // legitimate one. A key in session storage is left over — written before
+  // the switch to 0, or by a context that raced it — and it is expired by
+  // definition: honouring it is how "every open" came to mean "never" for
+  // every popup after the first.
+  if (autoLockMinutes === 0) return persisted;
 
   // A stamp we cannot trust — clock wound back, or a malformed session — is
   // treated as infinitely idle. This check is the only thing enforcing the
   // deadline the user chose, so its failure direction has to be "lock", not
   // "keep handing out the master key".
-  const idleMs = ageOf(session.lastActivity) ?? Infinity;
+  const idleMs = ageOf(state.lastActivity) ?? Infinity;
   return idleMs > autoLockMinutes * 60_000;
 }
 
@@ -746,6 +831,11 @@ export interface PreparedRecovery {
   /** Show this and have it typed back BEFORE calling commit(). */
   recoveryCode: string;
   /**
+   * Whether the vault has a passkey linked, which commit() will unlink. Read
+   * when the reset was prepared; the commit drops whatever is linked by then.
+   */
+  removesPasskey: boolean;
+  /**
    * Replaces the password and recovery wrappers and unlocks. Until this
    * resolves, the old password and the old recovery code both still work.
    */
@@ -824,9 +914,19 @@ export async function prepareRecovery(code: string, newPassword: string): Promis
       // only the vault it was unwrapped from; written over any other, the new
       // password would open nothing.
       //
-      // Spread over the copy read just now, not the one from prepare, so a
-      // passkey added in between survives the reset.
-      await updateVaultMeta(meta.vaultId, current => ({ ...current, ...wrappers }));
+      // Spread over the copy read just now, not the one from prepare, so
+      // nothing else changed in between is undone.
+      //
+      // Except the passkey, which goes. A recovery reset is what someone does
+      // when a way in is lost or may be in the wrong hands — the recovery code
+      // is rotated for exactly that reason — and a passkey linked before it
+      // went on opening the vault afterwards, silently. Whoever the reset was
+      // meant to shut out kept a key. The user adds their own passkey again
+      // in one step; LockScreen tells them so.
+      await updateVaultMeta(meta.vaultId, current => {
+        const { passkey: _unlinked, ...rest } = current;
+        return { ...rest, ...wrappers } as VaultMeta;
+      });
       await writeSession({ mk: toBase64(masterKeyBytes), lastActivity: Date.now() });
     })().catch(error => {
       committing = null;
@@ -835,7 +935,7 @@ export async function prepareRecovery(code: string, newPassword: string): Promis
     return committing;
   };
 
-  return { recoveryCode, commit };
+  return { recoveryCode, removesPasskey: !!meta.passkey, commit };
 }
 
 /** Verifies a password without changing session state. */

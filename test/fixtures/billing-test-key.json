@@ -1,0 +1,25 @@
+{
+  "comment": "TEST-ONLY signing key for unit and e2e tests. Trusted only by builds made with BILLING_ENV=test; never by a store build.",
+  "kid": "test-only",
+  "privateJwk": {
+    "key_ops": [
+      "sign"
+    ],
+    "ext": true,
+    "kty": "EC",
+    "x": "5L1l1J4h3Y94hzBwBpSdSNUSPKgUTu7etaJDdEFDaqg",
+    "y": "7wunp-jXoQgHd_2whLixNBOA9bMmJ86TKvf2wTVVgBg",
+    "crv": "P-256",
+    "d": "E6fzUZEUap1dkdms8ko0Hgqp2WIekIMVl1v4CE-ZURk",
+    "kid": "test-only",
+    "alg": "ES256"
+  },
+  "publicJwk": {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "5L1l1J4h3Y94hzBwBpSdSNUSPKgUTu7etaJDdEFDaqg",
+    "y": "7wunp-jXoQgHd_2whLixNBOA9bMmJ86TKvf2wTVVgBg",
+    "kid": "test-only",
+    "alg": "ES256"
+  }
+}

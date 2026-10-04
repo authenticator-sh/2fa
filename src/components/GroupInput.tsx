@@ -117,7 +117,7 @@ export function GroupInput({ value, onChange, groups = [], language, inputId = '
         className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5"
       >
         {t('groups.field')}
-        <span className="ms-1.5 font-normal text-xs text-gray-400 dark:text-gray-500">
+        <span className="ms-1.5 font-normal text-xs text-gray-500 dark:text-gray-400">
           {t('groups.optional')}
         </span>
       </label>
@@ -164,7 +164,7 @@ export function GroupInput({ value, onChange, groups = [], language, inputId = '
             onClick={clear}
             aria-label={t('groups.clear')}
             title={t('groups.clear')}
-            className="absolute end-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+            className="absolute end-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-gray-500 transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
           >
             <X size={14} />
           </button>

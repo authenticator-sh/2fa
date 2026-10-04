@@ -27,8 +27,35 @@ interface EncryptedBackupFile {
   iterations: number;
   salt: string;
   exportDate: string;
+  /** The extension version that wrote the file; absent before 1.14.0. */
+  appVersion?: string;
+  /** Written by an install that predates the paywall (BackupFileOptions). */
+  legacy?: true;
   /** Everything sensitive, including how many accounts there are. */
   data: string;
+}
+
+/**
+ * The iteration counts an encrypted export may ask for.
+ *
+ * The count comes from the file, and PBKDF2 runs on the popup's main thread:
+ * a crafted .encrypted.json with `iterations: 1e10` froze the popup for hours
+ * on the password prompt, with nothing the user could do but kill the browser.
+ * Every version that wrote this format wrote PBKDF2_ITERATIONS, 600 000 — the
+ * format arrived in 1.10.0 and the constant has not moved since — so the floor
+ * sits well under it and the ceiling leaves room for a later raise — about
+ * eight times today's cost, seconds rather than hours — while refusing
+ * anything that would hang.
+ */
+export const MIN_BACKUP_ITERATIONS = 100_000;
+export const MAX_BACKUP_ITERATIONS = 5_000_000;
+
+/** The file is not one we wrote, or is from a build that writes more than we accept. */
+export class DamagedBackupFileError extends Error {
+  constructor(detail: string) {
+    super(`This backup file cannot be opened: ${detail}`);
+    this.name = 'DamagedBackupFileError';
+  }
 }
 
 export class WrongExportPasswordError extends Error {
@@ -38,12 +65,37 @@ export class WrongExportPasswordError extends Error {
   }
 }
 
-export function buildPlainBackupFile(accounts: Account[]): string {
+/**
+ * `legacy` marks a file written by an install that predates the paywall, so
+ * restoring it on a new computer keeps the person's unlimited accounts
+ * (billing/legacy.ts). Absent otherwise — older readers ignore the field.
+ */
+export interface BackupFileOptions {
+  legacy?: boolean;
+}
+
+/**
+ * The version of the extension writing the file. Files from before 1.14.0 do
+ * not have it, which is how a restore tells a pre-paywall backup from a new one
+ * whatever date it bears (billing/legacy.ts).
+ */
+function appVersion(): { appVersion?: string } {
+  try {
+    const version = chrome.runtime.getManifest().version;
+    return typeof version === 'string' ? { appVersion: version } : {};
+  } catch {
+    return {};
+  }
+}
+
+export function buildPlainBackupFile(accounts: Account[], options: BackupFileOptions = {}): string {
   return JSON.stringify(
     {
       version: '2.0',
       exportDate: new Date().toISOString(),
+      ...appVersion(),
       accountCount: accounts.length,
+      ...(options.legacy ? { legacy: true } : {}),
       accounts,
     },
     null,
@@ -51,7 +103,11 @@ export function buildPlainBackupFile(accounts: Account[]): string {
   );
 }
 
-export async function buildEncryptedBackupFile(accounts: Account[], password: string): Promise<string> {
+export async function buildEncryptedBackupFile(
+  accounts: Account[],
+  password: string,
+  options: BackupFileOptions = {}
+): Promise<string> {
   const salt = newSalt();
   const key = await deriveKeyFromPassword(password, salt);
 
@@ -62,6 +118,8 @@ export async function buildEncryptedBackupFile(accounts: Account[], password: st
     iterations: PBKDF2_ITERATIONS,
     salt: toBase64(salt),
     exportDate: new Date().toISOString(),
+    ...appVersion(),
+    ...(options.legacy ? { legacy: true } : {}),
     data: await encryptJson(accounts, key),
   };
 
@@ -82,7 +140,30 @@ export async function readEncryptedBackupFile(text: string, password: string): P
     throw new Error('Not an encrypted backup file');
   }
 
-  const key = await deriveKeyFromPassword(password, fromBase64(file.salt), file.iterations);
+  // Checked before the derivation, which is where a hostile count does its
+  // damage. Refused rather than clamped: a clamped count derives a different
+  // key, which would come back as "wrong password" for the right one.
+  const { iterations } = file;
+  if (
+    typeof iterations !== 'number' ||
+    !Number.isInteger(iterations) ||
+    iterations < MIN_BACKUP_ITERATIONS ||
+    iterations > MAX_BACKUP_ITERATIONS
+  ) {
+    throw new DamagedBackupFileError(`unsupported iteration count ${String(iterations)}`);
+  }
+  if (typeof file.salt !== 'string' || typeof file.data !== 'string') {
+    throw new DamagedBackupFileError('missing salt or data');
+  }
+
+  let salt: Uint8Array;
+  try {
+    salt = fromBase64(file.salt);
+  } catch {
+    throw new DamagedBackupFileError('salt is not base64');
+  }
+
+  const key = await deriveKeyFromPassword(password, salt, iterations);
   try {
     return await decryptJson<Account[]>(file.data, key);
   } catch {

@@ -69,9 +69,17 @@ class FakeElement {
     return true;
   }
 
-  attachShadow(): { appendChild(child: FakeElement): FakeElement } {
-    const root = new FakeElement();
-    this.appendChild(root);
+  /** Set by attachShadow in open mode, as the real property is; null for closed. */
+  shadowRoot: FakeShadowRoot | null = null;
+
+  /**
+   * A root of its own, outside `children`: the document's queries do not
+   * reach into it, which is the whole difficulty with fields inside one.
+   */
+  attachShadow(init: { mode?: 'open' | 'closed' } = {}): FakeShadowRoot {
+    const root = new FakeShadowRoot();
+    root.isConnected = this.isConnected;
+    if (init.mode === 'open') this.shadowRoot = root;
     return root;
   }
 
@@ -80,9 +88,15 @@ class FakeElement {
   }
 
   querySelectorAll(selector: string): FakeElement[] {
+    if (selector.trim() === '*') return this.descendants();
     const wanted = selector.split(',').map(part => part.trim().toUpperCase());
     return this.descendants().filter(node => wanted.includes(node.tagName));
   }
+}
+
+class FakeShadowRoot extends FakeElement {
+  tagName = '#shadow-root';
+  activeElement: FakeElement | null = null;
 }
 
 class FakeInput extends FakeElement {
@@ -283,4 +297,4 @@ export function input(props: Partial<FakeInput> & { parent: FakeElement }): Fake
   return el;
 }
 
-export { FakeElement, FakeInput, FakeDocument };
+export { FakeElement, FakeInput, FakeDocument, FakeShadowRoot };

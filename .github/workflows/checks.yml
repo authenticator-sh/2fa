@@ -35,6 +35,36 @@ jobs:
       # release scripts unchecked.
       - run: npm run typecheck
       - run: npm test
+      # The tests read src/; what ships is what the bundler made of it. The build
+      # itself is the first check (tsc over src/ plus vite), and check:bundle
+      # then walks the emitted service worker's import graph for `import()` —
+      # which Chrome refuses in a worker — and makes sure every page, icon and
+      # the default locale the manifest needs is in the package.
+      - run: npm run build
+      - run: npm run check:bundle
+
+  # The built extension loaded into real Chromium (Playwright). A job of its own
+  # so a red run here is not mistaken for a unit failure, and so a browser that
+  # would not install shows up on its own step rather than as failing tests.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+      # Builds into .e2e-build/ (not dist/) and runs e2e/.
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 14
 
   deps:
     runs-on: ubuntu-latest

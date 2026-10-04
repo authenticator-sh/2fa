@@ -171,7 +171,7 @@ export async function run(): Promise<void> {
     const limit = share.MAX_SHARE_SECONDS;
     let worst = '';
     let allWithin = true;
-    for (const period of [1, 7, 11, 35, 45, 70, 90, 119, 250, 3600]) {
+    for (const period of [share.MIN_SHARE_PERIOD, 17, 35, 45, 70, 90, 119, 250, 3600]) {
       const link = await share.buildShareLink({
         account: { ...account, period },
         durationSec: limit,
@@ -197,6 +197,32 @@ export async function run(): Promise<void> {
       odd.validUntilMs === (oddCounter - 1 + odd.count) * 35_000,
       String(odd.validUntilMs)
     );
+  }
+
+  // An hour of one-second codes is 3 601 of them: a link of 12 000 characters
+  // that no QR code holds and no chat client keeps in one piece. It was built
+  // anyway, and the sender found out only when the other side could not use it.
+  scenario('A period too short to fit in a link is refused, with the reason');
+  {
+    for (const period of [1, 5, 10, share.MIN_SHARE_PERIOD - 1]) {
+      let reason: string | undefined;
+      try {
+        await share.buildShareLink({ account: { ...account, period }, durationSec: 300, nowMs });
+      } catch (error) {
+        reason = (error as { reason?: string }).reason;
+      }
+      check(`${period} s is refused as a period problem`, reason === 'period', String(reason));
+    }
+
+    // The shortest that is made stays under the line length at which email
+    // clients wrap a URL, even for an hour.
+    const shortest = await share.buildShareLink({
+      account: { ...account, period: share.MIN_SHARE_PERIOD },
+      durationSec: share.MAX_SHARE_SECONDS,
+      nowMs,
+    });
+    check('the shortest period allowed still makes a link under 998 characters', shortest.url.length < 998, String(shortest.url.length));
+    check('and the page can still read anything down to one second', share.SHARE_LIMITS.minPeriod === 1);
   }
 
   scenario('A label the sender wrote travels instead of the account name');

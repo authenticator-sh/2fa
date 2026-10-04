@@ -5,7 +5,7 @@
 // popup down. They are pure functions, so the scenarios below are the cheapest
 // coverage in the project.
 
-import { check, scenario } from './harness';
+import { check, scenario, USER_ADD } from './harness';
 
 const base = {
   id: 'x',
@@ -102,9 +102,18 @@ export async function run(): Promise<void> {
   check('a hotp URL throws UnsupportedOTPTypeError', hotpRefused);
 
   scenario('otpauth:// parameters are range-checked at the door');
-  const parsed = qr.parseOTPAuthURL('otpauth://totp/ACME:alice?secret=JBSWY3DPEHPK3PXP&period=0&digits=99&algorithm=SHA-256');
-  check('a zero period is replaced', parsed?.period === 30);
-  check('an absurd digit count is replaced', parsed?.digits === 6);
+  // Stated and unusable is refused, not replaced: a zero period stored as 30
+  // or 99 digits stored as 6 was an account whose every code was wrong.
+  const refusedWith = (url: string) => {
+    try {
+      return JSON.stringify(qr.parseOTPAuthURL(url));
+    } catch (error: any) {
+      return error?.name === 'UnsupportedOTPTypeError' ? `refused:${error.reason}` : `threw:${error?.message}`;
+    }
+  };
+  check('a zero period is refused', refusedWith('otpauth://totp/ACME:alice?secret=JBSWY3DPEHPK3PXP&period=0') === 'refused:other');
+  check('an absurd digit count is refused', refusedWith('otpauth://totp/ACME:alice?secret=JBSWY3DPEHPK3PXP&digits=99') === 'refused:other');
+  const parsed = qr.parseOTPAuthURL('otpauth://totp/ACME:alice?secret=JBSWY3DPEHPK3PXP&algorithm=SHA-256');
   check('hyphenated SHA-256 is preserved, not downgraded', parsed?.algorithm === 'SHA256', String(parsed?.algorithm));
 
   const seven = qr.parseOTPAuthURL('otpauth://totp/ACME:alice?secret=JBSWY3DPEHPK3PXP&digits=7');
@@ -437,7 +446,7 @@ export async function run(): Promise<void> {
     qr.buildOTPAuthURL({ ...base, issuer: 'Other', name: 'two@x.com', secret: secondSecret }),
   ].join('\n');
 
-  const first = await uriImport.importURIList(twoLinks, 'en');
+  const first = await uriImport.importURIList(twoLinks, 'en', USER_ADD);
   check('the first import reports what it wrote', first.added === 2, JSON.stringify(first));
   check('and says so as a success', first.kind === 'success', first.kind);
 
@@ -446,11 +455,11 @@ export async function run(): Promise<void> {
 
   // Same text again: the de-duplication is what stops a second attempt at a
   // half-finished migration from doubling everything.
-  const second = await uriImport.importURIList(twoLinks, 'en');
+  const second = await uriImport.importURIList(twoLinks, 'en', USER_ADD);
   check('a repeat adds nothing', second.added === 0, JSON.stringify(second));
   check('and still leaves two accounts', (await storage.getAccounts()).length === 2);
 
-  const nothing = await uriImport.importURIList('not a link at all', 'en');
+  const nothing = await uriImport.importURIList('not a link at all', 'en', USER_ADD);
   check('a file with no links is an error, not a silent no-op',
     nothing.kind === 'error' && nothing.added === undefined, JSON.stringify(nothing));
 
@@ -461,7 +470,7 @@ export async function run(): Promise<void> {
     { ...base, id: 'a', name: 'x@y.com', issuer: 'Acme', secret },
     { ...base, id: 'b', name: 'z@y.com', issuer: 'Acme', secret: 'KRSXG5CTMVRXEZLU' },
   ] as any);
-  const restored = await uriImport.importURIList(written.text, 'en');
+  const restored = await uriImport.importURIList(written.text, 'en', USER_ADD);
   check('an exported .txt imports as its own accounts', restored.added === 2, JSON.stringify(restored));
   check('and the file was recognised as a link list', uriImport.looksLikeURIList(written.text));
 

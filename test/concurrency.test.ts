@@ -11,7 +11,7 @@
 // The length guard in saveAccounts does not see it: eleven written over eleven
 // is not a shrink. These scenarios are the ones that guard actually misses.
 
-import { areas, check, flush, resetState, scenario, setWebLocks, storageContext, withLatency } from './harness';
+import { areas, check, flush, resetState, scenario, setWebLocks, storageContext, withLatency, USER_ADD } from './harness';
 
 const account = (id: string, secret: string) => ({
   id,
@@ -46,8 +46,8 @@ export async function run(): Promise<void> {
   await storage.saveAccounts([account('a1', SEEDS[0])]);
   await flush();
   await Promise.all([
-    storage.addAccount(account('b2', SEEDS[1]) as any),
-    storage.addAccount(account('c3', SEEDS[2]) as any),
+    storage.addAccount(account('b2', SEEDS[1]) as any, USER_ADD),
+    storage.addAccount(account('c3', SEEDS[2]) as any, USER_ADD),
   ]);
   await flush();
   check(
@@ -64,8 +64,8 @@ export async function run(): Promise<void> {
   await storage.saveAccounts([account('a1', SEEDS[0])]);
   await flush();
   const [batch] = await Promise.all([
-    storage.addMultipleAccounts([account('b2', SEEDS[1]), account('c3', SEEDS[2])] as any),
-    storage.addAccount(account('d4', SEEDS[3]) as any),
+    storage.addMultipleAccounts([account('b2', SEEDS[1]), account('c3', SEEDS[2])] as any, USER_ADD),
+    storage.addAccount(account('d4', SEEDS[3]) as any, USER_ADD),
   ]);
   await flush();
   check(
@@ -83,7 +83,7 @@ export async function run(): Promise<void> {
   await flush();
   await Promise.all([
     storage.deleteAccount('a1'),
-    storage.addAccount(account('b3', SEEDS[2]) as any),
+    storage.addAccount(account('b3', SEEDS[2]) as any, USER_ADD),
   ]);
   await flush();
   check(
@@ -100,7 +100,7 @@ export async function run(): Promise<void> {
   await flush();
   const outcomes = await Promise.allSettled([
     storage.updateAccount('a1', { name: 'renamed@example.com' }),
-    storage.addAccount(account('b2', SEEDS[1]) as any),
+    storage.addAccount(account('b2', SEEDS[1]) as any, USER_ADD),
   ]);
   await flush();
   check(
@@ -120,7 +120,7 @@ export async function run(): Promise<void> {
   await flush();
   await Promise.all([
     storage.reorderAccounts(['a2', 'a1']),
-    storage.addAccount(account('b3', SEEDS[2]) as any),
+    storage.addAccount(account('b3', SEEDS[2]) as any, USER_ADD),
   ]);
   await flush();
   check(
@@ -136,7 +136,7 @@ export async function run(): Promise<void> {
   await storage.saveAccounts([account('a0', SEEDS[0])]);
   await flush();
   await Promise.all(
-    SEEDS.slice(1).map((seed, i) => storage.addAccount(account(`w${i + 1}`, seed) as any))
+    SEEDS.slice(1).map((seed, i) => storage.addAccount(account(`w${i + 1}`, seed) as any, USER_ADD))
   );
   await flush();
   const all = await storage.getAccounts();
@@ -155,7 +155,7 @@ export async function run(): Promise<void> {
   await resetState();
   await storage.saveAccounts([account('a1', SEEDS[0])]);
   await flush();
-  await storage.addAccount({ ...account('b2', SEEDS[0]), name: 'a different name' } as any);
+  await storage.addAccount({ ...account('b2', SEEDS[0]), name: 'a different name' } as any, USER_ADD);
   await flush();
   check('nothing was appended', storedRecords().length === 1, String(storedRecords().length));
   check(
@@ -173,7 +173,7 @@ export async function run(): Promise<void> {
   const spellings = ['jbswy3dpehpk3pxp', 'JBSWY3DPEHPK3PXP=', 'JBSW-Y3DP-EHPK-3PXP', 'JBSW Y3DP EHPK 3PXP'];
   const batch2 = await storage.addMultipleAccounts(
     spellings.map((secret, i) => account(`v${i}`, secret)) as any
-  );
+  , USER_ADD);
   await flush();
   check('none of them is added', batch2.added === 0, String(batch2.added));
   check('all four are reported as already here', batch2.skipped === 4, String(batch2.skipped));
@@ -187,13 +187,13 @@ export async function run(): Promise<void> {
   await flush();
   const { faults, resetFaults } = await import('./harness');
   faults.failLocalSetFor = 'authenticator_accounts';
-  const refused = await storage.addAccount(account('b2', SEEDS[1]) as any).then(
+  const refused = await storage.addAccount(account('b2', SEEDS[1]) as any, USER_ADD).then(
     () => 'resolved',
     () => 'rejected'
   );
   resetFaults();
   check('the failing write is reported to its caller', refused === 'rejected', refused);
-  await storage.addAccount(account('c3', SEEDS[2]) as any);
+  await storage.addAccount(account('c3', SEEDS[2]) as any, USER_ADD);
   await flush();
   check(
     'and the next write still goes through',
@@ -263,7 +263,7 @@ export async function run(): Promise<void> {
 
         const first = {
           delete: () => popup.deleteAccount('a1'),
-          add: () => popup.addAccount(account('x3', SEEDS[2]) as any),
+          add: () => popup.addAccount(account('x3', SEEDS[2]) as any, USER_ADD),
           edit: () => popup.updateAccount('a2', { name: 'renamed' }),
           reorder: () => popup.reorderAccounts(['a2', 'a1']),
         }[kind];
@@ -273,7 +273,7 @@ export async function run(): Promise<void> {
         await Promise.all([
           first(),
           new Promise(resolve => setTimeout(resolve, offset)).then(() =>
-            scanner.addAccount(account('y4', SEEDS[3]) as any)
+            scanner.addAccount(account('y4', SEEDS[3]) as any, USER_ADD)
           ),
         ]);
         await new Promise(resolve => setTimeout(resolve, 40));
@@ -339,6 +339,87 @@ export async function run(): Promise<void> {
     check('and the deleted account stays out', ids === 'a2', ids);
   }
 
+  // --- what the open page shows -------------------------------------------
+  //
+  // Every open surface reloads on every storage event, and reads do not finish
+  // in the order they started: a read that has to replay a held sync push waits
+  // for the accounts lock with the list it already read, while a read started
+  // after the next write finishes at once. Applied in arrival order, the older
+  // list landed last and stayed on screen.
+  scenario('A reload that started first but finished last does not put the older list on screen');
+  await resetState();
+  {
+    const { createAccountsLoader } = await import('@/hooks/useAccounts');
+    await storage.saveAccounts([account('a1', SEEDS[0]), account('a2', SEEDS[1])] as any);
+    await flush();
+    const screen: { accounts: any[] } = { accounts: [] };
+    const loader = createAccountsLoader(patch => {
+      if (patch.accounts) screen.accounts = patch.accounts;
+    });
+    // A held push is waiting to be replayed, so the first read will queue for
+    // the lock after reading — behind the writer standing in for another window.
+    areas.local.syncPushPending = true;
+    let release!: () => void;
+    const writerHolds = new Promise<void>(resolve => (release = resolve));
+    const writer = navigator.locks.request('authenticator-accounts', () => writerHolds);
+    await flush();
+
+    const older = loader.load({ quiet: true });
+    await flush();
+    // The other window's add lands while it holds the lock…
+    areas.local.authenticator_accounts = [
+      ...(areas.local.authenticator_accounts as any[]),
+      account('a3', SEEDS[2]),
+    ];
+    // …and the storage event it fires starts a second read, which sees it.
+    await loader.load({ quiet: true });
+    release();
+    await writer;
+    await older;
+    await flush();
+    const ids = screen.accounts.map(a => a.id).join();
+    check('the screen shows the newest list', ids === 'a1,a2,a3', ids);
+  }
+
+  scenario('Reloading a list that is already on screen keeps it there');
+  await resetState();
+  {
+    const { createAccountsLoader } = await import('@/hooks/useAccounts');
+    await storage.saveAccounts([account('a1', SEEDS[0])] as any);
+    const spinners: boolean[] = [];
+    const loader = createAccountsLoader(patch => {
+      if (patch.loading !== undefined) spinners.push(patch.loading);
+    });
+    await loader.reload();
+    check('the first load shows the spinner', spinners[0] === true, spinners.join());
+    spinners.length = 0;
+    await loader.load({ quiet: true });
+    check('a quiet reload never does', !spinners.includes(true), spinners.join());
+    spinners.length = 0;
+    // What App calls after an import or a restore.
+    await loader.reload();
+    check('nor does a reload once a list is shown', !spinners.includes(true), spinners.join());
+    loader.clear();
+    spinners.length = 0;
+    await loader.reload();
+    check('after a lock the next load shows it again', spinners[0] === true, spinners.join());
+  }
+
+  scenario('Locking while a read is in flight keeps the decrypted list off screen');
+  await resetState();
+  {
+    const { createAccountsLoader } = await import('@/hooks/useAccounts');
+    await storage.saveAccounts([account('a1', SEEDS[0])] as any);
+    let shown: any[] = [];
+    const loader = createAccountsLoader(patch => {
+      if (patch.accounts) shown = patch.accounts;
+    });
+    const inFlight = loader.load();
+    loader.clear();
+    await inFlight;
+    check('nothing is published after the lock', shown.length === 0, shown.map(a => a.id).join());
+  }
+
   // Web Locks are missing on old Chrome builds; the in-context queue must still
   // serialise one window's own writers, as it did before the lock existed.
   scenario('Without Web Locks one window still never loses its own writes');
@@ -346,7 +427,7 @@ export async function run(): Promise<void> {
   try {
     await resetState();
     await storage.saveAccounts([account('a1', SEEDS[0])]);
-    await Promise.all(SEEDS.slice(1, 4).map((seed, i) => storage.addAccount(account(`n${i}`, seed) as any)));
+    await Promise.all(SEEDS.slice(1, 4).map((seed, i) => storage.addAccount(account(`n${i}`, seed) as any, USER_ADD)));
     await flush();
     check('every add landed', storedIds().join() === 'a1,n0,n1,n2', storedIds().join());
   } finally {

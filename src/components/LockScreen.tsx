@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { AlertTriangle, Download, Eye, EyeOff, Fingerprint, Lock } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { createT, type Language } from '@/utils/i18n';
@@ -21,6 +21,7 @@ interface LockScreenProps {
 
 export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps) {
   const t = createT(language);
+  const ids = useId();
 
   const [mode, setMode] = useState<'password' | 'recovery'>('password');
   const [password, setPassword] = useState('');
@@ -126,6 +127,12 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
           </h2>
         </div>
         <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">{t('vault.recover.rotated')}</p>
+        {/* Said before the commit, while the user can still read it: the reset
+            unlinks the passkey (see vault.prepareRecovery), and finding out the
+            next time Touch ID quietly fails to open anything is worse. */}
+        {prepared.removesPasskey && (
+          <p className="text-xs text-amber-700 dark:text-amber-400 mb-3">{t('vault.recover.passkeyRemoved')}</p>
+        )}
 
         <div className="w-full bg-gray-100 dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-lg p-3 mb-2">
           <code className="block text-center text-sm font-mono font-semibold tracking-wider text-gray-900 dark:text-gray-100 break-all">
@@ -146,10 +153,11 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
           {t('vault.recovery.download')}
         </button>
 
-        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+        <label htmlFor={`${ids}-recovery-confirm`} className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
           {t('vault.recovery.confirm')}
         </label>
         <input
+          id={`${ids}-recovery-confirm`}
           type="text"
           value={typedRecovery}
           onChange={e => setTypedRecovery(e.target.value)}
@@ -169,7 +177,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
         <button
           onClick={handleFinishRecovery}
           disabled={!confirmed || busy}
-          className="w-full bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
+          className="w-full bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
         >
           {t('vault.recovery.finish')}
         </button>
@@ -216,15 +224,22 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
                 onChange={e => setPassword(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleUnlock()}
                 placeholder={t('vault.lock.password')}
+                aria-label={t('vault.lock.password')}
                 autoFocus
                 className="w-full px-3 py-2.5 pe-9 text-sm rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4]"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute end-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                // One name and a pressed state, rather than a name that flips
+                // between "show" and "hide": the state is what a screen reader
+                // announces, and a label that changes under the focus is
+                // announced as a different button.
+                aria-label={t('a11y.showPassword')}
+                aria-pressed={showPassword}
+                className="absolute end-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
               >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                {showPassword ? <EyeOff size={16} aria-hidden /> : <Eye size={16} aria-hidden />}
               </button>
             </div>
 
@@ -238,7 +253,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
             <button
               onClick={handleUnlock}
               disabled={busy || !password}
-              className="w-full bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50 mb-3"
+              className="w-full bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50 mb-3"
             >
               {t('vault.lock.unlock')}
             </button>
@@ -258,7 +273,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
                 setMode('recovery');
                 setError(null);
               }}
-              className="w-full text-xs text-[#4285F4] hover:underline"
+              className="w-full text-xs text-[#1a73e8] dark:text-[#669DF6] hover:underline"
             >
               {t('vault.lock.forgot')}
             </button>
@@ -275,6 +290,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
               value={recoveryCode}
               onChange={e => setRecoveryCode(e.target.value)}
               placeholder={t('vault.recover.placeholder')}
+              aria-label={t('vault.recover.placeholder')}
               autoFocus
               spellCheck={false}
               className="w-full px-3 py-2.5 text-sm font-mono rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4] mb-2"
@@ -285,6 +301,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
               onChange={e => setNewPassword(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleRecover()}
               placeholder={t('vault.recover.newPassword')}
+              aria-label={t('vault.recover.newPassword')}
               className="w-full px-3 py-2.5 text-sm rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4] mb-3"
             />
 
@@ -298,7 +315,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
             <button
               onClick={handleRecover}
               disabled={busy || !recoveryCode || !newPassword}
-              className="w-full bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50 mb-3"
+              className="w-full bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50 mb-3"
             >
               {t('vault.recover.submit')}
             </button>

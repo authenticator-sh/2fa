@@ -1,5 +1,6 @@
 import { parseMigrationURL, type MigrationAccount } from './migration-parser';
 import { cleanSecret, isUsableSecret } from './totp';
+import type { TranslationKey } from './i18n-keys';
 
 export interface ParsedOTPAuth {
   name: string;
@@ -9,6 +10,8 @@ export interface ParsedOTPAuth {
   /** 6 and 8 dominate, but 7 exists in the wild and otpauth generates it. */
   digits: number;
   period: number;
+  /** Present only for Steam Guard; see Account.type. */
+  type?: 'steam';
 }
 
 export interface ParsedQRResult {
@@ -25,6 +28,16 @@ export interface ParsedQRResult {
 }
 
 /**
+ * Why a code that was read and understood is refused.
+ *
+ * - `hotp`: counter-based. It has its own message because the fix is specific:
+ *   there is none, the account needs a different authenticator.
+ * - `other`: an OTP kind we do not generate (mOTP, Yandex) or parameters we
+ *   cannot honour — MD5, four digits, a two-hour period.
+ */
+export type UnsupportedReason = 'hotp' | 'other';
+
+/**
  * The QR was read and understood — and describes something we will not store.
  *
  * Distinct from the `null` return, which means "could not be parsed at all".
@@ -32,11 +45,17 @@ export interface ParsedQRResult {
  * corrupt, sending them to re-export a code that would never work either.
  */
 export class UnsupportedOTPTypeError extends Error {
-  constructor(message = 'Counter-based (HOTP) codes are not supported') {
-    super(message);
+  constructor(readonly reason: UnsupportedReason = 'hotp') {
+    super(
+      reason === 'hotp'
+        ? 'Counter-based (HOTP) codes are not supported'
+        : 'This code uses an OTP type or parameters that are not supported'
+    );
     this.name = 'UnsupportedOTPTypeError';
   }
 }
+
+export type OTPAlgorithm = 'SHA1' | 'SHA256' | 'SHA512';
 
 const ALGORITHMS = ['SHA1', 'SHA256', 'SHA512'] as const;
 
@@ -44,12 +63,14 @@ const ALGORITHMS = ['SHA1', 'SHA256', 'SHA512'] as const;
  * `SHA-256` (hyphenated) appears in real issuer URIs and otpauth accepts it, so
  * matching the bare form only used to downgrade those accounts to SHA1 —
  * silently, and forever.
+ *
+ * This one REPAIRS: it is for writing out a record we already hold, where the
+ * value has to match what generation computes with. Reading a value someone
+ * else wrote goes through readAlgorithm below, which refuses instead.
  */
-function parseAlgorithm(raw: string | null): 'SHA1' | 'SHA256' | 'SHA512' {
+function parseAlgorithm(raw: string | null): OTPAlgorithm {
   const name = (raw || 'SHA1').toUpperCase().replace(/-/g, '');
-  return (ALGORITHMS as readonly string[]).includes(name)
-    ? (name as 'SHA1' | 'SHA256' | 'SHA512')
-    : 'SHA1';
+  return (ALGORITHMS as readonly string[]).includes(name) ? (name as OTPAlgorithm) : 'SHA1';
 }
 
 /** Out-of-range values are dropped rather than coerced: see safePeriod in totp.ts. */
@@ -61,6 +82,104 @@ function parsePeriod(raw: string | null): number {
 function parseDigits(raw: string | null): number {
   const n = Number(raw);
   return Number.isInteger(n) && n >= 6 && n <= 10 ? n : 6;
+}
+
+// ---- reading parameters someone else wrote ----------------------------------
+//
+// Absent means the default; present and unsupported means REFUSED. These used to
+// be one rule — anything unrecognised became the default — so `algorithm=MD5`
+// was stored as SHA1, `digits=4` as 6 and `period=7200` as 30: a healthy-looking
+// card whose every code is wrong, with nothing anywhere to say so. A default is
+// a guess about a value nobody wrote down; replacing a value somebody DID write
+// down is not a guess, it is a different account. Refused, the entry is counted
+// as unsupported and the user is told.
+//
+// The accepted ranges are the ones generation honours (safePeriod, safeDigits,
+// safeAlgorithm in totp.ts) — a value those would repair is a value we cannot
+// generate with.
+
+/** Missing, null or blank: nobody said, so the RFC default stands. */
+function unstated(value: unknown): boolean {
+  return value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+}
+
+/** Raivo and the URI parameters spell numbers as strings; "6" is 6. */
+function asNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return Number(value.trim());
+  return NaN;
+}
+
+/** The algorithm a file or link states, SHA1 when it states none, null when it states one we cannot use. */
+export function readAlgorithm(value: unknown): OTPAlgorithm | null {
+  if (unstated(value)) return 'SHA1';
+  if (typeof value !== 'string') return null;
+  // `SHA-256`, `sha256` and KeePass's `HMAC-SHA-256` all name the same thing.
+  const name = value.toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^HMAC/, '');
+  return (ALGORITHMS as readonly string[]).includes(name) ? (name as OTPAlgorithm) : null;
+}
+
+/** 6 when unstated; null for anything outside 6–10. Steam's 5 is Steam's own path. */
+export function readDigits(value: unknown): number | null {
+  if (unstated(value)) return 6;
+  const n = asNumber(value);
+  return Number.isInteger(n) && n >= 6 && n <= 10 ? n : null;
+}
+
+/**
+ * 30 when unstated; null outside 1–3600 seconds. A fraction is refused too: the
+ * old floor turned 30.5 into 30, which is a different time step, not the same
+ * one rounded.
+ */
+export function readPeriod(value: unknown): number | null {
+  if (unstated(value)) return 30;
+  const n = asNumber(value);
+  return Number.isInteger(n) && n >= 1 && n <= 3600 ? n : null;
+}
+
+// ---- size limits --------------------------------------------------------------
+//
+// Nothing capped either before, so a link or a file could hand over a secret of
+// 100 000 characters and have it stored, synced and HMAC'd every second.
+
+/**
+ * Longest secret we accept, in Base32 characters once separators are removed.
+ *
+ * RFC 6238 suggests keys as long as the hash (64 bytes for SHA-512, 103
+ * characters); some issuers use the 128-byte HMAC block size (205). 512
+ * characters is 320 bytes — past anything a real issuer uses, with room to
+ * spare, and still far short of a size that costs anything. A longer "secret"
+ * is not a key someone was issued, so it is refused rather than cut: a
+ * truncated key is a different key.
+ */
+export const MAX_SECRET_LENGTH = 512;
+
+/**
+ * Longest account name or issuer we keep, in characters.
+ *
+ * Cut rather than refused: this is display text, the account is still the
+ * account, and losing a working 2FA seed over a long label would be the wrong
+ * trade. 256 fits the longest legal e-mail address (254) with room over.
+ */
+export const MAX_LABEL_LENGTH = 256;
+
+/** A secret within MAX_SECRET_LENGTH once cleaned. */
+export function withinSecretLimit(secret: string): boolean {
+  return cleanSecret(secret).replace(/=+$/, '').length <= MAX_SECRET_LENGTH;
+}
+
+/** Display text cut to MAX_LABEL_LENGTH, by code point so no emoji is split in half. */
+export function clampLabel(value: string): string {
+  if (value.length <= MAX_LABEL_LENGTH) return value;
+  return Array.from(value).slice(0, MAX_LABEL_LENGTH).join('').trim();
+}
+
+/** Whether the link names Steam as its issuer, in the parameter or the label. */
+function issuedBySteam(urlObj: URL): boolean {
+  const label = decodeLabel(urlObj.pathname.replace(/^\//, ''));
+  const separator = label.indexOf(':');
+  const issuers = [urlObj.searchParams.get('issuer') || '', separator >= 0 ? label.slice(0, separator) : ''];
+  return issuers.some(issuer => issuer.trim().toLowerCase() === 'steam');
 }
 
 export function parseOTPAuthURL(url: string): ParsedOTPAuth | null {
@@ -94,7 +213,24 @@ export function parseOTPAuthURL(url: string): ParsedOTPAuth | null {
     throw new UnsupportedOTPTypeError();
   }
 
-  if (kind !== 'totp') {
+  // Steam Guard travels three ways: Aegis and most apps write its own
+  // `otpauth://steam/` scheme, KeePassXC writes a TOTP link with
+  // `encoder=steam`, and Steam itself hands out a plain TOTP link issued by
+  // "Steam" — the `uri` field of every Steam Desktop Authenticator maFile, and
+  // the thing people copy out of it. Read as plain TOTP, each is a six-digit
+  // code Steam never accepts; Steam issues no other kind of code, so an issuer
+  // of Steam is as good as saying so.
+  const steam =
+    kind === 'steam' ||
+    (kind === 'totp' &&
+      ((urlObj.searchParams.get('encoder') || '').toLowerCase() === 'steam' || issuedBySteam(urlObj)));
+
+  if (kind !== 'totp' && !steam) {
+    // Another OTP kind — mOTP, Yandex's `yaotp` — is understood and refused,
+    // like HOTP. Returning null called it a damaged code, which sends the user
+    // off to rescan something that will never be accepted. An empty or
+    // malformed kind is still just unreadable.
+    if (/^[a-z][a-z0-9-]*$/.test(kind)) throw new UnsupportedOTPTypeError('other');
     console.error('URL is not a totp URL');
     return null;
   }
@@ -110,7 +246,7 @@ export function parseOTPAuthURL(url: string): ParsedOTPAuth | null {
 
     // Checked here rather than left to the card: an unusable secret reaching
     // storage is what took the whole popup down on every subsequent open.
-    if (!isUsableSecret(secret)) {
+    if (!isUsableSecret(secret) || !withinSecretLimit(secret)) {
       console.error('Secret in URL is not valid base32');
       return null;
     }
@@ -124,13 +260,31 @@ export function parseOTPAuthURL(url: string): ParsedOTPAuth | null {
     // omits `issuer=` for an account that has none, so inventing one here made
     // every such account come back from its own backup renamed — and the edit
     // form had to special-case the invented word to hide it.
-    const issuer = params.get('issuer') || (separator >= 0 ? path.slice(0, separator) : '');
+    const issuer = clampLabel((params.get('issuer') || (separator >= 0 ? path.slice(0, separator) : '')).trim());
     // Google writes "Issuer: Account" with a space after the colon.
-    const name = (separator >= 0 ? path.slice(separator + 1) : path || 'Account').trim();
+    const name = clampLabel((separator >= 0 ? path.slice(separator + 1) : path || 'Account').trim());
 
-    const algorithm = parseAlgorithm(params.get('algorithm'));
-    const digits = parseDigits(params.get('digits'));
-    const period = parsePeriod(params.get('period'));
+    if (steam) {
+      // The parameters are Steam's, whatever the link says: an exporter that
+      // wrote digits=6 on a Steam entry must not change the code it produces.
+      return {
+        name,
+        issuer: issuer || 'Steam',
+        secret,
+        algorithm: 'SHA1',
+        digits: 5,
+        period: 30,
+        type: 'steam',
+      };
+    }
+
+    // Stated and unusable is refused, not defaulted: see readAlgorithm.
+    const algorithm = readAlgorithm(params.get('algorithm'));
+    const digits = readDigits(params.get('digits'));
+    const period = readPeriod(params.get('period'));
+    if (algorithm === null || digits === null || period === null) {
+      throw new UnsupportedOTPTypeError('other');
+    }
 
     // Nothing is logged here on purpose. This used to print the name and issuer
     // of every account it parsed, which was one line per user action back when
@@ -142,13 +296,15 @@ export function parseOTPAuthURL(url: string): ParsedOTPAuth | null {
 
     return {
       name,
-      issuer: issuer.trim(),
+      issuer,
       secret,
       algorithm,
       digits,
       period,
     };
   } catch (error) {
+    // A refusal is an answer, not a parse failure; it has to reach the caller.
+    if (error instanceof UnsupportedOTPTypeError) throw error;
     console.error('Error parsing OTP Auth URL:', error);
     return null;
   }
@@ -203,6 +359,18 @@ export function buildOTPAuthURL(account: ParsedOTPAuth): string {
   const params = new URLSearchParams();
   params.set('secret', cleanSecret(account.secret));
   if (issuer) params.set('issuer', issuer);
+
+  // Steam Guard as Aegis writes it, which is what the other apps that know
+  // Steam read. Its own scheme rather than `totp` plus a flag: a reader that
+  // does not know Steam then refuses the line instead of importing a TOTP
+  // account that shows digits Steam never accepts — our own versions before
+  // this one included.
+  if (account.type === 'steam') {
+    params.set('algorithm', 'SHA1');
+    params.set('digits', '5');
+    params.set('period', '30');
+    return `otpauth://steam/${label}?${params.toString().replace(/\+/g, '%20')}`;
+  }
   // Written out even at their defaults: an importer that assumes different ones
   // produces a confidently wrong code, which is the failure with no symptom.
   //
@@ -250,10 +418,12 @@ export function parseQRCode(url: string): ParsedQRResult | null {
         : undefined;
 
     // A migration batch routinely mixes types. Dropping the counter-based
-    // entries and importing the rest beats refusing the whole export, as long
+    // entries — and those whose algorithm or digit count we cannot generate
+    // with — and importing the rest beats refusing the whole export, as long
     // as the caller is told how many were left behind.
     const usable = migrationAccounts.filter(
-      (account: MigrationAccount) => account.type !== 'hotp' && isUsableSecret(account.secret)
+      (account: MigrationAccount) =>
+        account.type === 'totp' && isUsableSecret(account.secret) && withinSecretLimit(account.secret)
     );
     // Entries the protobuf parser could not read never reach `migrationAccounts`
     // at all, so counting only what it returned reported them as nothing at
@@ -263,15 +433,18 @@ export function parseQRCode(url: string): ParsedQRResult | null {
     const skipped = migrationAccounts.length - usable.length + payload.unreadable;
 
     if (usable.length === 0) {
-      if (migrationAccounts.every((account: MigrationAccount) => account.type === 'hotp')) {
-        throw new UnsupportedOTPTypeError();
+      // Every entry understood and refused: say why, rather than "invalid".
+      if (payload.unreadable === 0 && migrationAccounts.every((account: MigrationAccount) => account.type !== 'totp')) {
+        throw new UnsupportedOTPTypeError(
+          migrationAccounts.every((account: MigrationAccount) => account.type === 'hotp') ? 'hotp' : 'other'
+        );
       }
       return null;
     }
 
     const accounts: ParsedOTPAuth[] = usable.map((account: MigrationAccount) => ({
-      name: account.name,
-      issuer: account.issuer,
+      name: clampLabel(account.name),
+      issuer: clampLabel(account.issuer),
       secret: account.secret,
       algorithm: account.algorithm,
       digits: account.digits,
@@ -290,7 +463,7 @@ export function parseQRCode(url: string): ParsedQRResult | null {
 
   // Try parsing as standard otpauth:// URL
   if (scheme.startsWith('otpauth://')) {
-      const parsed = parseOTPAuthURL(trimmedUrl);
+    const parsed = parseOTPAuthURL(trimmedUrl);
 
     if (!parsed) {
       console.error('Failed to parse otpauth URL');
@@ -305,6 +478,33 @@ export function parseQRCode(url: string): ParsedQRResult | null {
 
   console.error('Unknown QR code format');
   return null;
+}
+
+/**
+ * Whether the text claims to be one of ours: an `otpauth://` link or a Google
+ * Authenticator export.
+ *
+ * `parseQRCode` returns null both for a QR that is simply something else — a
+ * URL, a Wi-Fi code — and for one of these whose payload cannot be read. The
+ * two need different answers. The camera should keep looking past the first,
+ * and stop on the second, because rescanning the same code yields the same
+ * damaged payload; "invalid QR code" for the second sends the user hunting for
+ * a different code when the one they have is the right one, exported badly.
+ */
+export function isAuthenticatorQR(text: string): boolean {
+  return /^otpauth(-migration)?:\/\//i.test(text.trim());
+}
+
+/**
+ * The message for a QR that did not produce an account: `error` is what
+ * `parseQRCode` threw, if it threw. One place, so the scanner, the popup and
+ * both upload paths cannot drift apart on which failure is which.
+ */
+export function qrFailureKey(text: string, error?: unknown): TranslationKey {
+  if (error instanceof UnsupportedOTPTypeError) {
+    return error.reason === 'hotp' ? 'addAccount.errorHotp' : 'addAccount.errorUnsupportedCode';
+  }
+  return isAuthenticatorQR(text) ? 'addAccount.errorDamagedQR' : 'addAccount.errorInvalidQR';
 }
 
 export const ACCOUNT_COLORS = [

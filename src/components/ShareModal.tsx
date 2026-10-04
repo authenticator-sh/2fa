@@ -4,13 +4,36 @@ import { ModalHeader } from './ModalHeader';
 import type { Account } from '@/types';
 import { accountLabel } from '@/utils/account-label';
 import { createT, type Language } from '@/utils/i18n';
-import { buildShareLink, clampLabel, MAX_SHARE_SECONDS, SHARE_DURATIONS, type ShareLink } from '@/utils/share';
+import {
+  buildShareLink,
+  clampLabel,
+  MAX_SHARE_SECONDS,
+  MIN_SHARE_PERIOD,
+  SHARE_DURATIONS,
+  ShareError,
+  type ShareLink,
+} from '@/utils/share';
+import { totpParams } from '@/utils/totp';
 import { drawQR, type QRDrawing } from '@/utils/qr-encode';
+import { MIN_PASSWORD_LENGTH } from '@/utils/crypto';
 
 interface ShareModalProps {
   account: Account;
   language: Language;
   onClose: () => void;
+}
+
+/**
+ * Whether a share password is set but too short to mean anything.
+ *
+ * The password is optional — empty means an open link — but one that is set is
+ * the only thing between a forwarded link and the codes, and whoever holds the
+ * link can try passwords offline for as long as it is valid — and a few
+ * letters fall to a GPU well inside the hour a link can live. Same floor as an
+ * encrypted export, and the screen says it in the same words.
+ */
+export function sharePasswordTooShort(password: string): boolean {
+  return password.length > 0 && password.length < MIN_PASSWORD_LENGTH;
 }
 
 /**
@@ -56,16 +79,20 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (sharePasswordTooShort(password)) {
+      setError(t('vault.setup.tooShort'));
+      return;
+    }
     setCreating(true);
     setError(null);
     try {
       const built = await buildShareLink({ account, durationSec, label, password: password || undefined });
       // Drawn before the link is shown, so the second screen never paints with
       // a hole where the QR code is about to be — but a failure here is not a
-      // failure to share. A five-second period packs 721 codes into 2 500
-      // characters, past what any QR version can hold, and the encoder throws;
-      // the link itself is fine and copying it still works, so the code is
-      // dropped and the rest of the screen stands.
+      // failure to share. A link too long for any QR version — ten-digit codes
+      // on a short period come closest — makes the encoder throw; the link
+      // itself is fine and copying it still works, so the code is dropped and
+      // the rest of the screen stands.
       let drawing: QRDrawing | null = null;
       try {
         drawing = await drawQR(built.url);
@@ -75,11 +102,17 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
       setLink(built);
       setQr(drawing);
     } catch (err) {
-      // The one failure with a cause of its own is a secret that produces no
-      // code, and the card already refuses to offer sharing for those — so
-      // this is the message for anything that gets past that.
+      // Two failures have a cause of their own. A period too short to fit an
+      // hour of codes in a link says so, with the numbers — "cannot be
+      // shared" alone read as a broken account. A secret that produces no code
+      // is the other, and the card already refuses to offer sharing for
+      // those, so its message covers anything else that gets past that.
       console.error('Could not build a share link', err);
-      setError(t('share.failed'));
+      setError(
+        err instanceof ShareError && err.reason === 'period'
+          ? t('share.periodTooShort', totpParams(account).period, MIN_SHARE_PERIOD)
+          : t('share.failed')
+      );
     } finally {
       setCreating(false);
     }
@@ -153,9 +186,9 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                   {t('share.duration')}
-                </label>
+                </span>
                 {/* A row of chips, not a select: four choices fit on one line,
                     and the one that is picked should be visible without a
                     click. The last chip is the maximum, and there is no field
@@ -172,7 +205,7 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
                         onClick={() => setDurationSec(seconds)}
                         className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${
                           active
-                            ? 'border-[#4285F4] bg-blue-50 text-[#4285F4] dark:bg-blue-900/30 dark:text-blue-300'
+                            ? 'border-[#4285F4] bg-blue-50 text-[#1a73e8] dark:bg-blue-900/30 dark:text-blue-300'
                             : 'border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-dark-600 dark:text-gray-300 dark:hover:bg-dark-700'
                         }`}
                       >
@@ -184,11 +217,12 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                <label htmlFor="share-password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                   {t('share.password')}
                 </label>
                 <div className="relative">
                   <input
+                    id="share-password"
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -202,9 +236,11 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute end-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors p-1"
+                    aria-label={t('a11y.showPassword')}
+                    aria-pressed={showPassword}
+                    className="absolute end-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 transition-colors p-1"
                   >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    {showPassword ? <EyeOff size={16} aria-hidden /> : <Eye size={16} aria-hidden />}
                   </button>
                 </div>
                 <p className="mt-1.5 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
@@ -219,7 +255,7 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
               <button
                 type="submit"
                 disabled={creating}
-                className="w-full bg-[#4285F4] hover:bg-[#3367D6] disabled:opacity-60 text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
+                className="w-full bg-[#1a73e8] hover:bg-[#1967D2] disabled:opacity-60 text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
               >
                 {creating ? t('share.creating') : t('share.create')}
               </button>
@@ -263,7 +299,7 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
                 className={`w-full flex items-center justify-center gap-2 font-medium text-sm py-2.5 rounded-lg transition-colors ${
                   copied
                     ? 'bg-green-600 text-white'
-                    : 'bg-[#4285F4] hover:bg-[#3367D6] text-white'
+                    : 'bg-[#1a73e8] hover:bg-[#1967D2] text-white'
                 }`}
               >
                 {copied ? <Check size={16} /> : <Copy size={16} />}

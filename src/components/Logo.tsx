@@ -1,12 +1,14 @@
 interface LogoProps {
   size?: number;
   className?: string;
+  /** Only the blue disc and keyhole, without the white tile: for a white background, where the tile disappears. */
+  bare?: boolean;
 }
 
-export function Logo({ size = 24, className = '' }: LogoProps) {
+export function Logo({ size = 24, className = '', bare = false }: LogoProps) {
   return (
-    <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width={size} height={size}>
-      <rect x="0" y="0" width="300" height="300" rx="50" fill="white" />
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox={bare ? '25 25 250 250' : '0 0 300 300'} width={size} height={size}>
+      {!bare && <rect x="0" y="0" width="300" height="300" rx="50" fill="white" />}
 
       <circle cx="150" cy="150" r="125" fill="#4285F4" />
 

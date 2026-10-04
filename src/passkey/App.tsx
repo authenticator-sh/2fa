@@ -15,11 +15,18 @@
 // the extension's own origin as its relying party id; only claiming a website's
 // id would need host permissions, and this page claims none.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, Fingerprint, Lock } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { SupportFooter } from '@/components/SupportFooter';
-import { applyDocumentLanguage, createT, loadLanguage, resolveLanguage, type Language } from '@/utils/i18n';
+import {
+  applyDocumentLanguage,
+  createT,
+  loadLanguage,
+  resolveLanguage,
+  type Language,
+  type TranslationKey,
+} from '@/utils/i18n';
 import {
   evaluatePrf,
   isPasskeyApiAvailable,
@@ -32,7 +39,6 @@ import {
 import {
   attachPasskey,
   consumeKeyHandoff,
-  getMasterKeyBytes,
   getVaultPasskey,
   isVaultEnabled,
   stageKeyHandoff,
@@ -46,7 +52,11 @@ type Status =
   | { kind: 'done' }
   | { kind: 'locked' }
   | { kind: 'unsupported' }
-  | { kind: 'error'; message: string };
+  // The key, not the sentence. A sentence is fixed in the language it was
+  // written in: this window reads the chosen language asynchronously, so an
+  // error set before that finished — or the language switched in the popup
+  // while this stayed open — kept English, or the old language, on screen.
+  | { kind: 'error'; messageKey: TranslationKey };
 
 function modeFromUrl(): Mode {
   return new URLSearchParams(window.location.search).get('mode') === 'register'
@@ -59,6 +69,10 @@ export default function App() {
   const [status, setStatus] = useState<Status>({ kind: 'working' });
   const mode = modeFromUrl();
   const t = createT(language);
+  // The key staged for registration, once taken. Held for the life of this
+  // window so a dismissed prompt can be retried without going back to the
+  // popup, and never written anywhere: the hand-off is single use.
+  const registrationKey = useRef<Uint8Array | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -79,6 +93,22 @@ export default function App() {
     })();
   }, []);
 
+  // And follow it while the window is open: it is small and easy to leave
+  // behind the popup, where the language can be changed underneath it.
+  useEffect(() => {
+    if (!chrome.storage?.onChanged?.addListener) return;
+    const onChanged = (changes: Record<string, { newValue?: unknown }>, areaName: string) => {
+      if (areaName !== 'local' || !('language' in changes)) return;
+      const next = resolveLanguage(changes.language.newValue);
+      loadLanguage(next).then(() => {
+        applyDocumentLanguage(next);
+        setLanguage(next);
+      });
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, []);
+
   const run = useCallback(async () => {
     setStatus({ kind: 'working' });
 
@@ -89,19 +119,20 @@ export default function App() {
 
     try {
       if (!(await isVaultEnabled())) {
-        setStatus({ kind: 'error', message: t('vault.passkey.needsUnlock') });
+        setStatus({ kind: 'error', messageKey: 'vault.passkey.needsUnlock' });
         return;
       }
 
       if (mode === 'register') {
-        // Registration needs the master key, which only exists while the vault
-        // is unlocked. Sending the user back to the popup is the honest outcome:
-        // there is nothing to wrap yet.
-        // The popup stages the key before opening this window, because with
-        // auto-lock on "every open" it lives in no store this context can read.
-        // Falling back to the session covers every other mode and a reload of
-        // this page after the staged copy was consumed.
-        const masterKey = (await consumeKeyHandoff()) ?? (await getMasterKeyBytes());
+        // Registration needs the master key, and it comes from one place only:
+        // the hand-off the popup stages after the user re-enters their password
+        // (vault.stagePasskeyRegistration). This page used to fall back to the
+        // unlocked session, which made the password prompt decorative — opening
+        // passkey.html?mode=register in an unlocked browser linked a passkey
+        // with no password at all. With nothing staged, the user goes back to
+        // the popup and asks again.
+        registrationKey.current ??= await consumeKeyHandoff('register');
+        const masterKey = registrationKey.current;
         if (!masterKey) {
           setStatus({ kind: 'locked' });
           return;
@@ -114,13 +145,14 @@ export default function App() {
         // written, so a passkey that cannot reproduce its own PRF output never
         // becomes a stored wrapper that opens nothing.
         await attachPasskey(masterKey, credentialId, prfSalt, prfOutput, label);
+        registrationKey.current = null;
         setStatus({ kind: 'done' });
         return;
       }
 
       const registered = await getVaultPasskey();
       if (!registered) {
-        setStatus({ kind: 'error', message: t('vault.passkey.failed') });
+        setStatus({ kind: 'error', messageKey: 'vault.passkey.failed' });
         return;
       }
 
@@ -131,7 +163,7 @@ export default function App() {
       // adopts it once — the biometric prompt was the authentication event.
       // Staging also fires a session change event, which is how a popup that is
       // still open leaves its lock screen without being reopened.
-      await stageKeyHandoff(masterKey);
+      await stageKeyHandoff(masterKey, 'unlock');
       setStatus({ kind: 'done' });
 
       // Best effort, in this order on purpose. openPopup lands the user straight
@@ -149,14 +181,14 @@ export default function App() {
     } catch (error) {
       console.error('Passkey ceremony failed:', error);
       if (error instanceof PasskeyCancelledError) {
-        setStatus({ kind: 'error', message: t('vault.passkey.cancelled') });
+        setStatus({ kind: 'error', messageKey: 'vault.passkey.cancelled' });
         return;
       }
       if (error instanceof PasskeyUnsupportedError || error instanceof PasskeyNoPrfError) {
         setStatus({ kind: 'unsupported' });
         return;
       }
-      setStatus({ kind: 'error', message: t('vault.passkey.failed') });
+      setStatus({ kind: 'error', messageKey: 'vault.passkey.failed' });
     }
   }, [mode, t]);
 
@@ -198,15 +230,15 @@ export default function App() {
             <p className="text-sm text-gray-600 dark:text-gray-300 mb-5">{heading}</p>
 
             {status.kind === 'error' && (
-              <p className="flex items-center justify-center gap-1.5 text-xs text-red-600 dark:text-red-400 mb-4">
-                <AlertTriangle size={14} />
-                {status.message}
+              <p role="alert" className="flex items-center justify-center gap-1.5 text-xs text-red-600 dark:text-red-400 mb-4">
+                <AlertTriangle size={14} aria-hidden />
+                {t(status.messageKey)}
               </p>
             )}
 
             <button
               onClick={run}
-              className="w-full flex items-center justify-center gap-2 bg-[#4285F4] hover:bg-[#3367D6] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
+              className="w-full flex items-center justify-center gap-2 bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
             >
               <Fingerprint size={16} />
               {mode === 'register' ? t('vault.passkey.add') : t('vault.passkey.unlockButton')}

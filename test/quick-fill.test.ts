@@ -195,4 +195,22 @@ export async function runWorkerLanguage(): Promise<void> {
   const source = (await import('node:fs')).readFileSync('src/background/quick-fill.ts', 'utf8');
   check('the worker does not load languages through import()', !/\bloadLanguage\(/.test(source));
   await chrome.storage.local.remove('language');
+
+  // The worker carries its own copy of the few strings it shows, instead of
+  // every full table. A copy is only acceptable if it cannot drift: each entry
+  // has to be exactly what the app's own table says.
+  scenario("The worker's strings are the app's strings");
+  const { WORKER_KEYS, WORKER_STRINGS } = await import('@/background/strings');
+  const { languages } = await import('@/utils/i18n');
+  check('every language is there', languages.every(({ code }) => code in WORKER_STRINGS));
+  for (const { code } of languages) {
+    const table = (await import(`../src/utils/locales/${code}.ts`)).default;
+    const drifted = WORKER_KEYS.filter((key) => WORKER_STRINGS[code]?.[key] !== table[key]);
+    check(`${code} matches its table`, drifted.length === 0, drifted.join(', '));
+  }
+  const { readFileSync } = await import('node:fs');
+  const workerSources = ['service-worker', 'quick-fill', 'open-mode']
+    .map((name) => readFileSync(`src/background/${name}.ts`, 'utf8'))
+    .join('\n');
+  check('and no full table is bundled into the worker', !/utils\/locales\//.test(workerSources));
 }

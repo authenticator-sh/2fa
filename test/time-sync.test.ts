@@ -310,19 +310,26 @@ export async function run(): Promise<void> {
     check('and "corrected" matches what codes use', status.corrected === ((await offsetAt(fixedAt)) !== 0));
   }
 
-  scenario('A check that fails clears the correction instead of vouching for it');
+  scenario('A correction read back from disk is cleared by a check that fails');
   await fresh();
   {
+    // Another page measured the slow clock and wrote the correction down.
     const measured = stubFetch(honest(TRUE_MS));
     await at(TRUE_MS - SLOW, () => timeSync.checkTimeSync());
     measured.restore();
 
-    // One minute on, "check now" with the network gone. The old code left the
-    // correction applied and reported { unknown, corrected: false } over it.
+    // A minute on, a new page loads it and "check now" finds the network gone.
+    // This page never watched the clock under that correction, so it cannot
+    // tell whether the OS fixed the clock in between — the correction goes
+    // rather than being vouched for by a reading nobody took.
+    const later = TRUE_MS - SLOW + 60_000;
+    totp.setTimeOffsetMs(0);
+    await at(later, () => totp.loadTimeOffset());
+    check('it is loaded at first', Math.abs((await offsetAt(later)) - SLOW) < 2_000, String(await offsetAt(later)));
     const offline = stubFetch({});
-    const status = await at(TRUE_MS - SLOW + 60_000, () => timeSync.recheckClock());
+    const status = await at(later, () => timeSync.recheckClock());
     offline.restore();
-    const left = await offsetAt(TRUE_MS - SLOW + 60_000);
+    const left = await offsetAt(later);
     check('nothing is applied on a reading we could not take', left === 0, String(left));
     check('and Settings does not say otherwise', status.state === 'unknown' && status.corrected === (left !== 0));
     check('and it is off the disk', areas.local.timeOffsetMs === undefined);
@@ -406,5 +413,330 @@ export async function run(): Promise<void> {
     offline.restore();
     check('a correction past its life is dropped', expired === 0, String(expired));
     check('and the failed renewal leaves it dropped', (await offsetAt(start + nearEnd)) === 0);
+  }
+  // ---- Pages that stay open ------------------------------------------------
+  //
+  // `at` pins only the wall clock, which to a page that took a measurement
+  // itself reads as the clock being stepped under it. The scenarios below are
+  // about time simply passing, so both clocks move together.
+
+  const steadyClocks = (wallMs: number) => {
+    const realNow = Date.now;
+    let wall = wallMs;
+    let mono = 1_000_000;
+    (Date as any).now = () => wall;
+    (performance as any).now = () => mono;
+    return {
+      advance(ms: number) {
+        wall += ms;
+        mono += ms;
+      },
+      get wall() {
+        return wall;
+      },
+      restore() {
+        (Date as any).now = realNow;
+        delete (performance as any).now;
+      },
+    };
+  };
+
+  /** setTimeout, with every timer of `minMs` or longer held back to be run by hand. */
+  const holdTimers = (minMs: number) => {
+    const realSet = globalThis.setTimeout;
+    const realClear = globalThis.clearTimeout;
+    const held: Array<{ delay: number; run: () => void }> = [];
+    (globalThis as any).setTimeout = (fn: () => void, delay = 0, ...rest: unknown[]) => {
+      if (delay < minMs) return realSet(fn, delay, ...rest);
+      const entry = { delay, run: fn };
+      held.push(entry);
+      return entry;
+    };
+    (globalThis as any).clearTimeout = (handle: any) => {
+      const at = held.indexOf(handle);
+      if (at >= 0) held.splice(at, 1);
+      else realClear(handle);
+    };
+    return {
+      held,
+      restore() {
+        globalThis.setTimeout = realSet;
+        globalThis.clearTimeout = realClear;
+      },
+    };
+  };
+
+  const turn = (ms = 30) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  // The side panel measured, and four and a half minutes later asked for a
+  // renewal while the Wi-Fi was down. The failure used to clear a correction
+  // with a minute of life left — and 0 being the one value that asks for no
+  // renewal, nothing measured again for as long as the panel stayed open.
+  scenario('A renewal that fails keeps a correction this page is still watching');
+  await fresh();
+  {
+    const clocks = steadyClocks(TRUE_MS - SLOW);
+    try {
+      const measured = stubFetch(honest(TRUE_MS));
+      await timeSync.checkTimeSync();
+      measured.restore();
+      const measuredAt = (areas.local.timeOffsetMs as any)?.at;
+      check('the drift is corrected', Math.abs(totp.getTimeOffsetMs() - SLOW) < 2_000);
+
+      clocks.advance(4.5 * 60_000);
+      const offline = stubFetch({});
+      totp.getTimeOffsetMs();
+      await turn();
+      const renewalCalls = offline.calls.length;
+      check('a renewal was attempted', renewalCalls > 0, `${renewalCalls} calls`);
+      // The side panel reads the correction every second; the failed renewal
+      // must not be asked for again on every one of them.
+      for (let i = 0; i < 10; i++) {
+        clocks.advance(1_000);
+        totp.getTimeOffsetMs();
+        await turn(0);
+      }
+      offline.restore();
+      check('and not asked for again on every read', offline.calls.length === renewalCalls, `${offline.calls.length} calls`);
+      const kept = totp.getTimeOffsetMs();
+      check('the failed renewal leaves the correction in force', Math.abs(kept - SLOW) < 2_000, String(kept));
+      check('without restamping it as new', (areas.local.timeOffsetMs as any)?.at === measuredAt);
+
+      const status = await timeSync.getClockStatus();
+      check(
+        'and Settings says it is corrected, not "unknown, device clock as-is"',
+        status.state === 'off' && status.corrected,
+        JSON.stringify(status)
+      );
+      check('and the banner stays up', (await timeSync.getTimeSyncNotice()) !== null);
+
+      clocks.advance(60_000);
+      const stillOffline = stubFetch({});
+      const lapsed = totp.getTimeOffsetMs();
+      await turn();
+      stillOffline.restore();
+      check('past its own life it lapses all the same', lapsed === 0, String(lapsed));
+    } finally {
+      clocks.restore();
+    }
+  }
+
+  scenario('A page left open measures again when the network comes back');
+  await fresh();
+  {
+    const clocks = steadyClocks(TRUE_MS - SLOW);
+    const timers = holdTimers(60_000);
+    const events: Record<string, () => void> = {};
+    (globalThis as any).addEventListener = (type: string, listener: () => void) => {
+      events[type] = listener;
+    };
+    (globalThis as any).removeEventListener = (type: string) => {
+      delete events[type];
+    };
+    const readings: Array<{ confident: boolean; synced: boolean }> = [];
+    const stop = timeSync.watchClock((result) => readings.push(result));
+    try {
+      const offline = stubFetch({});
+      await timeSync.checkTimeSync();
+      check('the reading is handed to the page', readings.length === 1 && !readings[0].confident);
+      check(
+        'and a retry is lined up a minute out',
+        timers.held.length === 1 && timers.held[0].delay === 60_000,
+        timers.held.map((t) => t.delay).join()
+      );
+
+      // Still down: each retry waits longer, never more than five minutes.
+      const delays: number[] = [];
+      for (let i = 0; i < 4; i++) {
+        timers.held.shift()!.run();
+        await turn();
+        delays.push(timers.held[0]?.delay ?? -1);
+      }
+      offline.restore();
+      check('backing off to five minutes', delays.join() === '120000,240000,300000,300000', delays.join());
+
+      // The network returns, and the page does not sit out the backoff.
+      const back = stubFetch(honest(TRUE_MS));
+      events.online?.();
+      await turn();
+      back.restore();
+      check('the sources are asked at once', back.calls.length > 0, `${back.calls.length} calls`);
+      const restored = totp.getTimeOffsetMs();
+      check('the correction is back', Math.abs(restored - SLOW) < 2_000, String(restored));
+      const last = readings[readings.length - 1];
+      check('the page hears about it', last?.confident === true && last?.synced === false);
+      check('and no retry is left behind', timers.held.length === 0, String(timers.held.length));
+    } finally {
+      stop();
+      timers.restore();
+      clocks.restore();
+    }
+    check('stopping the watch removes its listener', events.online === undefined);
+    delete (globalThis as any).addEventListener;
+    delete (globalThis as any).removeEventListener;
+  }
+
+  // A popup opened more than five minutes after the last one finds its stored
+  // correction expired, and drew uncorrected codes for the second or three the
+  // new measurement took — codes from the clock that needed correcting.
+  scenario('A page opened after a correction lapsed shows the clock being checked');
+  await fresh();
+  {
+    await at(TRUE_MS - SLOW, () => totp.persistTimeOffset(SLOW));
+    let notified = 0;
+    const unsubscribe = totp.subscribeTimeOffset(() => notified++);
+    const opened = TRUE_MS - SLOW + 10 * 60_000;
+    const timers = holdTimers(5_000);
+    try {
+      await at(opened, () => totp.loadTimeOffset());
+      check('codes wait for the measurement', totp.isTimeOffsetPending());
+      await turn(0);
+      check('and whoever draws them is told', notified > 0, String(notified));
+
+      const stub = stubFetch(honest(TRUE_MS + 10 * 60_000));
+      await at(opened, () => timeSync.checkTimeSync());
+      stub.restore();
+      check('the measurement ends the wait', !totp.isTimeOffsetPending());
+      check('with the correction back', Math.abs((await offsetAt(opened)) - SLOW) < 2_000);
+
+      // Nothing ever measures: the wait is bounded, never permanent.
+      const muchLater = opened + 20 * 60_000;
+      await at(muchLater, () => totp.loadTimeOffset());
+      check('pending again on the next stale open', totp.isTimeOffsetPending());
+      const cap = timers.held.find((t) => t.delay <= 5_000);
+      check('with a limit of five seconds', cap !== undefined, timers.held.map((t) => t.delay).join());
+      cap?.run();
+      check('after which codes are drawn regardless', !totp.isTimeOffsetPending());
+    } finally {
+      timers.restore();
+      unsubscribe();
+    }
+
+    await fresh();
+    areas.local.timeOffsetMs = 300_000;
+    await at(TRUE_MS, () => totp.loadTimeOffset());
+    check('an undated correction of unknown age does not make codes wait', !totp.isTimeOffsetPending());
+  }
+
+  // Three sources, and two was a majority: two answering the same wrong time
+  // moved every code by up to the twelve-hour cap while the third, and the
+  // device, both said otherwise.
+  scenario('Two sources agreeing against the third do not move the clock');
+  await fresh();
+  {
+    const stub = stubFetch({
+      'time.akamai.com': akamaiSays(TRUE_MS + 600_000),
+      'timeapi.io': timeApiSays(TRUE_MS + 600_000),
+      'cloudflare.com': cloudflareSays(TRUE_MS),
+    });
+    const result = await at(TRUE_MS, () => timeSync.checkTimeSync());
+    const notice = await at(TRUE_MS, () => timeSync.getTimeSyncNotice());
+    stub.restore();
+    check('the reading is not trusted', result.confident === false);
+    check('no correction is applied', (await offsetAt(TRUE_MS)) === 0);
+    check('and no alarm is raised', notice === null, String(notice));
+  }
+
+  scenario('A clock hours out is still corrected when the answers agree');
+  for (const [label, handlers] of [
+    ['all three answering', honest(TRUE_MS)],
+    ['one of them down', { ...honest(TRUE_MS), 'timeapi.io': dead }],
+  ] as const) {
+    await fresh();
+    // The time zone written to the hardware clock as UTC: five hours out.
+    const device = TRUE_MS - 5 * 3_600_000;
+    const stub = stubFetch(handlers);
+    const status = await at(device, () => timeSync.getClockStatus());
+    stub.restore();
+    const applied = await offsetAt(device);
+    check(
+      `${label}: five hours slow is corrected`,
+      status.state === 'off' && status.corrected && Math.abs(applied - 5 * 3_600_000) < 2_000,
+      `${JSON.stringify(status)} ${applied}`
+    );
+  }
+
+  // ---- The codes on screen ---------------------------------------------------
+
+  scenario('A code is computed once per slot, not once per second');
+  await fresh();
+  {
+    let reads = 0;
+    const counted: any = { id: 'counted', name: 'n', issuer: 'i', algorithm: 'SHA1', digits: 6, period: 30 };
+    Object.defineProperty(counted, 'secret', {
+      get() {
+        reads++;
+        return ACCOUNT.secret;
+      },
+    });
+    const slot = Math.floor(TRUE_MS / 30_000) * 30_000;
+    let live = totp.advanceTOTP(counted, null, slot);
+    let unchanged = 0;
+    for (let ms = slot; ms < slot + 30_000; ms += 250) {
+      const next = totp.advanceTOTP(counted, live, ms);
+      if (next === live) unchanged++;
+      live = next;
+    }
+    check('one HMAC for the whole slot', reads === 1, `${reads} secret reads`);
+    check('while the countdown still moves', live.totp?.remaining === 1, String(live.totp?.remaining));
+    // 120 reads, four a second; the second changes 29 times within the slot.
+    check('and a tick within the same second changes nothing at all', unchanged === 120 - 29, String(unchanged));
+
+    const turned = totp.advanceTOTP(counted, live, slot + 30_000 + 15);
+    check(
+      'a new slot is a new code, and the right one',
+      turned.totp?.code === totp.generateCodeAt(ACCOUNT, slot + 30_000) && turned.totp?.remaining === 30,
+      `${turned.totp?.code} ${turned.totp?.remaining}`
+    );
+
+    const steam = { ...ACCOUNT, id: 'steam', type: 'steam' };
+    const steamLive = totp.advanceTOTP(steam, null, slot + 1_000);
+    check(
+      'Steam codes come through the same path',
+      steamLive.totp?.code === totp.generateCodeAt(steam, slot + 1_000) && /^[2-9BCDFGHJKMNPQRTVWXY]{5}$/.test(steamLive.totp?.code ?? ''),
+      steamLive.totp?.code
+    );
+
+    const broken = { ...ACCOUNT, id: 'broken', secret: '1' };
+    const brokenLive = totp.advanceTOTP(broken, null, slot);
+    check('a broken secret is a row without a code', brokenLive.totp === null);
+    check('and is not retried every second', totp.advanceTOTP(broken, brokenLive, slot + 1_000) === brokenLive);
+  }
+
+  scenario('Every code on the page turns over together, on the second');
+  await fresh();
+  {
+    const ticker = await import('@/utils/ticker');
+    check('the tick lands just past the next second', ticker.msUntilNextSecond(1_700_000_000_400) === 615);
+
+    const clocks = steadyClocks(1_700_000_000_500);
+    const timers = holdTimers(1);
+    try {
+      totp.setTimeOffsetMs(1_250);
+      let ticks = 0;
+      const stop = ticker.onEverySecond(() => ticks++);
+      const second = ticker.onEverySecond(() => ticks++);
+      check('one timer for the whole page', timers.held.length === 1, String(timers.held.length));
+      check(
+        'aligned to the corrected second, not the device one',
+        timers.held[0]?.delay === 265,
+        String(timers.held[0]?.delay)
+      );
+      timers.held.shift()!.run();
+      check('every listener hears the same tick', ticks === 2, String(ticks));
+      check('and the next one is lined up', timers.held.length === 1);
+
+      totp.setTimeOffsetMs(3_000);
+      await turn(0);
+      check('a new correction redraws at once', ticks === 4, String(ticks));
+
+      second();
+      stop();
+      check('with nobody left listening, no timer is left', timers.held.length === 0, String(timers.held.length));
+    } finally {
+      totp.setTimeOffsetMs(0);
+      timers.restore();
+      clocks.restore();
+    }
   }
 }

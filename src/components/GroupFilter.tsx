@@ -56,7 +56,7 @@ export function GroupFilter({
             aria-pressed={isActive}
             className={`flex-shrink-0 max-w-[140px] flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full transition-colors ${
               isActive
-                ? 'bg-[#4285F4] text-white'
+                ? 'bg-[#1a73e8] text-white'
                 : 'bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-600'
             }`}
           >

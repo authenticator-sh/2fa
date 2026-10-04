@@ -1,12 +1,16 @@
-import { useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Copy, Check, Trash2, GripVertical, Pencil, Share2 } from 'lucide-react';
 import type { Account } from '@/types';
 import { colorForKey } from '@/utils/qr-parser';
 import { accountLabel } from '@/utils/account-label';
-import { useTOTP } from '@/hooks/useTOTP';
+import { useCheckingTime, useTOTP } from '@/hooks/useTOTP';
+import { isSteamAccount, tryGenerateTOTP, whenTimeOffsetSettled } from '@/utils/totp';
+import { toast } from '@/utils/ui-feedback';
 import { createT, type Language } from '@/utils/i18n';
 import { recordAccountUsage } from '@/utils/suggestions';
 import { takePickPrompt } from '@/utils/quick-fill';
+import { finishPickedFill } from '@/utils/finish-quick-fill';
+import { announceFilled } from '@/hooks/useFinishQuickFill';
 import { ProgressRing } from './ProgressRing';
 import { TruncatedName } from './TruncatedName';
 
@@ -82,7 +86,8 @@ interface AccountCardProps {
   showAvatar?: boolean;
   draggable?: boolean;
   onDragStart?: (e: React.DragEvent, id: string) => void;
-  onDragOver?: (e: React.DragEvent) => void;
+  /** Takes the row's id so the parent can pass one stable handler to every row. */
+  onDragOver?: (e: React.DragEvent, id: string) => void;
   onDrop?: (e: React.DragEvent, id: string) => void;
   /** The pointer left this row, so its drop marker must go. */
   onDragLeave?: (id: string) => void;
@@ -95,7 +100,23 @@ interface AccountCardProps {
   showGroup?: boolean;
 }
 
-export function AccountCard({
+/**
+ * How long "Copied" stays up after a copy. Restarted by a second copy rather
+ * than left to the first one's timer, which took the confirmation of the second
+ * click down early.
+ */
+const COPIED_MS = 2000;
+
+/**
+ * Memoised so a popup-wide re-render — a search keystroke, a banner appearing —
+ * does not redraw every row whose props did not change. Each row keeps its own
+ * code up to date from the shared tick; nothing above it needs to.
+ *
+ * Which only works while every callback the popup passes keeps its identity —
+ * see useStableCallback and the drag handlers in App.tsx. One inline arrow is
+ * enough to redraw all forty rows on every keystroke.
+ */
+export const AccountCard = memo(function AccountCard({
   account,
   onDelete,
   onEdit,
@@ -116,20 +137,53 @@ export function AccountCard({
 }: AccountCardProps) {
   const t = createT(language);
   const totp = useTOTP(account);
+  const checkingTime = useCheckingTime();
   const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // A row removed while "Copied" is up — deleted, filtered out — must not have
+  // a timer left behind to set state on it.
+  useEffect(() => () => {
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+  }, []);
 
   const handleCopy = async () => {
     if (!totp) return;
+    // The code is worked out at the moment of the click, not taken from what
+    // the row last drew: that is up to a tick old, and a click just after a
+    // slot ends — or just after a clock correction lands — copied the code
+    // that had stopped working. And if the clock is being measured again,
+    // the copy waits the second it takes rather than guess.
+    await whenTimeOffsetSettled();
+    const current = tryGenerateTOTP(account);
+    if (!current) return;
+
+    // Opened by quick fill to ask which account this site wants? Then the
+    // answer goes where the question came from, as well as onto the clipboard
+    // — a miss there costs nothing, the code is pasted as it always was.
+    // Started before the copy so a clipboard refusal does not also cost the
+    // fill.
+    finishPickedFill(account, t)
+      .then(outcome => {
+        if (outcome === 'filled') announceFilled(t);
+      })
+      .catch(() => {});
     try {
-      await navigator.clipboard.writeText(totp.code);
+      await navigator.clipboard.writeText(current.code);
     } catch (error) {
       // Rejected when the document is not focused, or by policy. Swallowing it
-      // silently left the user unable to tell a failed copy from a misclick.
+      // silently left the user unable to tell a failed copy from a misclick —
+      // and then paste whatever the clipboard held before.
       console.error('Could not copy the code to the clipboard', error);
+      toast('error', t('accounts.copyFailed'));
       return;
     }
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => {
+      copiedTimer.current = null;
+      setCopied(false);
+    }, COPIED_MS);
     if (currentDomain) {
       // What this copy is worth depends on why the popup is open. Opened by
       // quick fill because it could not tell which account this site wants,
@@ -143,7 +197,7 @@ export function AccountCard({
   };
 
   const suggestedBadge = isSuggested ? (
-    <span className="flex-shrink-0 text-[10px] font-medium leading-none text-[#4285F4] bg-blue-50/70 dark:bg-blue-900/25 border border-blue-200/70 dark:border-blue-800/60 px-1.5 py-[3px] rounded-full">
+    <span className="flex-shrink-0 text-[10px] font-medium leading-none text-[#1a73e8] dark:text-[#669DF6] bg-blue-50/70 dark:bg-blue-900/25 border border-blue-200/70 dark:border-blue-800/60 px-1.5 py-[3px] rounded-full">
       {t('accounts.suggested')}
     </span>
   ) : null;
@@ -182,13 +236,27 @@ export function AccountCard({
 
   const groupBadge = groupBadgeFor(false);
 
-  const formattedCode = totp ? totp.code.match(/.{1,3}/g)?.join(' ') || totp.code : '';
-  const isExpiringSoon = totp ? totp.remaining <= 5 : false;
+  const steam = isSteamAccount(account);
+  // Steam's five characters are shown the way Steam shows them, unbroken:
+  // split 3 + 2 they read as two things to type.
+  const formattedCode = totp ? (steam ? totp.code : totp.code.match(/.{1,3}/g)?.join(' ') || totp.code) : '';
+  // While a lapsed correction is measured again, the row says so in place of
+  // the code — see isTimeOffsetPending. Only the digits give way: the ring,
+  // the name and every action stay where they are, so nothing jumps when the
+  // code comes back a second later.
+  const checkingLabel = (
+    <span className="font-sans text-xs tracking-normal text-gray-500 dark:text-gray-400" role="status">
+      {t('accounts.checkingTime')}
+    </span>
+  );
+  // A share link carries codes as numbers, and a Steam code is not one.
+  const canShare = !steam;
+  const isExpiringSoon = totp && !checkingTime ? totp.remaining <= 5 : false;
 
   const dragProps = {
     draggable,
     onDragStart: (e: React.DragEvent) => onDragStart?.(e, account.id),
-    onDragOver: (e: React.DragEvent) => { e.preventDefault(); onDragOver?.(e); },
+    onDragOver: (e: React.DragEvent) => { e.preventDefault(); onDragOver?.(e, account.id); },
     onDrop: (e: React.DragEvent) => { e.preventDefault(); onDrop?.(e, account.id); },
     // Without these two the blue line stayed on the last row the pointer
     // crossed whenever the drag ended anywhere but on a row — outside the
@@ -222,6 +290,7 @@ export function AccountCard({
     return (
       <div
         {...dragProps}
+        data-testid="account-card"
         className={`${baseClass} py-3 ${viewMode === 'compact' ? 'px-3 after:inset-x-3' : 'px-4 after:inset-x-4'}`}
       >
         <div className="flex items-center gap-2">
@@ -238,14 +307,14 @@ export function AccountCard({
           <div className="flex flex-shrink-0 items-center gap-0.5">
             <button
               onClick={() => onEdit(account)}
-              className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-600 dark:hover:text-gray-300"
+              className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-dark-600 dark:hover:text-gray-300"
               title={t('edit.title')}
             >
               <Pencil size={13} />
             </button>
             <button
               onClick={() => onDelete(account.id)}
-              className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/30"
+              className="rounded p-1 text-gray-500 hover:bg-red-50 hover:text-red-600 dark:text-gray-400 dark:hover:bg-red-900/30 dark:hover:text-red-400"
               title={t('accounts.deleteAccount')}
             >
               <Trash2 size={13} />
@@ -259,10 +328,10 @@ export function AccountCard({
   // Hidden mode — just name, click whole row to copy
   if (viewMode === 'hidden') {
     return (
-      <div {...dragProps} className={`${baseClass} px-4 py-2.5 after:inset-x-4 overflow-hidden`}>
+      <div {...dragProps} data-testid="account-card" className={`${baseClass} px-4 py-2.5 after:inset-x-4 overflow-hidden`}>
         <div className="flex items-center gap-2">
           {draggable && (
-            <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-gray-500 flex-shrink-0">
+            <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 dark:text-gray-400 flex-shrink-0">
               <GripVertical size={14} />
             </div>
           )}
@@ -282,7 +351,7 @@ export function AccountCard({
               {copied ? (
                 <Check size={14} className="text-green-600 dark:text-green-400" />
               ) : (
-                <Copy size={14} className="text-gray-400 dark:text-gray-500" />
+                <Copy size={14} className="text-gray-500 dark:text-gray-400" />
               )}
             </span>
             {copied && (
@@ -293,23 +362,25 @@ export function AccountCard({
           </button>
 
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity flex-shrink-0">
-            <button
-              onClick={() => onShare(account)}
-              className="p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              title={t('share.title')}
-            >
-              <Share2 size={13} />
-            </button>
+            {canShare && (
+              <button
+                onClick={() => onShare(account)}
+                className="p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                title={t('share.title')}
+              >
+                <Share2 size={13} />
+              </button>
+            )}
             <button
               onClick={() => onEdit(account)}
-              className="p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              className="p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
               title={t('edit.title')}
             >
               <Pencil size={13} />
             </button>
             <button
               onClick={() => onDelete(account.id)}
-              className="p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500"
+              className="p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
               title={t('accounts.deleteAccount')}
             >
               <Trash2 size={13} />
@@ -346,7 +417,7 @@ export function AccountCard({
       // The drag goes with the handle. A row that still reorders with no
       // affordance, and jumps 2px mid-drag when isDragOver lands, is worse than
       // a row that does not reorder; that stays a normal-view job.
-      <div className={`${baseClass} py-1.5 px-3 after:inset-x-3 overflow-hidden`}>
+      <div data-testid="account-card" className={`${baseClass} py-1.5 px-3 after:inset-x-3 overflow-hidden`}>
         <div className="flex items-center gap-1.5">
           <button
             onClick={handleCopy}
@@ -364,19 +435,20 @@ export function AccountCard({
             {groupBadgeFor(true)}
             <span
               dir="ltr"
+              data-testid="account-code"
               className={`ms-auto flex-shrink-0 font-mono text-base tracking-wide transition-colors ${
                 isExpiringSoon
-                  ? 'text-orange-600 dark:text-orange-400 animate-pulse'
-                  : 'text-[#4285F4]'
+                  ? 'text-orange-600 dark:text-orange-400 motion-safe:animate-pulse'
+                  : 'text-[#1a73e8] dark:text-[#669DF6]'
               }`}
             >
-              {formattedCode}
+              {checkingTime ? checkingLabel : formattedCode}
             </span>
             <span className={`flex-shrink-0 transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
               {copied ? (
                 <Check size={14} className="text-green-600 dark:text-green-400" />
               ) : (
-                <Copy size={14} className="text-gray-400 dark:text-gray-500" />
+                <Copy size={14} className="text-gray-500 dark:text-gray-400" />
               )}
             </span>
           </button>
@@ -385,23 +457,25 @@ export function AccountCard({
               them out of the layout would shove the code sideways under the
               cursor, and the code is what the row exists to show. */}
           <div className="flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity flex-shrink-0">
-            <button
-              onClick={() => onShare(account)}
-              className="p-0.5 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              title={t('share.title')}
-            >
-              <Share2 size={12} />
-            </button>
+            {canShare && (
+              <button
+                onClick={() => onShare(account)}
+                className="p-0.5 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+                title={t('share.title')}
+              >
+                <Share2 size={12} />
+              </button>
+            )}
             <button
               onClick={() => onEdit(account)}
-              className="p-0.5 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              className="p-0.5 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
               title={t('edit.title')}
             >
               <Pencil size={12} />
             </button>
             <button
               onClick={() => onDelete(account.id)}
-              className="p-0.5 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500"
+              className="p-0.5 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
               title={t('accounts.deleteAccount')}
             >
               <Trash2 size={12} />
@@ -418,7 +492,10 @@ export function AccountCard({
 
   // Normal mode
   return (
-    <div {...dragProps} className={`${baseClass} p-3 px-4 after:inset-x-4`}>
+    // data-testid on the row and the code: what the Playwright suite (e2e/)
+    // reads. The row has no role of its own to find it by, and the digits are
+    // one text node among the name and the badges.
+    <div {...dragProps} data-testid="account-card" className={`${baseClass} p-3 px-4 after:inset-x-4`}>
       <div className="flex items-start justify-between mb-1.5">
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           {showAvatar && <Avatar account={account} size={20} />}
@@ -429,29 +506,31 @@ export function AccountCard({
           {suggestedBadge}
           {groupBadge}
           {draggable && (
-            <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 dark:text-gray-500 flex-shrink-0">
+            <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 dark:text-gray-400 flex-shrink-0">
               <GripVertical size={14} />
             </div>
           )}
         </div>
         <div className="flex items-center gap-0.5">
-          <button
-            onClick={() => onShare(account)}
-            className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-            title={t('share.title')}
-          >
-            <Share2 size={13} />
-          </button>
+          {canShare && (
+            <button
+              onClick={() => onShare(account)}
+              className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+              title={t('share.title')}
+            >
+              <Share2 size={13} />
+            </button>
+          )}
           <button
             onClick={() => onEdit(account)}
-            className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-gray-100 dark:hover:bg-dark-600 rounded text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
             title={t('edit.title')}
           >
             <Pencil size={13} />
           </button>
           <button
             onClick={() => onDelete(account.id)}
-            className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-400 hover:text-red-500"
+            className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 group-focus-within:opacity-100 transition-opacity p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
             title={t('accounts.deleteAccount')}
           >
             <Trash2 size={14} />
@@ -474,13 +553,14 @@ export function AccountCard({
               code is going into a phone, a VPN client or an SSH prompt. */}
           <div
             dir="ltr"
+            data-testid="account-code"
             className={`font-mono text-2xl tracking-wide transition-colors ${
               isExpiringSoon
-                ? 'text-orange-600 dark:text-orange-400 animate-pulse'
-                : 'text-[#4285F4]'
+                ? 'text-orange-600 dark:text-orange-400 motion-safe:animate-pulse'
+                : 'text-[#1a73e8] dark:text-[#669DF6]'
             }`}
           >
-            {formattedCode}
+            {checkingTime ? checkingLabel : formattedCode}
           </div>
           {/* Sits directly after the digits rather than pushed to the far right:
               the icon belongs to the code it copies, and across the width of the
@@ -491,7 +571,7 @@ export function AccountCard({
               {copied ? (
                 <Check size={16} className="text-green-600 dark:text-green-400" />
               ) : (
-                <Copy size={16} className="text-gray-400 dark:text-gray-500" />
+                <Copy size={16} className="text-gray-500 dark:text-gray-400" />
               )}
             </div>
             {copied && (
@@ -508,4 +588,4 @@ export function AccountCard({
       </div>
     </div>
   );
-}
+});

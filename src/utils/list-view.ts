@@ -54,12 +54,107 @@ export function chooseListView({ loading, total, shown, failed, held }: ListView
  * Read defensively: a record written by an older build or another exporter can
  * carry `issuer: null`, and `null.toLowerCase()` inside the render threw the
  * popup onto the crash screen at the first keystroke.
+ *
+ * The group counts too: with forty accounts, "work" is how people look for the
+ * ones they filed under Work, and a search that ignored the one label they
+ * chose themselves answered "no accounts found".
  */
-export function matchesSearch(account: Pick<Account, 'name' | 'issuer'>, query: string): boolean {
+export function matchesSearch(account: Pick<Account, 'name' | 'issuer' | 'group'>, query: string): boolean {
   const needle = query.toLowerCase();
   if (!needle) return true;
   return (
     String(account.name ?? '').toLowerCase().includes(needle) ||
-    String(account.issuer ?? '').toLowerCase().includes(needle)
+    String(account.issuer ?? '').toLowerCase().includes(needle) ||
+    (typeof account.group === 'string' && account.group.toLowerCase().includes(needle))
   );
+}
+
+/**
+ * How the list is ordered.
+ *
+ * 'manual' is the order the user dragged the rows into, and the default: it is
+ * what every existing install already has on screen. The other two are views
+ * over it, never written back — switching to "by service" and back returns the
+ * hand-made order untouched.
+ */
+export type SortOrder = 'manual' | 'service' | 'name';
+
+export const SORT_ORDERS: readonly SortOrder[] = ['manual', 'service', 'name'];
+
+/** Where the choice is kept. Local, like every other setting on the Settings screen. */
+export const SORT_ORDER_KEY = 'sortOrder';
+
+/** A stored value, or 'manual' for anything this build does not know. */
+export function readSortOrder(value: unknown): SortOrder {
+  return SORT_ORDERS.includes(value as SortOrder) ? (value as SortOrder) : 'manual';
+}
+
+const collators = new Map<string, Intl.Collator>();
+
+function collatorFor(language: string): Intl.Collator {
+  let collator = collators.get(language);
+  if (!collator) {
+    // Base sensitivity so "github" and "GitHub" sit together, numeric so
+    // "Server 2" comes before "Server 10".
+    collator = new Intl.Collator(language, { sensitivity: 'base', numeric: true });
+    collators.set(language, collator);
+  }
+  return collator;
+}
+
+const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+
+/**
+ * The list in the chosen order.
+ *
+ * Collated in the interface language: code-point order puts "Ä" after "Z" and
+ * every lowercase name after every capitalised one. Ties keep their manual
+ * order, so two accounts on one service stay the way the user arranged them.
+ * An account with no issuer sorts by its name under "service" — most imports
+ * that lack one put the service in the name.
+ */
+export function sortAccounts<T extends Pick<Account, 'name' | 'issuer'>>(
+  accounts: readonly T[],
+  order: SortOrder,
+  language: string
+): T[] {
+  if (order === 'manual') return [...accounts];
+  const collator = collatorFor(language);
+  const primary = (account: T) =>
+    order === 'service' ? text(account.issuer) || text(account.name) : text(account.name) || text(account.issuer);
+  const secondary = (account: T) => (order === 'service' ? text(account.name) : text(account.issuer));
+  return accounts
+    .map((account, index) => ({ account, index }))
+    .sort(
+      (a, b) =>
+        collator.compare(primary(a.account), primary(b.account)) ||
+        collator.compare(secondary(a.account), secondary(b.account)) ||
+        a.index - b.index
+    )
+    .map(entry => entry.account);
+}
+
+/**
+ * The order to write after an undone delete puts an account back.
+ *
+ * Re-adding appends it, so it would come back at the bottom of a list it was
+ * taken from the middle of. It goes back after the nearest account that stood
+ * before it and still exists — not at its old index, which counts rows another
+ * window may have added or deleted in the meantime. Null when it is already
+ * where it belongs, or no longer in the list at all.
+ */
+export function restoredOrder(currentIds: readonly string[], id: string, previousIds: readonly string[]): string[] | null {
+  if (!currentIds.includes(id)) return null;
+  const without = currentIds.filter(existing => existing !== id);
+  const before = previousIds.slice(0, Math.max(0, previousIds.indexOf(id)));
+  let at = 0;
+  for (let i = before.length - 1; i >= 0; i--) {
+    const found = without.indexOf(before[i]);
+    if (found !== -1) {
+      at = found + 1;
+      break;
+    }
+  }
+  const next = [...without.slice(0, at), id, ...without.slice(at)];
+  return next.every((value, i) => value === currentIds[i]) ? null : next;
 }

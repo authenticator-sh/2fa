@@ -1,9 +1,9 @@
 import type { Account } from '@/types';
 import { isVaultEnabled } from './vault';
+import { publicSuffixLength } from './public-suffix';
 
 const STORAGE_KEY = 'accountUsageByDomain';
 const ENABLED_KEY = 'suggestionsEnabled';
-const GENERIC_SECOND_LEVEL = new Set(['co', 'com', 'org', 'net', 'gov', 'edu', 'ac']);
 
 /**
  * What is remembered about one account on one domain, split by what the use
@@ -53,19 +53,29 @@ export async function setSuggestionsEnabled(enabled: boolean): Promise<void> {
   }
 }
 
-// Strips subdomains down to a registrable domain. Good enough for a usage
-// heuristic (not security-sensitive) — doesn't consult a real public suffix list,
-// so exotic multi-part TLDs beyond the common co.uk-style pattern may over-strip.
+/**
+ * The registrable domain a hostname belongs to: everything the same owner
+ * controls, and the key the per-site history is filed under.
+ *
+ * This used to keep two labels unless the second-level one was on a short list
+ * of co/com/org-style names, which folded whole public zones into one "site":
+ * hometax.go.kr and gov24.go.kr both became go.kr, so an account used on one
+ * government service was inserted unasked on another, and every github.io or
+ * vercel.app tenant shared one history with every other. The suffixes now come
+ * from a cut of the Public Suffix List (see public-suffix.ts). Entries filed
+ * under the old, folded keys simply stop matching — asking once more is the
+ * safe direction, and there is no way to tell which site they were earned on.
+ */
 export function getBaseDomain(hostname: string): string {
-  const parts = hostname.split('.').filter(Boolean);
-  if (parts.length <= 2) return hostname;
+  // An address has no registrable part, and trimming it to its last two
+  // octets would merge every host on the same /16.
+  if (hostname.includes(':') || /^\d+(\.\d+){3}$/.test(hostname)) return hostname;
 
-  const tld = parts[parts.length - 1];
-  const sld = parts[parts.length - 2];
-  if (tld.length === 2 && GENERIC_SECOND_LEVEL.has(sld) && parts.length >= 3) {
-    return parts.slice(-3).join('.');
-  }
-  return parts.slice(-2).join('.');
+  const parts = hostname.toLowerCase().split('.').filter(Boolean);
+  const suffix = publicSuffixLength(parts);
+  // The hostname is itself a public suffix (github.io, co.uk): nothing to strip.
+  if (parts.length <= suffix) return hostname;
+  return parts.slice(-(suffix + 1)).join('.');
 }
 
 /**

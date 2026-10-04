@@ -4,5 +4,5 @@
     "noEmit": true,
     "types": ["node", "chrome"]
   },
-  "include": ["src", "test", "scripts"]
+  "include": ["src", "test", "scripts", "e2e", "e2e-stack", "playwright.config.ts", "playwright.stack.config.ts"]
 }

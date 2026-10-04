@@ -29,6 +29,8 @@ import {
   type ImportReport,
 } from './import-formats';
 import { withAccountsLock } from './write-lock';
+import { admit, type AddOrigin } from '@/billing/gate';
+import { reassertSyncedFacts } from '@/billing/state';
 
 const STORAGE_KEY = 'authenticator_accounts';
 const SYNC_OVERFLOW_KEY = 'syncOverflow';
@@ -80,6 +82,8 @@ export async function setSyncEnabled(enabled: boolean): Promise<void> {
       const meta = await getVaultMeta();
       if (meta) await saveVaultMeta(meta);
     });
+    // And the two billing facts turning sync off took with it.
+    await reassertSyncedFacts();
     return;
   }
 
@@ -96,7 +100,11 @@ export async function setSyncEnabled(enabled: boolean): Promise<void> {
   // purge repeating on every later save here, as it used to: each time a
   // sync-on machine pushed, the next rename on this one wiped it again, so the
   // other machines effectively had no cloud copy at all.
-  await chrome.storage.sync.remove([...(await syncKeysInUse()), VAULT_META_KEY]).catch(() => {});
+  // The two billing facts that ride along in sync (billing/state.ts) go too:
+  // "removed from Google's servers" is about everything we put there.
+  await chrome.storage.sync
+    .remove([...(await syncKeysInUse()), VAULT_META_KEY, 'billingLegacy', 'billingLicenseKey'])
+    .catch(() => {});
 }
 
 // Chrome measures the quota in UTF-8 bytes, and `String.length` counts UTF-16
@@ -705,6 +713,83 @@ function tombstoneIdentities(record: StoredAccount): string[] {
 }
 
 /**
+ * Every form a seed's copies can take, in and out of the vault.
+ *
+ * tombstoneIdentities describes one record in the form it is stored in — the
+ * secret for cleartext, the fingerprint for ciphertext — and the merge used to
+ * compare an arriving copy only in ITS form. A seed deleted with protection
+ * off was marked by its secret; switch protection on, and another device's
+ * encrypted copy of it arrives as a fingerprint no marker names, and the
+ * account is back. The other way round the same. So a deletion is recorded
+ * under the secret in both spellings AND, while a vault is open, under the
+ * fingerprint of each — and the merge checks an arriving copy in every form it
+ * can compute (see syncAdditions).
+ *
+ * The marker hash itself is unchanged: markers already on disk hash exactly
+ * these strings.
+ */
+async function seedIdentities(secrets: string[]): Promise<string[]> {
+  const forms = new Set<string>();
+  for (const secret of secrets) {
+    forms.add(secret);
+    forms.add(secretKey(secret));
+  }
+  const fingerprintKey = await openFingerprintKey();
+  if (fingerprintKey) {
+    for (const form of [...forms]) forms.add(await fingerprintSecret(fingerprintKey, form));
+  }
+  return [...forms];
+}
+
+/** The key fingerprints are made with, or null when there is no open vault. */
+async function openFingerprintKey(): Promise<CryptoKey | null> {
+  if (!(await getVaultMeta())) return null;
+  const masterKeyBytes = await getMasterKeyBytes();
+  if (!masterKeyBytes) return null;
+  return (await deriveKeys(masterKeyBytes)).fingerprintKey;
+}
+
+/** What a change retires: the seed that leaves the list, in every form it was stored. */
+interface Retired {
+  /** Identities of the stored records, exactly as the merge compares them. */
+  identities: string[];
+  /** The seed itself, to be recorded in the forms it was NOT stored in as well. */
+  secrets: string[];
+}
+
+/**
+ * Every stored copy of the seed behind `id` — the record with that id, and the
+ * hidden copies the list folded into its card, which carry their own spelling
+ * or their own fingerprint. Taken from the stored records rather than
+ * recomputed from the decoded account, so they match exactly what the merge
+ * will compare a stale sync copy against.
+ */
+function retiredCopies(
+  stored: StoredAccount[],
+  seedOf: (record: StoredAccount) => string | undefined,
+  id: string,
+  seed: string | undefined
+): Retired {
+  const copies = stored
+    .filter(isUsableRecord)
+    .filter(record => record.id === id || (seed !== undefined && seedOf(record) === seed));
+  const secrets = new Set<string>();
+  for (const record of copies) {
+    const opened = seedOf(record);
+    if (opened !== undefined) secrets.add(opened);
+    if (!isEncryptedAccount(record)) secrets.add(record.secret);
+  }
+  if (seed !== undefined) secrets.add(seed);
+  return { identities: copies.flatMap(tombstoneIdentities), secrets: [...secrets] };
+}
+
+/** Record a retired seed as deleted here. Best-effort, like every marker write. */
+async function markRetired(retired: Retired): Promise<void> {
+  const identities = [...retired.identities, ...(await seedIdentities(retired.secrets).catch(() => retired.secrets))];
+  await markDeleted([...new Set(identities)]).catch(() => {});
+}
+
+/**
  * Give every readable record an id of its own.
  *
  * `deleteAccount` filters by id and `reorderAccounts` looks accounts up by it,
@@ -788,7 +873,7 @@ interface StoredRead {
  * lock exists to prevent — a surface reloading on a storage event wrote its
  * merge over an account another surface had added a moment before.
  */
-async function readStored(persist: boolean): Promise<StoredRead> {
+async function readStored(persist: boolean, options: { noteRead?: boolean } = {}): Promise<StoredRead> {
   const localResult = await chrome.storage.local.get([STORAGE_KEY, REVISION_KEY]);
   const rawLocal = localResult[STORAGE_KEY];
   // Something that is not a list is kept as one quarantined entry rather than
@@ -810,7 +895,10 @@ async function readStored(persist: boolean): Promise<StoredRead> {
 
   // Only a read that actually succeeded says anything about whether the area
   // is populated; a thrown read says nothing and must not start the clock.
-  if (syncReadable) {
+  // Nor does the read a save's own push merges with: the popup's reads keep
+  // the download-window latch, and a push re-arming it would hold back the
+  // very write that makes the area real.
+  if (syncReadable && options.noteRead !== false) {
     await noteSyncRead(syncAccounts.length, localAccounts.length);
   }
 
@@ -872,15 +960,63 @@ async function syncAdditions(
   // sync write catches up. Without this the reload after a delete put the
   // account straight back, and a second delete was needed to make it stick.
   const wasDeletedHere = await deletedHere();
+  const formsOf = await arrivalIdentities();
   const additions: StoredAccount[] = [];
   for (const acc of candidates) {
+    const identities = await formsOf(acc);
+    // Ciphertext of this vault while it is locked: which seed it holds cannot
+    // be known, so neither can whether it was deleted here. It stays in sync
+    // and is merged by the first read after the unlock — the same wait
+    // sealArrivals gives cleartext, and nothing reads the list while locked.
+    if (identities === null) continue;
     let deleted = false;
-    for (const identity of tombstoneIdentities(acc)) {
+    for (const identity of identities) {
       if (await wasDeletedHere(identity)) deleted = true;
     }
     if (!deleted) additions.push(acc);
   }
   return additions;
+}
+
+/**
+ * Every identity an arriving sync record could have been deleted under.
+ *
+ * Its own (tombstoneIdentities), plus the forms it would take on the other side
+ * of the vault: a cleartext copy's fingerprints while a vault is open, and an
+ * encrypted copy's secret once it is opened. A deletion made before the vault
+ * was switched on — or after it was switched off — is recorded in the other
+ * form, and checking only the arriving one let the account back in.
+ *
+ * `null` for ciphertext of the current vault while it is locked.
+ */
+async function arrivalIdentities(): Promise<(record: StoredAccount) => Promise<string[] | null>> {
+  const meta = await getVaultMeta();
+  const masterKeyBytes = meta ? await getMasterKeyBytes() : null;
+  const keys = masterKeyBytes ? await deriveKeys(masterKeyBytes) : null;
+
+  return async record => {
+    const own = tombstoneIdentities(record);
+    if (!isUsableRecord(record)) return own;
+
+    if (!isEncryptedAccount(record)) {
+      if (!keys) return own;
+      const forms = new Set(own);
+      for (const form of own) forms.add(await fingerprintSecret(keys.fingerprintKey, form));
+      return [...forms];
+    }
+
+    // Another vault's record is held, never opened; its fingerprint is all
+    // there is to compare, and all a deletion here could have recorded.
+    if (!meta || !belongsToVault(record, meta.vaultId)) return own;
+    if (!keys) return null;
+    try {
+      const fields = await decryptJson<Omit<Account, 'id'>>(record.enc, keys.dataKey);
+      if (!opensToAccount(fields)) return own;
+      return [...new Set([...own, fields.secret, secretKey(fields.secret)])];
+    } catch {
+      return own;
+    }
+  };
 }
 
 /**
@@ -934,6 +1070,18 @@ async function sealArrivals(
  */
 export async function getAccounts(): Promise<Account[]> {
   return decodeAccounts(await getStoredAccounts());
+}
+
+/**
+ * How many accounts this device holds, from local storage alone. For the
+ * billing check-in: a full read merges sync and starts the sync download
+ * window, and the service worker checks in at install time — before a new
+ * computer has received its synced accounts. Started there, the window had
+ * run out by the time they arrived, and the first account added by hand could
+ * then overwrite the only cloud copy. Throws like getAccounts (locked vault).
+ */
+export async function countLocalAccounts(): Promise<number> {
+  return (await decodeAccounts(await readLocalRecords())).length;
 }
 
 export interface SaveOptions {
@@ -1039,9 +1187,19 @@ async function writeAccounts(
     // list, and a writer that had read before another surface's delete wrote
     // the deleted record back AND wiped the marker that would have kept its sync
     // copy out: deleted, back, and staying back.
+    //
+    // In every form the seed could have been marked in, not only the one it is
+    // written in now: a deletion recorded with the vault off is a marker on the
+    // secret, and re-adding the account under a vault writes a fingerprint.
+    // Forgetting only that left the old marker to hide the account's sync copy
+    // on the day protection was switched off again.
     const before = new Set(existing.map(mergeKey));
     const arriving = records.filter(record => !before.has(mergeKey(record)));
-    await forgetDeleted(arriving.flatMap(tombstoneIdentities)).catch(() => {});
+    const arrivingSecrets = accounts
+      .filter((_, index) => !before.has(mergeKey(records[index])))
+      .map(account => account.secret);
+    const forms = await seedIdentities(arrivingSecrets).catch(() => arrivingSecrets);
+    await forgetDeleted([...arriving.flatMap(tombstoneIdentities), ...forms]).catch(() => {});
     return;
   }
 }
@@ -1055,15 +1213,21 @@ async function writeAccounts(
  * left a new one out. Under the lock, reading then, the last push to run always
  * carries the newest list.
  *
- * `merge` folds in what sync holds first, for the pushes that are not the tail
- * of a save — turning sync on, replaying a held push — where sync may carry
- * other devices' accounts that local has never seen, and a push of local alone
- * would prune them. A save's own push must not merge: it would put back what
- * the save just removed.
+ * `merge` folds in what sync holds first — minus what this device deleted —
+ * where sync may carry other devices' accounts that local has never seen, and
+ * a push of local alone would prune them. Every push merges now, a save's own
+ * included. It once did not, on the reasoning that merging would put back what
+ * the save had just removed; but a delete marks the seed deleted before it
+ * writes (and so does a secret replaced in an edit), so the merge leaves it
+ * out, while an unmerged push overwrote the chunk that held an account another
+ * device had written after this one's last read — gone from sync, and never
+ * having reached local, gone for good once that device dropped it too.
  */
-function pushLatest(options: PushOptions & { merge?: boolean } = {}): Promise<void> {
+function pushLatest(options: PushOptions & { merge?: boolean; noteRead?: boolean } = {}): Promise<void> {
   return withAccountsLock(async () => {
-    const records = options.merge ? (await readStored(true)).records : await readLocalRecords();
+    const records = options.merge
+      ? (await readStored(true, { noteRead: options.noteRead })).records
+      : await readLocalRecords();
     await pushToSync(records, options);
   });
 }
@@ -1071,7 +1235,7 @@ function pushLatest(options: PushOptions & { merge?: boolean } = {}): Promise<vo
 function pushAfterSave(options: SaveOptions): Promise<void> {
   // Sync is best-effort: failures here (e.g. QUOTA_BYTES_PER_ITEM exceeded
   // with many accounts) must not block the save or be retried.
-  const push = pushLatest().catch(syncError => {
+  const push = pushLatest({ merge: true, noteRead: false }).catch(syncError => {
     console.warn('Sync storage failed (local save succeeded):', syncError);
   });
   return options.awaitSync ? push : Promise.resolve();
@@ -1167,8 +1331,15 @@ async function mutateAccounts<T>(
   return outcome;
 }
 
-/** False when the seed was already here, so nothing was written. */
-export async function addAccount(account: Account): Promise<boolean> {
+/**
+ * False when the seed was already here, so nothing was written.
+ *
+ * `origin` is required: an account added by the person counts against the
+ * free limit (billing/gate.ts), an undone delete does not. The check runs here,
+ * inside the lock that every window shares, so two windows cannot both take
+ * the last free slot. It throws AccountLimitError before anything is written.
+ */
+export async function addAccount(account: Account, origin: AddOrigin): Promise<boolean> {
   return mutateAccounts(accounts => {
     // Deduplicated like every other way in, which this one was not.
     //
@@ -1179,29 +1350,52 @@ export async function addAccount(account: Account): Promise<boolean> {
     // shrink guard — a Save button that simply stopped working — and the next
     // import wrote the collapsed list back, deleting the hidden record for
     // good under a cheerful "Account added".
+    //
+    // Unless it is the Steam Guard account the list holds as plain TOTP: then
+    // the card is switched to Steam codes in place, and that is reported as
+    // done — the account is now as the user just scanned it.
     const key = secretKey(account.secret);
-    if (accounts.some(existing => secretKey(existing.secret) === key)) {
-      return { accounts: null, result: false };
+    const at = accounts.findIndex(existing => secretKey(existing.secret) === key);
+    if (at !== -1) {
+      if (!becomesSteam(accounts[at], account)) return { accounts: null, result: false };
+      const next = [...accounts];
+      next[at] = asSteam(accounts[at], account);
+      return { accounts: next, result: true };
     }
+    admit(origin, accounts.length, 1);
     return { accounts: [...accounts, account], result: true };
   });
 }
 
 export async function addMultipleAccounts(
-  newAccounts: Account[]
-): Promise<{ added: number; skipped: number; total: number }> {
+  newAccounts: Account[],
+  origin: AddOrigin
+): Promise<{ added: number; skipped: number; total: number; updated: number; leftOut: number }> {
   return mutateAccounts((accounts, stored) => {
-    const uniqueAccounts = newAccountsFrom(newAccounts, accounts, stored, 'added');
-
-    return {
-      accounts: [...accounts, ...uniqueAccounts],
-      result: {
-        added: uniqueAccounts.length,
-        skipped: newAccounts.length - uniqueAccounts.length,
-        total: newAccounts.length,
-      },
+    const merged = mergeIncoming(newAccounts, accounts, stored, 'added');
+    const admitted = withinLimit(merged, accounts.length, origin);
+    const result = {
+      added: admitted.added,
+      skipped: newAccounts.length - merged.added - merged.updated,
+      total: newAccounts.length,
+      updated: merged.updated,
+      leftOut: merged.added - admitted.added,
     };
+    return { accounts: admitted.accounts, result };
   });
+}
+
+/**
+ * The merged list cut to what the limit admits. New accounts are the tail of
+ * the merged list (mergeIncoming appends them in order), so keeping the first
+ * `n` of them is keeping the first `n` the person brought — the order of the
+ * file, or of the export QR. Upgrades of accounts already here are not new
+ * accounts and always stay.
+ */
+function withinLimit(merged: Merged, count: number, origin: AddOrigin): { accounts: Account[]; added: number } {
+  const keep = admit(origin, count, merged.added, merged.updated);
+  if (keep >= merged.added) return { accounts: merged.accounts, added: merged.added };
+  return { accounts: merged.accounts.slice(0, count + keep), added: keep };
 }
 
 export async function reorderAccounts(accountIds: string[]): Promise<void> {
@@ -1236,24 +1430,41 @@ export async function reorderAccounts(accountIds: string[]): Promise<void> {
  * than report a change that went nowhere.
  */
 export async function updateAccount(id: string, updates: Partial<Account>): Promise<boolean> {
-  return mutateAccounts(accounts => {
-    const index = accounts.findIndex(acc => acc.id === id);
-    if (index === -1) return { accounts: null, result: false };
+  const outcome = await mutateAccounts<{ found: boolean; retired: Retired | null }>(
+    (accounts, stored, seedOf) => {
+      const index = accounts.findIndex(acc => acc.id === id);
+      if (index === -1) return { accounts: null, result: { found: false, retired: null } };
 
-    const merged = { ...accounts[index], ...updates };
+      const merged = { ...accounts[index], ...updates };
 
-    // An explicit `undefined` means "clear this field" — clearing an account's
-    // group, say. Spreading it leaves the key present with an undefined value,
-    // which chrome.storage serialises as null, and `null.trim()` throws on the
-    // next read. Drop the key instead.
-    for (const key of Object.keys(updates) as (keyof Account)[]) {
-      if (updates[key] === undefined) delete merged[key];
-    }
+      // An explicit `undefined` means "clear this field" — clearing an account's
+      // group, say. Spreading it leaves the key present with an undefined value,
+      // which chrome.storage serialises as null, and `null.trim()` throws on the
+      // next read. Drop the key instead.
+      for (const key of Object.keys(updates) as (keyof Account)[]) {
+        if (updates[key] === undefined) delete merged[key];
+      }
 
-    const next = [...accounts];
-    next[index] = merged;
-    return { accounts: next, result: true };
-  });
+      const next = [...accounts];
+      next[index] = merged;
+
+      // A new secret retires the old one exactly as a delete does. Replacing an
+      // "Invalid key" is the usual case: the old seed's sync copy is still up
+      // there, and with no marker the next read took it for another device's
+      // account and put it back beside the fixed one — the broken card the user
+      // had just repaired, returning as a duplicate.
+      const oldSeed = secretKey(accounts[index].secret);
+      const replaced = typeof merged.secret === 'string' && secretKey(merged.secret) !== oldSeed;
+      return {
+        accounts: next,
+        result: { found: true, retired: replaced ? retiredCopies(stored, seedOf, id, oldSeed) : null },
+      };
+    },
+    // Before the write, as for a delete: the write fires onChanged, and the
+    // reload it triggers must already find the marker.
+    { beforeSave: ({ retired }) => (retired ? markRetired(retired) : Promise.resolve()) }
+  );
+  return outcome.found;
 }
 
 export async function deleteAccount(id: string): Promise<void> {
@@ -1267,24 +1478,17 @@ export async function deleteAccount(id: string): Promise<void> {
       const seed = target ? secretKey(target.secret) : undefined;
       if (!target && !stored.some(record => isUsableRecord(record) && record.id === id)) {
         // Already gone — deleted in another window. Nothing to write.
-        return { accounts: null, result: [] };
+        return { accounts: null, result: { identities: [], secrets: [] } };
       }
       return {
         accounts: accounts.filter(acc => acc.id !== id),
-        // The identities are taken from the stored records rather than
-        // recomputed from the decoded account, so they match exactly what the
-        // merge will compare a stale sync copy against — the fingerprint when a
-        // vault is on, the secret when it is not.
-        //
         // Every record of the same seed, not only the one with this id. The
         // list folds duplicates into one card, so deleting that card drops the
         // hidden copies from local too — and their sync copies, carrying their
         // own spelling or their own fingerprint, matched no marker and put the
-        // account straight back.
-        result: stored
-          .filter(isUsableRecord)
-          .filter(record => record.id === id || (seed !== undefined && seedOf(record) === seed))
-          .flatMap(tombstoneIdentities),
+        // account straight back. And in every form, not only the stored one:
+        // see seedIdentities.
+        result: retiredCopies(stored, seedOf, id, seed),
       };
     },
     {
@@ -1295,7 +1499,7 @@ export async function deleteAccount(id: string): Promise<void> {
       // stale sync copy and no tombstone yet merges the account straight back.
       // saveAccounts only forgets identities it adds, so an early marker
       // survives the save it precedes.
-      beforeSave: identities => markDeleted(identities).catch(() => {}),
+      beforeSave: markRetired,
     }
   );
 }
@@ -1305,7 +1509,7 @@ export async function exportAccounts(): Promise<string> {
   return JSON.stringify(accounts, null, 2);
 }
 
-export async function importAccounts(jsonData: string): Promise<ImportReport> {
+export async function importAccounts(jsonData: string, origin: AddOrigin): Promise<ImportReport & { leftOut: number }> {
   let file: ImportFile;
   try {
     // Our own plain export, a bare array from before 1.2, or another
@@ -1321,7 +1525,7 @@ export async function importAccounts(jsonData: string): Promise<ImportReport> {
     throw new ImportRejectedError('unknown-format');
   }
 
-  return await importAccountList(file.entries, file);
+  return await importAccountList(file.entries, origin, file);
 }
 
 export interface ImportResult {
@@ -1353,8 +1557,9 @@ function normalizeImported(entry: unknown, index: number): Account | null {
  */
 export async function importAccountList(
   importedAccounts: unknown[],
+  origin: AddOrigin,
   from: Partial<Omit<ImportFile, 'entries'>> = {}
-): Promise<ImportReport> {
+): Promise<ImportReport & { updated: number; leftOut: number }> {
   if (!Array.isArray(importedAccounts)) {
     throw new Error('Invalid format');
   }
@@ -1369,23 +1574,23 @@ export async function importAccountList(
   if (usable.length === 0) {
     // An empty file. Nothing to write, and saving the list over itself would
     // cost a sync push for nothing.
-    return { added: 0, alreadyHere: 0, unreadable, unsupported };
+    return { added: 0, updated: 0, alreadyHere: 0, unreadable, unsupported, leftOut: 0 };
   }
 
   // De-duplicated within the file too, and ids that collide reassigned: see
-  // newAccountsFrom.
+  // mergeIncoming.
   return mutateAccounts((existingAccounts, stored) => {
-    const newAccounts = newAccountsFrom(usable, existingAccounts, stored, 'imported');
-
-    return {
-      accounts: [...existingAccounts, ...newAccounts],
-      result: {
-        added: newAccounts.length,
-        alreadyHere: usable.length - newAccounts.length,
-        unreadable,
-        unsupported,
-      },
+    const merged = mergeIncoming(usable, existingAccounts, stored, 'imported');
+    const admitted = withinLimit(merged, existingAccounts.length, origin);
+    const result = {
+      added: admitted.added,
+      updated: merged.updated,
+      alreadyHere: usable.length - merged.added - merged.updated,
+      unreadable,
+      unsupported,
+      leftOut: merged.added - admitted.added,
     };
+    return { accounts: admitted.accounts, result };
   });
 }
 
@@ -1438,7 +1643,12 @@ export async function restoreFromSnapshot(records: StoredAccount[]): Promise<Res
   }
 
   return mutateAccounts((existingAccounts, stored) => {
-    const additions = newAccountsFrom(usable, existingAccounts, stored, 'restored');
+    // Only additions: a restore puts back what is missing and changes nothing
+    // that is here, a Steam type included — the copy is up to a day older than
+    // the list, and whatever it holds, the list is what the user has since
+    // made of it.
+    const merged = mergeIncoming(usable, existingAccounts, stored, 'restored');
+    const additions = merged.accounts.slice(existingAccounts.length);
     return {
       accounts: [...existingAccounts, ...additions],
       result: {
@@ -1451,20 +1661,60 @@ export async function restoreFromSnapshot(records: StoredAccount[]): Promise<Res
 }
 
 /**
- * The accounts in `incoming` that are not already here, safe to append.
+ * Whether `incoming` is a Steam Guard account the list holds as plain TOTP.
+ *
+ * The same secret drives both — Steam Guard is HMAC-SHA1 over 30-second steps
+ * too — so dedupe by secret alone called the Steam entry "already here" and
+ * kept the record that prints six digits Steam never accepts. That record is
+ * what every build before Steam support made of a Steam secret, so it is the
+ * shape a user fixing their list by importing a maFile or an Aegis backup
+ * actually has. The other way round is not an upgrade: a TOTP entry for a
+ * seed held as Steam is the older build's reading, and must not flatten it.
+ */
+function becomesSteam(existing: Account, incoming: Account): boolean {
+  return incoming.type === 'steam' && existing.type !== 'steam';
+}
+
+/** The existing account, now producing Steam codes; its name, group and place kept. */
+function asSteam(existing: Account, incoming: Account): Account {
+  return {
+    ...existing,
+    type: 'steam',
+    algorithm: incoming.algorithm,
+    digits: incoming.digits,
+    period: incoming.period,
+  };
+}
+
+interface Merged {
+  /** The existing list, upgraded where it needed to be, then the new accounts. */
+  accounts: Account[];
+  /** New accounts appended. */
+  added: number;
+  /** Accounts already here that the incoming list changed — Steam over TOTP. */
+  updated: number;
+}
+
+/**
+ * Fold `incoming` into the list: new seeds appended, known ones left alone.
  *
  * Deduplicated against the store AND against each other: a file can carry one
  * seed twice — a password manager export with the same TOTP on two items, or
  * one secret in two spellings. Appending both stored a record the list folds
  * away, and the count said two were added where one appeared.
+ *
+ * The one change made to an account that is already here is its type, when a
+ * Steam entry arrives for a seed held as TOTP (see becomesSteam).
  */
-function newAccountsFrom(
+function mergeIncoming(
   incoming: Account[],
   existingAccounts: Account[],
   stored: StoredAccount[],
   idSuffix: string
-): Account[] {
-  const known = new Set(existingAccounts.map(acc => secretKey(acc.secret)));
+): Merged {
+  const list = [...existingAccounts];
+  /** Where each seed already in the list, or already added, sits in `list`. */
+  const known = new Map(list.map((acc, index) => [secretKey(acc.secret), index]));
   // Ids from the stored records too, not only the decoded ones: a record this
   // device cannot read still occupies its id, and it is invisible to the list
   // the caller sees.
@@ -1472,12 +1722,23 @@ function newAccountsFrom(
     ...existingAccounts.map(acc => acc.id),
     ...stored.filter(isUsableRecord).map(record => record.id),
   ]);
-  const additions: Account[] = [];
+  let added = 0;
+  const updated = new Set<number>();
 
   for (const account of incoming) {
     const key = secretKey(account.secret);
-    if (known.has(key)) continue;
-    known.add(key);
+    const at = known.get(key);
+    if (at !== undefined) {
+      if (becomesSteam(list[at], account)) {
+        list[at] = asSteam(list[at], account);
+        // An account that was here before this import; one the same file
+        // added a line earlier is a duplicate inside the file, not an update.
+        if (at < existingAccounts.length) updated.add(at);
+      }
+      continue;
+    }
+    known.set(key, list.length);
+    added++;
 
     // Same id, different secret: two accounts, one identity. `deleteAccount`
     // filters the list by id, so deleting either would have deleted both.
@@ -1486,16 +1747,16 @@ function newAccountsFrom(
     if (usedIds.has(account.id)) {
       let candidate = `${account.id}-${idSuffix}`;
       for (let n = 2; usedIds.has(candidate); n++) candidate = `${account.id}-${idSuffix}-${n}`;
-      additions.push({ ...account, id: candidate });
+      list.push({ ...account, id: candidate });
       usedIds.add(candidate);
       continue;
     }
 
     usedIds.add(account.id);
-    additions.push(account);
+    list.push(account);
   }
 
-  return additions;
+  return { accounts: list, added, updated: updated.size };
 }
 
 // --- vault migration ------------------------------------------------------

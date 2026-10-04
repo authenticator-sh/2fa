@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useEscapeLayer, useReturnFocus } from '@/hooks/useLayer';
 import { Sparkles, Lightbulb, ArrowRight, X } from 'lucide-react';
 import { createT, type Language } from '@/utils/i18n';
 import { WHATS_NEW } from '@/utils/update-notes';
@@ -39,13 +40,8 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
   // Escape closes it, as it does every other dialog here. It counts as an
   // explicit dismissal for the same reason the corner button does: nothing
   // reaches this handler without the user asking for it.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useEscapeLayer(onClose);
+  useReturnFocus();
 
   const handleLater = () => {
     setLaterClicked(true);
@@ -62,11 +58,11 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
           <div className="flex items-center gap-2">
             <Sparkles className="text-[#4285F4]" size={20} />
             <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{t('update.title')}</h2>
-            <span className="ms-auto text-xs font-medium text-gray-400 dark:text-gray-500">v{version}</span>
+            <span className="ms-auto text-xs font-medium text-gray-500 dark:text-gray-400">v{version}</span>
             <button
               onClick={onClose}
               aria-label={t('update.gotIt')}
-              className="-me-1.5 flex-shrink-0 rounded p-1 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+              className="-me-1.5 flex-shrink-0 rounded p-1 text-gray-500 transition-colors hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
             >
               <X size={16} />
             </button>
@@ -77,7 +73,7 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
           <ul className="space-y-2 pb-3">
             {highlights.map((key) => (
               <li key={key} className="flex items-start gap-2 text-xs leading-relaxed text-gray-700 dark:text-gray-300">
-                <span className="text-[#4285F4] mt-0.5">&bull;</span>
+                <span className="text-[#1a73e8] dark:text-[#669DF6] mt-0.5">&bull;</span>
                 <span>{t(key)}</span>
               </li>
             ))}
@@ -90,7 +86,7 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
           <button
             type="button"
             onClick={() => openInTab(whatsNewUrl(language, version))}
-            className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[#4285F4] hover:underline"
+            className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[#1a73e8] dark:text-[#669DF6] hover:underline"
           >
             <ArrowRight size={13} className="rtl:rotate-180" />
             {t('update.learnMore')}
@@ -102,7 +98,7 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
           <button
             type="button"
             onClick={() => openInTab(FEATURE_REQUEST_URL)}
-            className="mb-3 flex items-center gap-1.5 text-xs font-medium text-[#4285F4] hover:underline"
+            className="mb-3 flex items-center gap-1.5 text-xs font-medium text-[#1a73e8] dark:text-[#669DF6] hover:underline"
           >
             <Lightbulb size={13} />
             {t('common.requestFeature')}
@@ -143,7 +139,7 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
             className={`w-full font-medium text-sm py-2.5 rounded-lg transition-colors ${
               showRatingPrompt
                 ? 'border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
-                : 'bg-[#4285F4] hover:bg-[#3367D6] text-white'
+                : 'bg-[#1a73e8] hover:bg-[#1967D2] text-white'
             }`}
           >
             {t('update.gotIt')}

@@ -43,7 +43,7 @@
 // half is enough, and that is what "send the password another way" buys.
 
 import type { Account } from '@/types';
-import { generateCodeAt, getTimeOffsetMs, totpParams } from './totp';
+import { generateCodeAt, getTimeOffsetMs, isSteamAccount, totpParams } from './totp';
 import { PBKDF2_ITERATIONS, randomBytes } from './crypto';
 
 export const SHARE_PAGE_URL = 'https://www.authenticator.sh/s';
@@ -58,6 +58,18 @@ export const SHARE_PAGE_URL = 'https://www.authenticator.sh/s';
  * will display, not only about the ones this build makes.
  */
 export const MAX_SHARE_SECONDS = 60 * 60;
+
+/**
+ * The shortest period a link is made for.
+ *
+ * The page will decode anything down to one second (SHARE_LIMITS.minPeriod is
+ * its bound, and stays so), but the link is an hour of codes, and its length is
+ * the number of codes in it. At 30 seconds that is about 550 characters; at 15,
+ * 900 — still under the 998 at which email clients wrap a URL; at 10, 1 300,
+ * past it; at one second, 12 000, which no QR code holds and no chat client
+ * keeps in one piece. Fifteen still covers every short period seen in the wild.
+ */
+export const MIN_SHARE_PERIOD = 15;
 
 /** The choices offered, in seconds. The last one is the maximum. */
 export const SHARE_DURATIONS = [5 * 60, 15 * 60, 30 * 60, MAX_SHARE_SECONDS] as const;
@@ -103,11 +115,19 @@ export interface ShareLink {
   count: number;
 }
 
-/** A link this build cannot make — the account's secret produces no code. */
+/**
+ * A link this build cannot make. `reason` is what the sender is told: the
+ * secret produces no code, or the codes change too often to fit in a link.
+ */
+export type ShareErrorReason = 'secret' | 'period' | 'steam' | 'format';
+
 export class ShareError extends Error {
-  constructor(message: string) {
+  readonly reason: ShareErrorReason;
+
+  constructor(message: string, reason: ShareErrorReason = 'format') {
     super(message);
     this.name = 'ShareError';
+    this.reason = reason;
   }
 }
 
@@ -389,7 +409,15 @@ export interface ShareRequest {
  */
 export async function buildShareLink(request: ShareRequest): Promise<ShareLink> {
   const { account, password } = request;
+  // The wire format carries each code as an integer below 10^digits, and the
+  // page prints it back as digits. A Steam code is letters; packed as a number
+  // it would arrive as something that looks like a code and is not one. The
+  // card does not offer sharing for these — this is the backstop.
+  if (isSteamAccount(account)) throw new ShareError('Steam Guard codes cannot be shared', 'steam');
   const { period, digits } = totpParams(account);
+  if (period < MIN_SHARE_PERIOD) {
+    throw new ShareError(`A ${period}-second period is too short to share`, 'period');
+  }
   const durationSec = Math.min(Math.max(request.durationSec, period), MAX_SHARE_SECONDS);
   const nowMs = request.nowMs ?? Date.now() + getTimeOffsetMs();
 
@@ -415,7 +443,7 @@ export async function buildShareLink(request: ShareRequest): Promise<ShareLink> 
     try {
       code = generateCodeAt(account, counter * period * 1000);
     } catch {
-      throw new ShareError('The secret cannot produce a code');
+      throw new ShareError('The secret cannot produce a code', 'secret');
     }
     codes.push(Number(code));
   }
