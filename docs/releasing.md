@@ -181,10 +181,11 @@ item and not something that happens on its own.
 accounts and the settings that describe how to show them. `chrome.storage.local`
 is the primary copy; `chrome.storage.session` holds the unlocked vault key for as
 long as the user's auto-lock setting allows, so it never touches disk;
-`chrome.storage.sync` is an optional second copy, off unless the user turns it on
-and removed from Google's servers when they turn it off. Nothing about the pages
-they visit is stored, and nothing is sent anywhere - the extension has no server
-and no analytics. Without this permission the extension cannot remember a single
+`chrome.storage.sync` is a second copy through the user's own Google account, on
+by default and removed from Google's servers when they turn it off. Nothing about
+the pages they visit is stored. Since 1.14.0 a daily check-in with our server
+carries how many accounts there are - a number, never an account, secret or
+code - for the free plan and Pro. Without this permission the extension cannot remember a single
 account between one click of the toolbar icon and the next, which is the whole
 function.
 
@@ -223,5 +224,5 @@ state. In the page it inspects input and textarea attributes
 (autocomplete="one-time-code", name, id, placeholder) to find the box that should
 receive the code, writes the code there and dispatches the events a form needs to
 notice it. If no field accepts it, the code goes to the clipboard instead. It
-never reads values the user has typed, page text or credentials, and it sends
-nothing anywhere - the extension has no analytics and no server.
+never reads values the user has typed, page text or credentials, and nothing it
+sees on the page is sent anywhere.
