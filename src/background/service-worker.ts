@@ -15,6 +15,7 @@ import {
   type InstallHint,
 } from '@/billing/state';
 import { isSyncRequestMessage, syncBilling } from '@/billing/sync';
+import { applyUninstallUrl, markInstalled, UNINSTALL_FEEDBACK_URL } from '@/billing/onboarding';
 import type { LegacySource } from '@/billing/types';
 import { isSyncEnabled } from '@/utils/sync-preference';
 
@@ -25,17 +26,6 @@ import { isSyncEnabled } from '@/utils/sync-preference';
 // particular is handed to Chrome and opened after we are gone — a hop we do not
 // need on the one page we get no second chance at.
 const WELCOME_URL = 'https://www.authenticator.sh/welcome';
-const UNINSTALL_FEEDBACK_URL = 'https://www.authenticator.sh/uninstall';
-
-/**
- * The install id rides on the uninstall address, so the survey answer can be
- * joined to the install it is about (MONETIZATION.md §3.8). Set whenever the
- * worker learns the id; Chrome keeps the last one it was given.
- */
-function setUninstallUrlFor(installId: string | null): void {
-  const url = installId ? `${UNINSTALL_FEEDBACK_URL}?i=${encodeURIComponent(installId)}` : UNINSTALL_FEEDBACK_URL;
-  chrome.runtime.setUninstallURL(url);
-}
 
 /**
  * Records the install — fresh, or updated from a version that predates
@@ -45,11 +35,32 @@ function setUninstallUrlFor(installId: string | null): void {
 async function setUpBilling(hint: InstallHint): Promise<void> {
   try {
     const install = await ensureInstall(hint);
-    setUninstallUrlFor(install.id);
+    // The install id rides on the uninstall address, so the survey answer can
+    // be joined to the install it is about (MONETIZATION.md §3.8), and with it
+    // how far the install got towards a first account (billing/onboarding.ts).
+    // Set whenever the worker learns the id; Chrome keeps the last one given.
+    if (hint.reason === 'install' && !install.legacy) await markInstalled();
+    await applyUninstallUrl(install.id);
     await syncBilling({ force: hint.reason !== 'other' });
   } catch (error) {
     console.warn('billing: setup failed', error);
   }
+}
+
+/**
+ * The welcome page, with the install id on it, so an install that came from
+ * one of our ads is joined to that install (the site's /api/i → the API's
+ * ad_installs) — and with it to whether it got going and what it paid. The
+ * site forwards the id only for a browser that came through an ad link;
+ * otherwise it goes nowhere. If the id cannot be had, the page opens without it.
+ */
+async function openWelcome(): Promise<void> {
+  let url = WELCOME_URL;
+  try {
+    const install = await ensureInstall({ reason: 'install' });
+    if (!install.legacy) url = `${WELCOME_URL}?iid=${encodeURIComponent(install.id)}`;
+  } catch {}
+  await chrome.tabs.create({ url }).catch(error => console.warn('could not open the welcome page', error));
 }
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -62,7 +73,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   void applyOpenMode();
 
   if (details.reason === 'install') {
-    chrome.tabs.create({ url: WELCOME_URL });
+    void openWelcome();
   } else if (details.reason === 'update') {
     // Unpacked extensions fire onInstalled('update') on every dev reload, even
     // without a version bump — only (re)arm the modal if this version hasn't

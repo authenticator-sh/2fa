@@ -443,7 +443,7 @@ export async function run(): Promise<void> {
     const keys = Object.keys(body).sort().join(',');
     check(
       'exactly the documented fields',
-      keys === 'accounts,browser_lang,events,has_key,iid,installed_at,key_hint,legacy,legacy_src,lid,open_mode,opens,pid,sync,ui_lang,vault,ver',
+      keys === 'accounts,browser_lang,dark,events,has_key,iid,installed_at,key_hint,legacy,legacy_src,lid,open_mode,opens,pid,style,sync,ui_lang,vault,ver',
       keys,
     );
     check('the count, not the accounts', body.accounts === 2);
@@ -451,6 +451,13 @@ export async function run(): Promise<void> {
     await chrome.storage.local.set({ language: 'de' });
     check('or the one picked', (await sync.buildSyncRequest(install)).ui_lang === 'de');
     await chrome.storage.local.remove('language');
+    check('the classic light look when nothing was picked', body.style === 'classic' && body.dark === false, `${body.style} ${body.dark}`);
+    await chrome.storage.local.set({ uiStyle: 'apple', darkMode: true });
+    const styled = await sync.buildSyncRequest(install);
+    check('or the style and theme picked', styled.style === 'apple' && styled.dark === true, `${styled.style} ${styled.dark}`);
+    await chrome.storage.local.set({ uiStyle: 'neon' });
+    check('an unknown stored style is sent as classic', (await sync.buildSyncRequest(install)).style === 'classic');
+    await chrome.storage.local.remove(['uiStyle', 'darkMode']);
     const text = JSON.stringify(body);
     // The one account-looking string is the prop this test put in an event on
     // purpose; strip it and nothing about the accounts may remain.
@@ -962,10 +969,10 @@ export async function run(): Promise<void> {
   // a variant missing from a language would show that reader a blank heading.
   scenario('Every paywall copy variant is written in every language');
   {
-    const { COPY } = await import('@/components/Paywall');
+    const { BACKUP_COPY, COPY } = await import('@/components/Paywall');
     const { languages } = await import('@/utils/i18n');
     const en = (await import('@/utils/locales/en')).default as unknown as Record<string, string>;
-    const keys = Object.values(COPY).flatMap(({ title, body }) => [title, body]);
+    const keys = [...Object.values(COPY), BACKUP_COPY].flatMap(({ title, body }) => [title, body]);
     check('the variants the server tests are all here', ['default', 'support', 'private', 'everything'].every((name) => name in COPY));
 
     const missing: string[] = [];

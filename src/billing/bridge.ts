@@ -3,7 +3,12 @@
 // utils/ui-feedback.ts, for the same reason: the callers are spread across
 // components that share no parent worth threading a callback through.
 
-export type PaywallTrigger = 'form' | 'qr' | 'migration' | 'file' | 'uri' | 'scan' | 'settings';
+/**
+ * Where the paywall was opened from; `backup` is cloud backup's "Turn on" in
+ * Settings, for anyone without Pro, and `backup_banner` the banner at the top
+ * of Settings offering the same.
+ */
+export type PaywallTrigger = 'form' | 'qr' | 'migration' | 'file' | 'uri' | 'scan' | 'settings' | 'backup' | 'backup_banner';
 
 export interface LimitContext {
   /** Accounts already stored. */

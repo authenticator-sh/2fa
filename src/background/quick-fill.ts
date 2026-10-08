@@ -19,6 +19,7 @@ import { openAppFor, openSidePanelInGesture } from './open-mode';
 import { detectLanguage, matchLanguage, type Language } from '@/utils/language';
 import { executeFill, injectFill as inject, MIN_REMAINING_SEC } from './quick-fill-inject';
 import { workerT, type WorkerKey } from './strings';
+import { reportCodeUsed } from '@/billing/onboarding';
 
 export const MENU_ID = 'quick-fill';
 export const COMMAND_ID = 'quick-fill';
@@ -205,6 +206,7 @@ export async function runQuickFill(invocation: Invocation, panel: Promise<boolea
   if (hostname && outcome !== 'skipped') {
     await recordAccountUsage(hostname, account.id, 'site').catch(() => {});
   }
+  if (outcome === 'filled' || outcome === 'copied') void reportCodeUsed(outcome === 'filled' ? 'fill' : 'copy');
 }
 
 /**

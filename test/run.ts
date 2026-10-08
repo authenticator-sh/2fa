@@ -20,6 +20,7 @@ const suites = [
   ['groups', () => import('./groups.test')],
   ['recovery', () => import('./recovery.test')],
   ['restoring an automatic copy', () => import('./restore.test')],
+  ['cloud backup', () => import('./cloud-backup.test')],
   ['review prompt', () => import('./review-prompt.test')],
   ['backup reminder', () => import('./backup-reminder.test')],
   ['time sync', () => import('./time-sync.test')],
@@ -41,6 +42,7 @@ const suites = [
   ['what the popup puts on screen', () => import('./ui-state.test')],
   ['toasts, dialogs, Escape and the order of the list', () => import('./ui-feedback.test')],
   ['the free limit, the license and what leaves the machine', () => import('./billing.test')],
+  ['the way to a first account', () => import('./onboarding.test')],
   ['the store listing against the manifest', () => import('./listing.test')],
 ] as const;
 

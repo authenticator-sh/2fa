@@ -32,12 +32,12 @@ export function describeAge(timestamp: number, t: ReturnType<typeof createT>): s
  * capital belongs to this one use and not to twenty translations. Turkish has
  * its own rule for i, which is why this goes through the locale.
  */
-function startOfLine(text: string, language: Language): string {
+export function startOfLine(text: string, language: Language): string {
   return text.charAt(0).toLocaleUpperCase(language) + text.slice(1);
 }
 
 /** "3 restored", plus what the copy held that this device could not read. */
-function resultMessage(result: RestoreResult, t: ReturnType<typeof createT>): string {
+export function resultMessage(result: RestoreResult, t: ReturnType<typeof createT>): string {
   const held = result.unreadable > 0 ? t('restore.held', result.unreadable) : '';
 
   // A copy whose every record belongs to another vault restored nothing and
@@ -239,7 +239,7 @@ export function RestoreOffer({ backup, language, onRestored, variant = 'banner' 
   return (
     <div className="mx-4 mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/50 dark:bg-blue-900/20">
       <div className="flex items-start gap-2">
-        <LifeBuoy size={15} className="mt-0.5 flex-shrink-0 text-[#1a73e8] dark:text-[#8AB4F8]" />
+        <LifeBuoy size={15} className="mt-0.5 flex-shrink-0 text-accent-600 dark:text-accent-300" />
         <div className="min-w-0">
           <p className="text-xs font-medium text-gray-900 dark:text-gray-100">
             {t('restore.offerTitle', backup.accountCount)}
@@ -250,7 +250,7 @@ export function RestoreOffer({ backup, language, onRestored, variant = 'banner' 
           <button
             onClick={() => void run()}
             disabled={busy}
-            className="mt-2 rounded-md bg-[#1a73e8] px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-[#1967D2] disabled:opacity-50"
+            className="mt-2 rounded-md bg-accent-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-accent-700 disabled:opacity-50"
           >
             {busy ? t('restore.busy') : t('restore.action')}
           </button>

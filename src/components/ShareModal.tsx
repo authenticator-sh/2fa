@@ -135,7 +135,7 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
     : '';
 
   const inputClass =
-    'w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500';
+    'w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500';
 
   return (
     <div
@@ -205,7 +205,7 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
                         onClick={() => setDurationSec(seconds)}
                         className={`rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${
                           active
-                            ? 'border-[#4285F4] bg-blue-50 text-[#1a73e8] dark:bg-blue-900/30 dark:text-blue-300'
+                            ? 'border-accent-500 bg-blue-50 text-accent-600 dark:bg-blue-900/30 dark:text-blue-300'
                             : 'border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-dark-600 dark:text-gray-300 dark:hover:bg-dark-700'
                         }`}
                       >
@@ -255,7 +255,7 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
               <button
                 type="submit"
                 disabled={creating}
-                className="w-full bg-[#1a73e8] hover:bg-[#1967D2] disabled:opacity-60 text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
+                className="w-full bg-accent-600 hover:bg-accent-700 disabled:opacity-60 text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
               >
                 {creating ? t('share.creating') : t('share.create')}
               </button>
@@ -299,7 +299,7 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
                 className={`w-full flex items-center justify-center gap-2 font-medium text-sm py-2.5 rounded-lg transition-colors ${
                   copied
                     ? 'bg-green-600 text-white'
-                    : 'bg-[#1a73e8] hover:bg-[#1967D2] text-white'
+                    : 'bg-accent-600 hover:bg-accent-700 text-white'
                 }`}
               >
                 {copied ? <Check size={16} /> : <Copy size={16} />}

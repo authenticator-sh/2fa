@@ -38,7 +38,7 @@ export function PromoBanner({ language, onDismiss }: PromoBannerProps) {
       </button>
       <div className="flex items-center gap-3">
         <div className="w-9 h-9 rounded-lg bg-white dark:bg-dark-700 border border-blue-100 dark:border-dark-600 shadow-sm flex items-center justify-center flex-shrink-0">
-          <KeyRound size={17} className="text-[#4285F4]" />
+          <KeyRound size={17} className="text-accent-500" />
         </div>
         <div className="flex-1 min-w-0 pe-3">
           <p className="text-xs font-medium text-gray-900 dark:text-gray-100 leading-snug">
@@ -49,7 +49,7 @@ export function PromoBanner({ language, onDismiss }: PromoBannerProps) {
             target="_blank"
             rel="noopener noreferrer"
             onClick={handleOpen}
-            className="text-xs text-[#1a73e8] dark:text-[#669DF6] hover:text-[#1967D2] dark:hover:text-[#8AB4F8] font-medium hover:underline"
+            className="text-xs text-accent-600 dark:text-accent-400 hover:text-accent-700 dark:hover:text-accent-300 font-medium hover:underline"
           >
             {t('promo.cta')}
           </a>

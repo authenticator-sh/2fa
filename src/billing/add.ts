@@ -10,6 +10,7 @@ import { AccountLimitError } from './gate';
 import { openPaywall, type PaywallTrigger } from './bridge';
 import { track } from './events';
 import { holdBlockedAdd } from './held-add';
+import { addedBy, reportAccountAdded, type AddVia } from './onboarding';
 import { loadGate, readInstall, readPolicy } from './state';
 import { hasPendingCheckout, syncBilling } from './sync';
 
@@ -60,9 +61,20 @@ const importsFree = (gate: GateSnapshot) => gate.policy?.import_free !== false;
  * from the popup, which Checkout's tab closes, as from anywhere else.
  */
 export async function addWithLimit<T>(
-  trigger: PaywallTrigger,
+  trigger: AddVia,
   run: (origin: AddOrigin) => Promise<T>,
   options: { import?: boolean; hold?: Account[] } = {}
+): Promise<T | null> {
+  const result = await addWithinLimit(trigger, run, options);
+  // Every way in passes here, so this is where an account is counted as added.
+  void reportAccountAdded(trigger, addedBy(result));
+  return result;
+}
+
+async function addWithinLimit<T>(
+  trigger: AddVia,
+  run: (origin: AddOrigin) => Promise<T>,
+  options: { import?: boolean; hold?: Account[] }
 ): Promise<T | null> {
   const gate = await loadGate();
   if ((options.import ?? IMPORTS.has(trigger)) && importsFree(gate)) return run({ kind: 'import' });

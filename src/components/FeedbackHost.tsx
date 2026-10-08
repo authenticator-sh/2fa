@@ -170,7 +170,7 @@ function Dialog({ request }: { request: DialogRequest }) {
               autoCorrect="off"
               placeholder={request.placeholder}
               onChange={event => setValue(event.target.value)}
-              className="mt-3 w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#4285F4] dark:border-dark-500 dark:bg-dark-700 dark:text-gray-100"
+              className="mt-3 w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-[11px] leading-relaxed text-gray-900 focus:outline-none focus:ring-2 focus:ring-accent-500 dark:border-dark-500 dark:bg-dark-700 dark:text-gray-100"
             />
           ) : (
             <input
@@ -180,7 +180,7 @@ function Dialog({ request }: { request: DialogRequest }) {
               placeholder={request.placeholder}
               onChange={event => setValue(event.target.value)}
               onKeyDown={event => event.key === 'Enter' && accept()}
-              className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#4285F4] dark:border-dark-500 dark:bg-dark-700 dark:text-gray-100"
+              className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-accent-500 dark:border-dark-500 dark:bg-dark-700 dark:text-gray-100"
             />
           ))}
 
@@ -198,7 +198,7 @@ function Dialog({ request }: { request: DialogRequest }) {
             className={`flex-1 rounded-lg py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50 ${
               request.kind === 'confirm' && request.danger
                 ? 'bg-red-600 hover:bg-red-700'
-                : 'bg-[#1a73e8] hover:bg-[#1967D2]'
+                : 'bg-accent-600 hover:bg-accent-700'
             }`}
           >
             {request.confirmLabel}

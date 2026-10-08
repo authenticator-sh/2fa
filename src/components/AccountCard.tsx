@@ -13,6 +13,7 @@ import { finishPickedFill } from '@/utils/finish-quick-fill';
 import { announceFilled } from '@/hooks/useFinishQuickFill';
 import { ProgressRing } from './ProgressRing';
 import { TruncatedName } from './TruncatedName';
+import { reportCodeUsed } from '@/billing/onboarding';
 
 export type ViewMode = 'normal' | 'compact' | 'hidden';
 
@@ -178,6 +179,7 @@ export const AccountCard = memo(function AccountCard({
       toast('error', t('accounts.copyFailed'));
       return;
     }
+    void reportCodeUsed('copy');
     setCopied(true);
     if (copiedTimer.current) clearTimeout(copiedTimer.current);
     copiedTimer.current = setTimeout(() => {
@@ -197,7 +199,7 @@ export const AccountCard = memo(function AccountCard({
   };
 
   const suggestedBadge = isSuggested ? (
-    <span className="flex-shrink-0 text-[10px] font-medium leading-none text-[#1a73e8] dark:text-[#669DF6] bg-blue-50/70 dark:bg-blue-900/25 border border-blue-200/70 dark:border-blue-800/60 px-1.5 py-[3px] rounded-full">
+    <span className="flex-shrink-0 text-[10px] font-medium leading-none text-accent-600 dark:text-accent-400 bg-blue-50/70 dark:bg-blue-900/25 border border-blue-200/70 dark:border-blue-800/60 px-1.5 py-[3px] rounded-full">
       {t('accounts.suggested')}
     </span>
   ) : null;
@@ -274,7 +276,7 @@ export const AccountCard = memo(function AccountCard({
   };
 
   const baseClass = `relative group bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700 transition-all duration-200 after:content-[''] after:absolute after:bottom-0 after:h-px after:bg-gray-200 dark:after:bg-dark-600 last:after:hidden ${
-    isDragOver ? 'border-t-2 border-[#4285F4]' : ''
+    isDragOver ? 'border-t-2 border-accent-500' : ''
   }`;
 
   /**
@@ -439,7 +441,7 @@ export const AccountCard = memo(function AccountCard({
               className={`ms-auto flex-shrink-0 font-mono text-base tracking-wide transition-colors ${
                 isExpiringSoon
                   ? 'text-orange-600 dark:text-orange-400 motion-safe:animate-pulse'
-                  : 'text-[#1a73e8] dark:text-[#669DF6]'
+                  : 'text-accent-600 dark:text-accent-400'
               }`}
             >
               {checkingTime ? checkingLabel : formattedCode}
@@ -557,7 +559,7 @@ export const AccountCard = memo(function AccountCard({
             className={`font-mono text-2xl tracking-wide transition-colors ${
               isExpiringSoon
                 ? 'text-orange-600 dark:text-orange-400 motion-safe:animate-pulse'
-                : 'text-[#1a73e8] dark:text-[#669DF6]'
+                : 'text-accent-600 dark:text-accent-400'
             }`}
           >
             {checkingTime ? checkingLabel : formattedCode}

@@ -79,5 +79,11 @@ export type ApiErrorCode =
   | 'payments_unavailable'
   /** Checkout: the plan's price is not the one this install's last policy showed. */
   | 'price_changed'
+  /** Cloud backup: no such copy for this license. */
+  | 'backup_not_found'
+  /** Cloud backup: the license has no current code — turned off, or never on. */
+  | 'backup_off'
+  /** Cloud backup: not the license's current code. */
+  | 'backup_wrong_code'
   | 'internal'
   | 'network';

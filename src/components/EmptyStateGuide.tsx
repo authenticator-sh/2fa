@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeftRight, ChevronDown, ChevronRight, FileDown, KeyRound, Link2, QrCode, Smartphone } from 'lucide-react';
 import { createT, type Language, type TranslationKey } from '@/utils/i18n';
+import { reportAddStep, reportOnboardPick } from '@/billing/onboarding';
 
 /**
  * First-run guidance.
@@ -22,7 +23,7 @@ type PathId = 'ga' | 'new' | 'other' | 'manual' | 'key';
  * in full because Tailwind only ships the classes it finds written down.
  */
 const TONES = {
-  blue: 'bg-blue-100 text-[#1a73e8] dark:bg-blue-900/30 dark:text-[#669DF6]',
+  blue: 'bg-blue-100 text-accent-600 dark:bg-blue-900/30 dark:text-accent-400',
   green: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
   teal: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400',
   violet: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400',
@@ -168,11 +169,15 @@ export function EmptyStateGuide({
               ref={node => {
                 rows.current[path.id] = node;
               }}
-              onClick={() => (hasSteps(path) ? onOpenPath(path) : run(path.action))}
+              onClick={() => {
+                void reportOnboardPick(path.id);
+                if (hasSteps(path)) onOpenPath(path);
+                else run(path.action);
+              }}
               // All five alike until one is hovered. The first used to be
               // tinted from the start, which singled out Google Authenticator
               // before the reader had answered the question above the rows.
-              className="flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-start transition-colors hover:border-[#4285F4] hover:bg-blue-50/50 dark:border-dark-600 dark:bg-dark-800 dark:hover:border-[#4285F4] dark:hover:bg-dark-700"
+              className="flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-start transition-colors hover:border-accent-500 hover:bg-blue-50/50 dark:border-dark-600 dark:bg-dark-800 dark:hover:border-accent-500 dark:hover:bg-dark-700"
             >
               <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${TONES[path.tone]}`}>
                 <path.icon size={18} />
@@ -202,8 +207,14 @@ export function EmptyStateGuide({
       key={openPath.id}
       path={openPath}
       language={language}
-      onAction={() => run(openPath.action)}
-      onPasteLinks={onPasteLinks}
+      onAction={() => {
+        void reportAddStep('guide', `${openPath.id}_go`);
+        run(openPath.action);
+      }}
+      onPasteLinks={() => {
+        void reportAddStep('guide', `${openPath.id}_paste`);
+        onPasteLinks();
+      }}
       onBack={onBack}
     />
   );
@@ -242,7 +253,7 @@ function GuideSteps({ path, language, onAction, onPasteLinks, onBack }: GuideSte
   // doing the most work.
   const step = (text: string, index: number) => (
     <li key={index} className="flex gap-3">
-      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-[#1a73e8] dark:text-[#669DF6] dark:bg-blue-900/30">
+      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-accent-600 dark:text-accent-400 dark:bg-blue-900/30">
         {index + 1}
       </span>
       <span className="pt-0.5 text-sm leading-snug text-gray-700 dark:text-gray-300">{text}</span>
@@ -261,7 +272,7 @@ function GuideSteps({ path, language, onAction, onPasteLinks, onBack }: GuideSte
       {path.paste && (
         <button
           onClick={onPasteLinks}
-          className="ms-9 mt-3 inline-flex items-center self-start gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-[#1a73e8] transition-colors hover:bg-gray-100 dark:border-dark-500 dark:bg-dark-800 dark:text-[#669DF6] dark:hover:bg-dark-700"
+          className="ms-9 mt-3 inline-flex items-center self-start gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-accent-600 transition-colors hover:bg-gray-100 dark:border-dark-500 dark:bg-dark-800 dark:text-accent-400 dark:hover:bg-dark-700"
         >
           <Link2 size={16} />
           {t('import.paste')}
@@ -271,9 +282,12 @@ function GuideSteps({ path, language, onAction, onPasteLinks, onBack }: GuideSte
       {extra.length > 0 && path.more && (
         <>
           <button
-            onClick={() => setShowMore(!showMore)}
+            onClick={() => {
+              if (!showMore) void reportAddStep('guide', `${path.id}_more`);
+              setShowMore(!showMore);
+            }}
             aria-expanded={showMore}
-            className="mt-3.5 flex items-center gap-1 text-sm font-medium text-[#1a73e8] dark:text-[#669DF6] transition-colors hover:text-[#1967D2] dark:hover:text-[#8AB4F8]"
+            className="mt-3.5 flex items-center gap-1 text-sm font-medium text-accent-600 dark:text-accent-400 transition-colors hover:text-accent-700 dark:hover:text-accent-300"
           >
             <ChevronDown
               size={16}
@@ -309,7 +323,7 @@ function GuideSteps({ path, language, onAction, onPasteLinks, onBack }: GuideSte
         </button>
         <button
           onClick={onAction}
-          className="min-w-0 flex-1 rounded-lg bg-[#1a73e8] px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#1967D2]"
+          className="min-w-0 flex-1 rounded-lg bg-accent-600 px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-700"
         >
           {t(actionLabel)}
         </button>

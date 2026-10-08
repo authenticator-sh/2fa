@@ -17,6 +17,7 @@ import { Logo } from '@/components/Logo';
 import { FeedbackHost } from '@/components/FeedbackHost';
 import { PaywallHost } from '@/components/PaywallHost';
 import { addWithLimit } from '@/billing/add';
+import { reasonOfKey, reportAddCancel, reportAddFail, reportAddStep } from '@/billing/onboarding';
 import { finishHeldAdd, isHeld } from '@/billing/held-add';
 import { BILLING_KEYS } from '@/billing/state';
 import { hasPendingCheckout, syncBilling } from '@/billing/sync';
@@ -24,6 +25,7 @@ import { accountLabel } from '@/utils/account-label';
 import { SupportFooter } from '@/components/SupportFooter';
 import { applyDocumentLanguage, createT, loadLanguage, resolveLanguage, type Language, type TranslationKey } from '@/utils/i18n';
 import { settingsFromChanges } from '@/utils/settings-watch';
+import { appearanceClass, cachedAppearance, readUiStyle, rememberAppearance, UI_STYLE_KEY } from '@/utils/appearance';
 import { addMultipleAccounts } from '@/utils/storage';
 import { readActiveGroup } from '@/utils/active-group';
 import { VaultLockedError } from '@/utils/vault';
@@ -59,8 +61,33 @@ type Status =
 
 export default function App() {
   const [language, setLanguage] = useState<Language>('en');
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => cachedAppearance().dark);
+  const [uiStyle, setUiStyle] = useState(() => cachedAppearance().style);
   const [status, setStatus] = useState<Status>({ kind: 'starting' });
+
+  // Reported for the admin's view of where adds go wrong (billing/onboarding.ts):
+  // the page opening, the camera running, every way a scan ends without an
+  // account, and the tab closed before one was added.
+  useEffect(() => {
+    void reportAddStep('camera', 'open');
+  }, []);
+  const lastStatus = useRef<Status['kind']>('starting');
+  useEffect(() => {
+    lastStatus.current = status.kind;
+    if (status.kind === 'scanning') void reportAddStep('camera', 'scanning');
+    else if (status.kind === 'denied') void reportAddFail('camera', 'camera_denied');
+    else if (status.kind === 'noCamera') void reportAddFail('camera', 'no_camera');
+    else if (status.kind === 'locked') void reportAddFail('camera', 'locked');
+    else if (status.kind === 'held') void reportAddFail('camera', 'limit_held');
+    else if (status.kind === 'error') void reportAddFail('camera', reasonOfKey(status.body));
+  }, [status]);
+  useEffect(() => {
+    const leaving = () => {
+      if (lastStatus.current !== 'added') void reportAddCancel('camera', lastStatus.current);
+    };
+    window.addEventListener('pagehide', leaving);
+    return () => window.removeEventListener('pagehide', leaving);
+  }, []);
   /**
    * Every video input, listed once a grant makes the labels readable. An empty
    * label is kept empty and named at render, for the same reason as above.
@@ -101,8 +128,11 @@ export default function App() {
     status.kind === 'added' && !!status.batch && status.batch.index < status.batch.total;
 
   useEffect(() => {
-    chrome.storage.local.get(['language', 'darkMode'], result => {
-      if (result.darkMode) setDarkMode(true);
+    chrome.storage.local.get(['language', 'darkMode', UI_STYLE_KEY], result => {
+      const appearance = { style: readUiStyle(result[UI_STYLE_KEY]), dark: result.darkMode === true };
+      setDarkMode(appearance.dark);
+      setUiStyle(appearance.style);
+      rememberAppearance(appearance);
       // Same rule as the popup: a stored choice wins, otherwise the browser's
       // own language decides. This page opens in its own tab, where landing in
       // English is even more jarring than in a 360px popup.
@@ -119,6 +149,7 @@ export default function App() {
     const onChanged = (changes: Record<string, { newValue?: unknown }>, areaName: string) => {
       const patch = settingsFromChanges(changes, areaName);
       if (patch.darkMode !== undefined) setDarkMode(patch.darkMode);
+      if (patch.uiStyle) setUiStyle(patch.uiStyle);
       const next = patch.language;
       if (next) loadLanguage(next).then(() => setLanguage(next));
     };
@@ -482,8 +513,10 @@ export default function App() {
       decodingImageRef.current = true;
       setDecodingImage(true);
       try {
+        void reportAddStep('camera', 'image');
         const text = await decodeQrFromImage(file);
         if (!text) {
+          void reportAddFail('camera', 'image_no_qr');
           toast('error', tRef.current('addAccount.errorNoQr'));
           return;
         }
@@ -495,11 +528,13 @@ export default function App() {
           // handleDecoded read it, found no otpauth in it, and reset the guard
           // expecting a live camera loop — which its early return in the
           // camera path keeps running, but this path froze. Restart it.
+          void reportAddFail('camera', 'image_not_otpauth');
           toast('error', tRef.current('addAccount.errorInvalidQR'));
           start();
         }
       } catch (error) {
         console.error('Could not read the uploaded image:', error);
+        void reportAddFail('camera', 'image_unreadable');
         toast('error', tRef.current('addAccount.errorNoQr'));
       } finally {
         decodingImageRef.current = false;
@@ -600,7 +635,7 @@ export default function App() {
   );
 
   return (
-    <div className={darkMode ? 'dark' : ''}>
+    <div className={appearanceClass({ style: uiStyle, dark: darkMode })}>
       <div className="min-h-screen bg-gray-50 dark:bg-dark-900 flex flex-col items-center px-6 py-10">
         <div className="w-full max-w-md">
           <div className="flex items-center gap-2 mb-6">
@@ -658,7 +693,7 @@ export default function App() {
                   onClick={start}
                   className={`flex-1 text-sm font-medium py-2.5 rounded-lg transition-colors ${
                     moreCodes
-                      ? 'bg-[#1a73e8] hover:bg-[#1967D2] text-white'
+                      ? 'bg-accent-600 hover:bg-accent-700 text-white'
                       : 'border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
                   }`}
                 >
@@ -669,7 +704,7 @@ export default function App() {
                   className={`flex-1 font-medium text-sm py-2.5 rounded-lg transition-colors ${
                     moreCodes
                       ? 'border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
-                      : 'bg-[#1a73e8] hover:bg-[#1967D2] text-white'
+                      : 'bg-accent-600 hover:bg-accent-700 text-white'
                   }`}
                 >
                   {t('scan.done')}
@@ -694,7 +729,7 @@ export default function App() {
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{problem.body}</p>
               <button
                 onClick={start}
-                className="w-full bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
+                className="w-full bg-accent-600 hover:bg-accent-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
               >
                 {t('scan.retry')}
               </button>
@@ -740,7 +775,7 @@ export default function App() {
                     start();
                   }}
                   aria-label={t('scan.selectCamera')}
-                  className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#4285F4] dark:border-dark-500 dark:bg-dark-700 dark:text-gray-200"
+                  className="mt-3 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-accent-500 dark:border-dark-500 dark:bg-dark-700 dark:text-gray-200"
                 >
                   {cameras.map((camera, index) => (
                     <option key={camera.id} value={camera.id}>

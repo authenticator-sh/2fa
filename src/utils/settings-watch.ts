@@ -13,10 +13,12 @@ import { readPopupSize, type PopupSize } from './popup-size';
 import { OPEN_MODE_KEY, readOpenMode, type OpenMode } from './open-mode';
 import { QUICK_FILL_ENABLED_KEY } from './quick-fill';
 import { readSortOrder, SORT_ORDER_KEY, type SortOrder } from './list-view';
+import { readUiStyle, UI_STYLE_KEY, type UiStyle } from './appearance';
 
 export interface SettingsPatch {
   language?: Language;
   darkMode?: boolean;
+  uiStyle?: UiStyle;
   viewMode?: ViewMode;
   showAvatars?: boolean;
   popupSize?: PopupSize;
@@ -48,6 +50,7 @@ export function settingsFromChanges(changes: StorageChanges, areaName: string): 
 
   if (has('language')) patch.language = resolveLanguage(value('language'));
   if (has('darkMode')) patch.darkMode = value('darkMode') === true;
+  if (has(UI_STYLE_KEY)) patch.uiStyle = readUiStyle(value(UI_STYLE_KEY));
   if (has('showAvatars')) patch.showAvatars = value('showAvatars') === true;
   if (has('viewMode')) {
     const mode = value('viewMode');

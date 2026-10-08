@@ -400,14 +400,15 @@ src/
 
 ## Network Access
 
-The extension never sends your secrets, account names, issuers, codes or the sites you use them on. Two kinds of request happen automatically — the cached clock check and the daily billing check-in, both below; everything else happens because you clicked something. In full, the outbound HTTPS calls are:
+The extension never sends your secrets, account names, issuers, codes or the sites you use them on in a form we can read — Pro's [cloud backup](#cloud-backup-pro-off-until-you-turn-it-on), if you turn it on, sends your accounts end-to-end encrypted. Two kinds of request happen automatically — the cached clock check and the daily billing check-in, both below — and a third with cloud backup on; everything else happens because you clicked something. In full, the outbound HTTPS calls are:
 
 | URL                                         | When                          | Purpose                        |
 |---------------------------------------------|-------------------------------|--------------------------------|
-| `https://www.authenticator.sh/welcome`      | First install                 | Opens welcome page in a new tab |
-| `https://www.authenticator.sh/uninstall?i=<install id>` | After uninstall (Chrome API) | Opens feedback page, which reports the removal to our server by that id and links an optional answer to it |
-| `https://api.authenticator.sh/v1/sync`      | Once a day (browser start or popup open, after it has rendered) | Billing check-in — see [What is sent to our server](#what-is-sent-to-our-server) |
+| `https://www.authenticator.sh/welcome?iid=<install id>` | First install | Opens welcome page in a new tab. The site passes the install id to our server only for a browser that came from one of our ads, to tell which campaign led to installs that went on to use the extension; it never goes to Meta |
+| `https://www.authenticator.sh/uninstall?i=<install id>&s=<stage>` | After uninstall (Chrome API) | Opens feedback page, which reports the removal to our server by that id, with how far a new install got towards a first account (`opened`, `pick:ga`, `fail:camera:camera_denied`…), and links an optional answer to it |
+| `https://api.authenticator.sh/v1/sync`      | Once a day (browser start or popup open, after it has rendered); in a new install's first three days also within minutes of a step towards a first account | Check-in — see [What is sent to our server](#what-is-sent-to-our-server) |
 | `https://api.authenticator.sh/v1/checkout`, `/v1/license/*`, `/v1/portal` | User starts a purchase, enters a key, restores a purchase or manages a subscription | Pro |
+| `https://api.authenticator.sh/v1/backup/*` | Cloud backup is on and the list changed (popup open); Settings → Backup & Restore opened with Pro or with cloud backup on (the list of copies); or the user turns it on or off, backs up, restores or starts over | Pro cloud backup — encrypted copies, see [Cloud backup](#cloud-backup-pro-off-until-you-turn-it-on) |
 | `https://checkout.stripe.com/…`, `https://billing.stripe.com/…` | User starts a purchase or manages a subscription | Stripe Checkout and customer portal, in a new tab |
 | `https://chromewebstore.google.com/.../reviews` | User takes the rating prompt | Opens the Web Store review form |
 | `https://www.authenticator.sh/support`      | User clicks "Help & support"  | Opens the support page         |
@@ -462,9 +463,59 @@ Pro, and nothing is ever hidden or locked.
 - The code is open source, so the limit is there for honest users — it is not
   DRM, and a fork can remove it.
 
+### Cloud backup (Pro, off until you turn it on)
+
+Pro can keep an **end-to-end encrypted** copy of your accounts on our server,
+so losing the computer does not mean losing the codes. It is off until you
+turn it on in **Settings → Backup & Restore**, and it is the only feature that
+sends your accounts to us — encrypted with a key we never see (the daily
+check-in sends only their number).
+
+- Turning it on shows a **backup recovery code** (`XXXXX-XXXXX-XXXXX-XXXXX`,
+  about 101 bits from the browser's random generator) and asks you to type it
+  back before anything is stored; closing the popup meanwhile keeps the same
+  code. The copies are encrypted with AES-256-GCM under a key derived from that
+  code with HKDF-SHA256 (`src/billing/cloud-backup.ts`). The code is kept in
+  this browser and, while Chrome sync is on, in your Google account so your
+  other Chrome profiles can open the same copies. It is never sent to us: we
+  cannot open the copies, and cannot recover them if the code is lost.
+- With password protection on, the stored code is itself encrypted under the
+  vault's key — sealed the moment protection is turned on, opened again when
+  it is turned off — so the copies cannot be fetched and opened from this disk
+  without your password.
+- **One code per license.** The server keeps the current code's `kid` (a short
+  hash that tells a device which code a copy needs) and a hash of `auth`, a
+  second value derived from the code that proves a device holds it. It refuses
+  a copy under any other code and after cloud backup was turned off, and a
+  browser told so forgets its code and asks for the current one.
+- A copy is sent when you turn it on, when you press **Back up now**, and
+  otherwise when the extension opens and what it holds — including records it
+  cannot read, such as another vault's — differs from the last copy that
+  browser sent. Typing the code on a new browser first merges the newest copy
+  into it (adding only what is missing), and sends a copy only if that browser
+  held accounts the copy lacked — the two lists together — so a new browser's
+  partial list never becomes the newest copy. Each time a
+  copy arrives the server keeps the 20 newest, the newest of each hour of the
+  last day, the newest of each day for 30 days, and the newest from each of
+  the 10 most recently active browsers, and deletes the rest.
+- Restoring only adds accounts that are missing, like the automatic copies. On
+  another computer: activate the license key, then enter the backup recovery
+  code. After Pro has ended: **Restore from cloud backup with your license
+  key** finds the copies with the key; the backup recovery code opens them.
+- If Pro ends, no new copies are made; the existing ones are deleted 90 days
+  after it ended, unless it is renewed — or bought again from a browser that
+  held the earlier license, whose backup (code and copies) the new license then
+  takes over. Turning cloud backup off needs the
+  code, deletes every copy of the license, and removes the code from this
+  browser and from Chrome sync; the other browsers stop on their next copy.
+  Lost the code: **start over with your license key** deletes the copies so a
+  new code can be made.
+
 ## What is sent to our server
 
-Once a day, the extension sends `https://api.authenticator.sh/v1/sync` exactly
+Once a day — and, in a new install's first three days, within minutes of a
+step towards a first account (at most every five minutes, `src/billing/onboarding.ts`) —
+the extension sends `https://api.authenticator.sh/v1/sync` exactly
 these fields (`src/billing/sync.ts`, `buildSyncRequest`; a test holds it to the
 list):
 
@@ -474,11 +525,11 @@ list):
 | `ver`, `ui_lang`, `browser_lang` | Extension version, interface language, browser language |
 | `installed_at`, `legacy`, `legacy_src` | When this installation appeared, and whether it predates billing |
 | `accounts` | **How many** accounts you have — a number, never which ones |
-| `vault`, `sync`, `open_mode` | Whether password protection and sync are on, and how the extension opens |
+| `vault`, `sync`, `open_mode`, `style`, `dark` | Whether password protection and sync are on, how the extension opens, and which of its two styles it is drawn in, light or dark |
 | `pid`, `lid` | Which policy and license this installation currently holds |
 | `has_key`, `key_hint` | Whether this installation holds a license key, and the last four characters of it. The installation Pro was bought on is sent its key in the response (`key`) until those four characters match it — so a key bought later replaces an older one; one where a key was typed in already has it and is never sent one |
 | `opens` | How many times the extension was opened on each day since the last check-in (at most the last 14 days) — a count per day, nothing about what was looked at |
-| `events` | Up to 50 queued billing events from a closed list (`src/billing/events.ts`): the limit was reached, the paywall was shown or closed, a plan was chosen, a checkout or a key was tried |
+| `events` | Up to 50 queued events from a closed list (`src/billing/events.ts`). Billing: the limit was reached, the paywall was shown or closed, a plan was chosen, a checkout or a key was tried, the cloud backup offer at the top of Settings was shown or closed. The way to a first account: first open, the "add your first account" screen shown and the way picked on it, each add screen reached, each error shown or add left (as a kind — `error_no_qr`, `camera_denied` — never what was scanned or typed), accounts added and by which way, the first code copied or filled in. Never an account's name, issuer, secret or site |
 
 The server sees the request's country (from its edge, the IP address is not
 stored). If you buy Pro, Stripe gives us your email address, to send and
@@ -496,6 +547,8 @@ purchase's metadata. Retention and your rights are in the
 | IndexedDB | Seven rolling snapshots, in the same form as the primary store | Always used |
 | `chrome.storage.local` (`billing*`) | The install id, the last signed policy and license, the license key this installation holds — typed in, or received after buying on it — and queued billing events and daily open counts — no account data | Always used |
 | `chrome.storage.sync` (`billingLegacy`, `billingLicenseKey`) | Whether this person predates billing, and the license key this installation holds — so their other Chrome profiles pick both up and turn Pro on by themselves | Only while sync is on; removed with the rest when sync is switched off, and put back when it is switched on again |
+| `chrome.storage.local` + `chrome.storage.sync` (`cloudBackupCode`) | The cloud backup's recovery code — encrypted under the vault's key when password protection is on | Only after turning cloud backup on; the sync copy only while sync is on, removed with the rest when sync is switched off |
+| Our server (`/v1/backup/*`) | Cloud backup copies, encrypted in the browser with a key we never receive; kept as described in [Cloud backup](#cloud-backup-pro-off-until-you-turn-it-on) | Only after turning cloud backup on (Pro) |
 
 Two consequences worth stating plainly:
 
@@ -508,7 +561,7 @@ Two consequences worth stating plainly:
   collected. Enabling password protection deletes it, and it can be switched off
   independently.
 
-We never receive your secrets, account names or codes. What our billing server does receive is listed in [What is sent to our server](#what-is-sent-to-our-server).
+We never receive your secrets, account names or codes in a form we can read: [cloud backup](#cloud-backup-pro-off-until-you-turn-it-on), if you turn it on, sends them encrypted with a code we never see. What our billing server does receive is listed in [What is sent to our server](#what-is-sent-to-our-server).
 
 ## Security
 

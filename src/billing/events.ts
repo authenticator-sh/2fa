@@ -1,4 +1,5 @@
-// The monetization events this install reports, and nothing else.
+// The events this install reports — billing, and the way to a first account
+// (onboarding.ts) — and nothing else.
 //
 // The list below is closed: an event not named here cannot be recorded, and
 // its properties are cut to short scalars. None of them can carry an account's
@@ -23,6 +24,17 @@ export const EVENT_NAMES = [
   'license_activate',
   'license_recover',
   'pro_settings_view',
+  // The way to a first account (onboarding.ts): kinds and counts only.
+  'first_open',
+  'onboard_view',
+  'onboard_pick',
+  'add_step',
+  'add_fail',
+  'add_cancel',
+  'account_added',
+  'first_code',
+  'backup_banner_view',
+  'backup_banner_close',
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

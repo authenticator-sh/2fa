@@ -9,6 +9,7 @@ import { decodeQrFromImage } from '@/utils/qr-decode';
 import { ModalHeader } from './ModalHeader';
 import { GroupInput } from './GroupInput';
 import { createT, type Language } from '@/utils/i18n';
+import { reasonOfKey, reportAddCancel, reportAddFail, reportAddStep } from '@/billing/onboarding';
 import { looksLikeURIList } from '@/utils/uri-import';
 import { steamSecretToBase32 } from '@/utils/import-formats';
 
@@ -38,7 +39,7 @@ interface AddAccountModalProps {
 
 /** Every text field on this form. */
 const FIELD =
-  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-all placeholder-gray-400 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-100 dark:placeholder-gray-500';
+  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-all placeholder-gray-400 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-100 dark:placeholder-gray-500';
 
 export function AddAccountModal({ onClose, onAdd, language, groups = [], defaultGroup = '', initialTab = 'qr' }: AddAccountModalProps) {
   const t = createT(language);
@@ -76,6 +77,26 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
   const [saving, setSaving] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
 
+  // Reported for the admin's view of where adds go wrong (billing/onboarding.ts):
+  // the tab shown, each way of reading a code, each refusal, and leaving.
+  useEffect(() => {
+    void reportAddStep(tab, 'open');
+    // Once per opening; a tab change reports itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Shows a refusal and reports which one it was. */
+  const fail = (flow: 'manual' | 'qr', key: Parameters<typeof t>[0]) => {
+    setError(t(key));
+    void reportAddFail(flow, reasonOfKey(key));
+  };
+
+  /** A save that threw: its own words on screen, only the fact in the report. */
+  const failSave = (flow: 'manual' | 'qr', message: string) => {
+    setError(message);
+    void reportAddFail(flow, 'save_failed');
+  };
+
   useEffect(() => {
     if (error && errorRef.current) {
       errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -99,7 +120,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
     setError('');
 
     if (!name || !secret) {
-      setError(t('addAccount.errorNameRequired'));
+      fail('manual', 'addAccount.errorNameRequired');
       return;
     }
 
@@ -113,7 +134,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
     }
 
     if (!validateSecret(usableSecret)) {
-      setError(t('addAccount.errorInvalidSecret'));
+      fail('manual', 'addAccount.errorInvalidSecret');
       return;
     }
 
@@ -121,7 +142,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
     // account whose code never changes and never works. Nothing downstream can
     // recover from it, so it is caught here.
     if (!Number.isFinite(period) || period < 1) {
-      setError(t('addAccount.errorInvalidPeriod'));
+      fail('manual', 'addAccount.errorInvalidPeriod');
       return;
     }
 
@@ -169,13 +190,14 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
       onClose();
     } catch (err) {
       console.error('Could not save the account:', err);
-      setError(t('addAccount.errorSaveFailed'));
+      fail('manual', 'addAccount.errorSaveFailed');
     } finally {
       setSaving(false);
     }
   };
 
   const handleClose = () => {
+    void reportAddCancel(tab, 'closed');
     onClose();
   };
 
@@ -198,7 +220,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
     // One form holds one account. A migration link holds however many the user
     // exported, so saying where they go is more use than failing quietly.
     if (/^otpauth-migration:\/\//i.test(trimmed)) {
-      setError(t('addAccount.pastedMigration'));
+      fail('manual', 'addAccount.pastedMigration');
       return;
     }
 
@@ -229,11 +251,12 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
       }
     } catch (error) {
       // Understood and refused, not unreadable: say which refusal it was.
-      if (error instanceof UnsupportedOTPTypeError) setError(t(qrFailureKey(trimmed, error)));
+      if (error instanceof UnsupportedOTPTypeError) fail('manual', qrFailureKey(trimmed, error));
     }
   };
 
   const handleTabChange = (newTab: 'manual' | 'qr') => {
+    if (newTab !== tab) void reportAddStep(newTab, 'open');
     setTab(newTab);
     setError('');
   };
@@ -244,7 +267,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
       const result = await decodeQrFromImage(file);
 
       if (!result) {
-        setError(t('addAccount.errorNoQr'));
+        fail('qr', 'addAccount.errorNoQr');
         return;
       }
 
@@ -277,7 +300,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
             if ((await onAdd(accountsToAdd, parsed.batch, parsed.skipped ?? 0)) === false) return;
           } catch (err) {
             console.error('Could not save the scanned accounts:', err);
-            setError(saveErrorMessage(err, t));
+            failSave('qr', saveErrorMessage(err, t));
             return;
           }
           console.log(`Successfully added ${accountsToAdd.length} accounts from migration`);
@@ -304,7 +327,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
           if ((await onAdd(account, undefined, undefined, 'qr')) === false) return;
         } catch (err) {
           console.error('Could not save the scanned account:', err);
-          setError(saveErrorMessage(err, t));
+          failSave('qr', saveErrorMessage(err, t));
           return;
         }
         onClose();
@@ -319,17 +342,17 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
         // the extension's own chrome.
         console.error('Failed to parse QR code (content withheld)');
         // Ours but unreadable says so; "invalid QR" is for everything else.
-        setError(t(qrFailureKey(result)));
+        fail('qr', qrFailureKey(result));
       }
     } catch (err) {
       console.error('QR scan error:', err);
       if (err instanceof UnsupportedOTPTypeError) {
-        setError(t(qrFailureKey('', err)));
+        fail('qr', qrFailureKey('', err));
         return;
       }
       // Only decoding is left in this try — saving has its own — so this is an
       // image that could not be read, not a reason to print its internals.
-      setError(t('addAccount.errorInvalidQR'));
+      fail('qr', 'addAccount.errorInvalidQR');
     }
   };
 
@@ -355,6 +378,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
     // did nothing at all.
     input.value = '';
     if (!file) return;
+    void reportAddStep('qr', 'image');
     await readExclusively(() => processQRFile(file));
   };
 
@@ -377,9 +401,10 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
 
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
+      void reportAddStep('qr', 'drop');
       await readExclusively(() => processQRFile(file));
     } else {
-      setError(t('addAccount.errorDropImage'));
+      fail('qr', 'addAccount.errorDropImage');
     }
   };
 
@@ -389,6 +414,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
       try {
         setError('');
         setScanning(true);
+        void reportAddStep('qr', 'screen');
         const dataUrl = await captureCurrentTab();
 
         // Convert the captured data URL into a File for the QR decoder.
@@ -402,7 +428,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
         // captureVisibleTab throws on restricted pages (chrome://, Web Store,
         // PDFs, other extensions). Show an actionable hint instead of the raw
         // system error, which reads as "it just broke".
-        setError(t('addAccount.errorScreenHint'));
+        fail('qr', 'addAccount.errorScreenHint');
       } finally {
         setScanning(false);
       }
@@ -490,7 +516,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                 <button
                   type="button"
                   onClick={() => setShowKeyHelp(!showKeyHelp)}
-                  className="mt-2 flex items-center gap-1 text-xs font-medium text-[#1a73e8] dark:text-[#669DF6] transition-colors hover:text-[#1967D2] dark:hover:text-[#8AB4F8]"
+                  className="mt-2 flex items-center gap-1 text-xs font-medium text-accent-600 dark:text-accent-400 transition-colors hover:text-accent-700 dark:hover:text-accent-300"
                 >
                   <ChevronDown
                     size={13}
@@ -635,7 +661,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
               <button
                 type="submit"
                 disabled={saving}
-                className="w-full bg-[#1a73e8] hover:bg-[#1967D2] disabled:opacity-60 text-white font-medium text-sm py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
+                className="w-full bg-accent-600 hover:bg-accent-700 disabled:opacity-60 text-white font-medium text-sm py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
               >
                 {saving && <Loader2 size={16} className="animate-spin" />}
                 {t('addAccount.add')}
@@ -651,7 +677,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                 onDrop={handleDrop}
                 className={`border-2 border-dashed rounded-lg p-4 text-center transition-all ${
                   isDragging
-                    ? 'border-[#4285F4] bg-blue-50 dark:bg-blue-900/20'
+                    ? 'border-accent-500 bg-blue-50 dark:bg-blue-900/20'
                     : 'border-gray-300 dark:border-dark-500 hover:border-gray-400 dark:hover:border-dark-400'
                 }`}
               >
@@ -677,7 +703,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={busyReading}
-                  className="inline-block disabled:opacity-60 bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-1.5 px-5 rounded-lg transition-colors"
+                  className="inline-block disabled:opacity-60 bg-accent-600 hover:bg-accent-700 text-white font-medium text-sm py-1.5 px-5 rounded-lg transition-colors"
                 >
                   {t('addAccount.chooseImage')}
                 </button>
@@ -692,7 +718,10 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
               </div>
 
               <button
-                onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('scan.html') })}
+                onClick={() => {
+                  void reportAddStep('qr', 'camera_page');
+                  chrome.tabs.create({ url: chrome.runtime.getURL('scan.html') });
+                }}
                 className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 hover:bg-gray-50 dark:hover:bg-dark-600 text-gray-700 dark:text-gray-200 font-medium text-sm transition-all"
               >
                 <Camera size={16} />

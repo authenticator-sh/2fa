@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { webcrypto } from 'node:crypto';
 import type { BrowserContext, Page, Route, Worker } from '@playwright/test';
-import { addAccountByHand, cards, expect, openPage, otherSecret, test } from './fixtures';
+import { addAccountByHand, cards, deleteByHand, expect, openPage, otherSecret, test } from './fixtures';
 
 const API = 'http://127.0.0.1:3199';
 const KEY = JSON.parse(readFileSync(new URL('../test/fixtures/billing-test-key.json', import.meta.url), 'utf8'));
@@ -49,6 +49,12 @@ interface MockState {
   checkouts?: Array<{ plan: string; trigger: unknown }>;
   /** The next checkout is refused: the price moved to this many cents since the last policy. */
   priceMovesTo?: number;
+  /** No plans in the policy: a country where no one can pay. */
+  noPlans?: boolean;
+  /** Cloud backup copies the server holds, oldest first (one license for every install here). */
+  backups?: Array<{ id: string; iid: string; kid: string; data: string; at: number }>;
+  /** The license's current backup code, as the server keeps it (kid and auth); null = off. */
+  backupKey?: { kid: string; auth: string } | null;
 }
 
 async function mockBilling(context: BrowserContext, state: MockState): Promise<void> {
@@ -59,7 +65,7 @@ async function mockBilling(context: BrowserContext, state: MockState): Promise<v
   };
   const now = () => Math.floor(Date.now() / 1000);
   const entitlement = (iid: string) =>
-    sign({ typ: 'ent', v: 1, lid: 'lic_e2e', kind: 'life', features: ['unlimited_accounts'], until: null, key_hint: 'VWX', sub: iid, iat: now(), exp: now() + 86_400 });
+    sign({ typ: 'ent', v: 1, lid: 'lic_e2e', kind: 'life', features: ['unlimited_accounts', 'cloud_backup'], until: null, key_hint: 'VWX', sub: iid, iat: now(), exp: now() + 86_400 });
 
   // Registered after the fixture's catch-all abort, so it is consulted first.
   await context.route(`${API}/**`, async (route: Route) => {
@@ -81,11 +87,13 @@ async function mockBilling(context: BrowserContext, state: MockState): Promise<v
         iat: now(),
         free_limit: state.freeLimit,
         warn_at: state.freeLimit === null ? null : Math.max(0, state.freeLimit - 1),
-        paywall: { copy: 'default', plans: ['pro_year', 'pro_life'], default_plan: 'pro_year', trial_days: 0, promo_codes: false },
-        prices: {
-          pro_year: { kind: 'sub', interval: 'year', pass_days: null, amount: state.yearAmount ?? 1499, currency: 'usd', exp: 2, approx: !!state.approx },
-          pro_life: { kind: 'life', interval: null, pass_days: null, amount: 2999, currency: 'usd', exp: 2, approx: !!state.approx },
-        },
+        paywall: { copy: 'default', plans: state.noPlans ? [] : ['pro_year', 'pro_life'], default_plan: 'pro_year', trial_days: 0, promo_codes: false },
+        prices: state.noPlans
+          ? {}
+          : {
+              pro_year: { kind: 'sub', interval: 'year', pass_days: null, amount: state.yearAmount ?? 1499, currency: 'usd', exp: 2, approx: !!state.approx },
+              pro_life: { kind: 'life', interval: null, pass_days: null, amount: 2999, currency: 'usd', exp: 2, approx: !!state.approx },
+            },
         ui: { pro_in_settings: false, import_partial: true },
         exps: [],
       });
@@ -119,6 +127,45 @@ async function mockBilling(context: BrowserContext, state: MockState): Promise<v
         return json(409, { error: 'price_changed' });
       }
       return json(200, { url: `${API}/checkout/cs_test_${checkouts.length}`, checkout_id: `co_${checkouts.length}` });
+    }
+    if (path.startsWith('/v1/backup/')) {
+      const backups = (state.backups ??= []);
+      const iid = String(body.iid);
+      // The license key finds the license's copies from an install that holds none (a new profile).
+      const byKey = typeof body.key === 'string' && body.key.toUpperCase().replace(/[\s-]/g, '') === GOOD_KEY.replace(/-/g, '');
+      if (!state.licensed.has(iid) && !byKey) return json(404, { error: 'no_license' });
+      if (path === '/v1/backup/upload') {
+        const kid = String(body.kid);
+        const auth = String(body.auth);
+        if (!state.backupKey) {
+          if (!body.claim) return json(409, { error: 'backup_off' });
+          state.backupKey = { kid, auth };
+        } else if (state.backupKey.kid !== kid || state.backupKey.auth !== auth) {
+          return json(409, { error: 'backup_wrong_code' });
+        }
+        const copy = { id: `bkp_${backups.length + 1}`, iid, kid, data: String(body.data), at: Date.now() };
+        backups.push(copy);
+        return json(200, { id: copy.id, created_at: copy.at });
+      }
+      if (path === '/v1/backup/list') {
+        return json(200, {
+          kid: state.backupKey?.kid ?? null,
+          backups: [...backups].reverse().map((b) => ({ id: b.id, created_at: b.at, bytes: b.data.length, kid: b.kid, this_device: b.iid === iid })),
+        });
+      }
+      if (path === '/v1/backup/get') {
+        if (!state.backupKey) return json(404, { error: 'backup_not_found' });
+        if (state.backupKey.auth !== String(body.auth)) return json(409, { error: 'backup_wrong_code' });
+        const copy = backups.find((b) => b.id === body.id);
+        return copy ? json(200, { id: copy.id, created_at: copy.at, kid: copy.kid, data: copy.data }) : json(404, { error: 'backup_not_found' });
+      }
+      if (path === '/v1/backup/delete') {
+        if (state.backupKey && state.backupKey.auth !== String(body.auth)) return json(409, { error: 'backup_wrong_code' });
+        const deleted = backups.length;
+        backups.length = 0;
+        state.backupKey = null;
+        return json(200, { deleted });
+      }
     }
     // The Checkout page itself: anything will do.
     if (path.startsWith('/checkout/')) return route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Checkout</title>' });
@@ -235,7 +282,7 @@ test('at the limit, Add opens the paywall; a license key turns Pro on and the ty
   // What left the machine: the count, never the accounts.
   const lastSync = state.syncs[state.syncs.length - 1]!;
   expect(Object.keys(lastSync).sort()).toEqual(
-    ['accounts', 'browser_lang', 'events', 'has_key', 'iid', 'installed_at', 'key_hint', 'legacy', 'legacy_src', 'lid', 'open_mode', 'opens', 'pid', 'sync', 'ui_lang', 'vault', 'ver'].sort()
+    ['accounts', 'browser_lang', 'dark', 'events', 'has_key', 'iid', 'installed_at', 'key_hint', 'legacy', 'legacy_src', 'lid', 'open_mode', 'opens', 'pid', 'style', 'sync', 'ui_lang', 'vault', 'ver'].sort()
   );
 
   await addAccountByHand(page, 'first@example.com', otherSecret(1));
@@ -243,9 +290,9 @@ test('at the limit, Add opens the paywall; a license key turns Pro on and the ty
   const { dialog, paywall } = await addOverLimit(page, 'second@example.com', otherSecret(2));
   // A single blocked add is not counted at the person: no "holds 1, you have 1".
   await expect(paywall.getByText(/free plan holds/)).toHaveCount(0);
-  // What Pro gives, as the buyer gains it, and the trust line under the button.
-  for (const benefit of ['As many accounts as you need', 'One key for up to 5 browsers', 'Right-click a field to insert your code']) await expect(paywall.getByText(benefit)).toBeVisible();
-  await expect(paywall.getByText('Secret keys never leave your browser · Open source')).toBeVisible();
+  // What Pro gives, as the buyer gains it. No seat count, and no trust line under the button (both gone 2026-10-08).
+  for (const benefit of ['As many accounts as you need', "We can't see your keys", 'Encrypted backup in the cloud']) await expect(paywall.getByText(benefit)).toBeVisible();
+  await expect(paywall.getByText(/up to 5 browsers|never leave your browser/)).toHaveCount(0);
   await expect(paywall.getByRole('radio', { name: /Yearly/ })).toHaveAttribute('aria-checked', 'true');
   await expect(paywall.getByRole('radio', { name: /Yearly/ })).toContainText('$14.99 / year');
   // The button that pays names what it charges: in a short window it is on
@@ -448,4 +495,176 @@ test('with no limit in the policy, there is no paywall at all', async ({ context
   await syncNow(page);
   for (let i = 1; i <= 4; i++) await addAccountByHand(page, `u${i}@example.com`, otherSecret(10 + i));
   await expect(cards(page)).toHaveCount(4);
+});
+
+test('cloud backup: turning it on asks for the code back, sends a copy we cannot read, and restores it', async ({ context, extensionId }) => {
+  const state: MockState = { freeLimit: null, licensed: new Set(), syncs: [] };
+  await mockBilling(context, state);
+
+  const page = await openPage(context, extensionId, 'popup.html');
+  await syncNow(page);
+  const iid = await page.evaluate(async () => ((await chrome.storage.local.get('billingInstall')).billingInstall as { id: string }).id);
+  state.licensed.add(iid);
+  await page.evaluate(() => chrome.storage.local.remove('billingLastSync'));
+  await page.reload();
+  await expect.poll(() => page.evaluate(async () => !!(await chrome.storage.local.get('billingEntitlement')).billingEntitlement)).toBe(true);
+
+  await addAccountByHand(page, 'backed-up@example.com', otherSecret(4));
+  await page.getByRole('button', { name: 'Settings' }).click();
+
+  const row = page.getByText('Cloud backup', { exact: true });
+  await expect(row).toBeVisible();
+  await page.getByRole('button', { name: 'Turn on cloud backup' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Your backup recovery code' });
+  await expect(dialog).toBeVisible();
+  const code = (await dialog.locator('code').innerText()).trim();
+  expect(code).toMatch(/^[A-Z2-9]{5}-[A-Z2-9]{5}-[A-Z2-9]{5}-[A-Z2-9]{5}$/);
+
+  // Typed wrong, nothing is turned on and nothing is sent.
+  await dialog.getByRole('textbox').fill('AAAAA-AAAAA-AAAAA-AAAAA');
+  await dialog.getByRole('button', { name: 'Turn on cloud backup' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('That does not match the code above.');
+  expect(state.backups ?? []).toHaveLength(0);
+
+  await dialog.getByRole('textbox').fill(code.toLowerCase());
+  await dialog.getByRole('button', { name: 'Turn on cloud backup' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText('On · last copy today')).toBeVisible();
+  await expect(page.getByText(/^Today, .+ · this browser$/)).toBeVisible();
+
+  // The server got one copy, and nothing in it it could read.
+  expect(state.backups).toHaveLength(1);
+  const sent = JSON.stringify(state.backups);
+  expect(sent).not.toContain('backed-up@example.com');
+  expect(sent).not.toContain(otherSecret(4));
+  expect(sent).not.toContain(code.replace(/-/g, ''));
+
+  // Lose the account here, then put it back from the cloud.
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await deleteByHand(page, 'backed-up@example.com');
+  await expect(cards(page)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByText(/^Today, .+ · this browser$/).locator('xpath=ancestor::li').getByRole('button', { name: 'Restore' }).click();
+  await page.getByRole('button', { name: 'Restore' }).last().click();
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByText('backed-up@example.com')).toBeVisible();
+});
+
+test('cloud backup without Pro: every install sees "Turn on", and it opens the paywall about the backup — not where nothing can be bought', async ({ context, extensionId }) => {
+  const state: MockState = { freeLimit: null, licensed: new Set(), syncs: [] };
+  await mockBilling(context, state);
+
+  const page = await openPage(context, extensionId, 'popup.html');
+  await syncNow(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  // No limit and Pro not offered in Settings — an install from before the paywall, say.
+  await expect(page.getByRole('region', { name: 'Pro' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Turn on cloud backup' }).click();
+
+  const paywall = page.getByRole('dialog', { name: 'Keep your codes, even if you lose this computer' });
+  await expect(paywall).toBeVisible();
+  await expect(paywall.getByText('Pro keeps an encrypted copy of your accounts in the cloud', { exact: false })).toBeVisible();
+  await expect(paywall.getByText(/account limit/)).toHaveCount(0);
+
+  // Where no one can pay, the server offers no plans, and there is no row to press.
+  state.noPlans = true;
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => chrome.storage.local.remove(['billingLastSync', 'billingPolicy']));
+  await syncNow(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByText('Backup & Restore')).toBeVisible();
+  // Restoring with a license key stays: getting copies back never depends on buying.
+  await expect(page.getByRole('button', { name: 'Restore from cloud backup with your license key' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Turn on cloud backup' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Cloud backup' })).toHaveCount(0);
+});
+
+test('the cloud backup banner over Settings counts its views, opens the backup paywall, and once closed stays closed', async ({ context, extensionId, serviceWorker }) => {
+  const state: MockState = { freeLimit: null, licensed: new Set(), syncs: [] };
+  await mockBilling(context, state);
+
+  const page = await openPage(context, extensionId, 'popup.html');
+  await syncNow(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const banner = page.getByRole('region', { name: 'Cloud backup' });
+  await expect(banner).toBeVisible();
+  await banner.getByRole('button', { name: /Keep your codes, even if you lose this computer/ }).click();
+
+  const paywall = page.getByRole('dialog', { name: 'Keep your codes, even if you lose this computer' });
+  await expect(paywall).toBeVisible();
+  await expect(paywall.getByText(/account limit/)).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  const seen = async () => {
+    const queued = (await serviceWorker.evaluate(async () => (await chrome.storage.local.get('billingEvents')).billingEvents ?? [])) as Array<{ n: string; p?: Record<string, unknown> }>;
+    const sent = state.syncs.flatMap((s) => (Array.isArray(s.events) ? (s.events as Array<{ n: string; p?: Record<string, unknown> }>) : []));
+    return [...queued, ...sent];
+  };
+  await expect.poll(async () => (await seen()).filter((e) => e.n === 'backup_banner_view').length).toBe(1);
+  await expect.poll(async () => (await seen()).some((e) => e.n === 'paywall_view' && e.p?.trigger === 'backup_banner')).toBe(true);
+
+  // Every Settings opening it shows in is a view of its own.
+  await page.reload();
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(banner).toBeVisible();
+  await expect.poll(async () => (await seen()).filter((e) => e.n === 'backup_banner_view').length).toBe(2);
+
+  await banner.getByRole('button', { name: 'Close' }).click();
+  await expect(banner).toHaveCount(0);
+  await expect.poll(async () => (await seen()).some((e) => e.n === 'backup_banner_close')).toBe(true);
+  await page.reload();
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByText('Backup & Restore')).toBeVisible();
+  await expect(banner).toHaveCount(0);
+  // The row's own "Turn on" stays.
+  await expect(page.getByRole('button', { name: 'Turn on cloud backup' })).toBeVisible();
+});
+
+test('a new profile restored with the license key gets the accounts, and Pro with them', async ({ context, extensionId }) => {
+  const state: MockState = { freeLimit: null, licensed: new Set(), syncs: [] };
+  await mockBilling(context, state);
+
+  // The first browser: Pro, one account, cloud backup on.
+  const page = await openPage(context, extensionId, 'popup.html');
+  await syncNow(page);
+  const iid = await page.evaluate(async () => ((await chrome.storage.local.get('billingInstall')).billingInstall as { id: string }).id);
+  state.licensed.add(iid);
+  await page.evaluate(() => chrome.storage.local.remove('billingLastSync'));
+  await page.reload();
+  await expect.poll(() => page.evaluate(async () => !!(await chrome.storage.local.get('billingEntitlement')).billingEntitlement)).toBe(true);
+  await addAccountByHand(page, 'carried@example.com', otherSecret(6));
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Turn on cloud backup' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Your backup recovery code' });
+  await expect(dialog.locator('code')).toHaveText(/^[A-Z2-9]{5}-[A-Z2-9]{5}-[A-Z2-9]{5}-[A-Z2-9]{5}$/);
+  const code = (await dialog.locator('code').innerText()).trim();
+  await dialog.getByRole('textbox').fill(code);
+  await dialog.getByRole('button', { name: 'Turn on cloud backup' }).click();
+  await expect(dialog).toBeHidden();
+  expect(state.backups).toHaveLength(1);
+
+  // A new profile: nothing of the first one is here — no install, no license, no accounts, no code.
+  await page.evaluate(async () => {
+    await chrome.storage.local.clear();
+    await chrome.storage.sync.clear();
+  });
+  await page.reload();
+  await syncNow(page);
+  await expect(cards(page)).toHaveCount(0);
+  expect(await page.evaluate(async () => !!(await chrome.storage.local.get('billingEntitlement')).billingEntitlement)).toBe(false);
+
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Restore from cloud backup with your license key' }).click();
+  await page.getByRole('textbox', { name: 'I have a license key' }).fill(GOOD_KEY);
+  await page.getByRole('textbox', { name: 'Backup recovery code' }).fill(code);
+  await page.getByRole('button', { name: 'Find copies' }).click();
+  await page.getByText(/^Today, .+ · another browser$/).locator('xpath=ancestor::li').getByRole('button', { name: 'Restore' }).click();
+  await page.getByRole('button', { name: 'Restore' }).last().click();
+
+  // The accounts, and the license typed to find them: Pro is on here too, and this browser keeps the code.
+  await expect.poll(() => page.evaluate(async () => !!(await chrome.storage.local.get('billingEntitlement')).billingEntitlement)).toBe(true);
+  await expect.poll(() => page.evaluate(async () => !!(await chrome.storage.local.get('cloudBackupCode')).cloudBackupCode)).toBe(true);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByText('carried@example.com')).toBeVisible();
 });

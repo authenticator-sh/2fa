@@ -23,8 +23,9 @@ import {
   describeFileImport,
   describeImport,
   fileImportKind,
-  importErrorMessage,
+  importErrorKind, importErrorMessage,
 } from '@/utils/import-message';
+import { reportAddFail, reportAddStep } from '@/billing/onboarding';
 import { importURIList, looksLikeURIList } from '@/utils/uri-import';
 import { confirmDialog, promptDialog, toast } from '@/utils/ui-feedback';
 import {
@@ -355,6 +356,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
       cancelLabel: t('common.cancel'),
     });
     if (!text || !text.trim()) return;
+    void reportAddStep('settings_paste', 'submitted');
     await runURIImport(text);
   };
 
@@ -387,6 +389,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
       }
     } catch (error) {
       console.error('Import failed:', error);
+      void reportAddFail('settings_import', importErrorKind(error));
       toast('error', importErrorMessage(error, language));
     }
 
@@ -452,6 +455,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
       }
     } catch (error) {
       console.error('QR import failed:', error);
+      void reportAddFail('settings_import', 'qr_failed');
       toast('error', qrImportErrorMessage(error, language));
     }
   };
@@ -541,7 +545,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
                 aria-label={t('export.password')}
                 autoComplete="new-password"
                 autoFocus
-                className="w-full px-2.5 py-1.5 text-xs rounded-md border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-[#4285F4] mb-2"
+                className="w-full px-2.5 py-1.5 text-xs rounded-md border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-accent-500 mb-2"
               />
               <input
                 type="password"
@@ -554,12 +558,12 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
                 placeholder={t('export.passwordConfirm')}
                 aria-label={t('export.passwordConfirm')}
                 autoComplete="new-password"
-                className="w-full px-2.5 py-1.5 text-xs rounded-md border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-[#4285F4] mb-2"
+                className="w-full px-2.5 py-1.5 text-xs rounded-md border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-accent-500 mb-2"
               />
               <button
                 onClick={handleEncryptedExport}
                 disabled={busy || !exportPassword || !exportPasswordConfirm}
-                className="w-full bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-xs py-1.5 rounded-md transition-colors disabled:opacity-50"
+                className="w-full bg-accent-600 hover:bg-accent-700 text-white font-medium text-xs py-1.5 rounded-md transition-colors disabled:opacity-50"
               >
                 {t('settings.export')}
               </button>

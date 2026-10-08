@@ -767,6 +767,24 @@ export async function isUnlocked(): Promise<boolean> {
   return (await getMasterKeyBytes()) !== null;
 }
 
+/**
+ * The master key without counting as activity: for reads nobody asked for — a
+ * status line redrawn because something in storage changed, a background step
+ * — which must never keep the vault open by themselves. Past the deadline it
+ * locks, exactly like getMasterKeyBytes.
+ */
+export async function peekMasterKeyBytes(): Promise<Uint8Array | null> {
+  return withLock(SESSION_LOCK, async () => {
+    const session = await readSession();
+    if (!session) return null;
+    if (await pastIdleDeadline(session)) {
+      await lockNow();
+      return null;
+    }
+    return fromBase64(session.state.mk);
+  });
+}
+
 // --- derived keys ---------------------------------------------------------
 // Cached because storage.ts derives them once per account read; importKey is
 // cheap but HKDF on every record in a 50-account list is measurable in a popup

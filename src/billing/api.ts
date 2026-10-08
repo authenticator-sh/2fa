@@ -28,6 +28,9 @@ const KNOWN: readonly ApiErrorCode[] = [
   'no_license',
   'payments_unavailable',
   'price_changed',
+  'backup_not_found',
+  'backup_off',
+  'backup_wrong_code',
   'internal',
 ];
 

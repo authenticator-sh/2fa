@@ -148,7 +148,7 @@ export function GroupInput({ value, onChange, groups = [], language, inputId = '
           maxLength={64}
           className={`w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg py-2 ps-3 ${
             value ? 'pe-9' : 'pe-3'
-          } border border-gray-300 dark:border-dark-600 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500`}
+          } border border-gray-300 dark:border-dark-600 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500`}
         />
 
         {/* Only once there is something to clear. Taking an account out of a

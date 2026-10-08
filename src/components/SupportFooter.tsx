@@ -29,10 +29,10 @@ export function SupportFooter({ language, onLanguageChange }: SupportFooterProps
   const t = createT(language);
 
   const linkClass =
-    'flex items-center gap-1.5 whitespace-nowrap text-[11px] font-medium text-gray-500 transition-colors hover:text-[#1a73e8] dark:text-gray-400 dark:hover:text-[#669DF6]';
+    'flex items-center gap-1.5 whitespace-nowrap text-[11px] font-medium text-gray-500 transition-colors hover:text-accent-600 dark:text-gray-400 dark:hover:text-accent-400';
 
   return (
-    <div className="flex-shrink-0 flex flex-wrap items-center gap-x-4 gap-y-0.5 border-t border-gray-200 bg-white px-4 py-1.5 dark:border-dark-700 dark:bg-dark-900">
+    <div data-ui="footer" className="flex-shrink-0 flex flex-wrap items-center gap-x-4 gap-y-0.5 border-t border-gray-200 bg-white px-4 py-1.5 dark:border-dark-700 dark:bg-dark-900">
       <button onClick={() => chrome.tabs.create({ url: SUPPORT_URL })} className={linkClass}>
         <LifeBuoy size={12} />
         {t('common.support')}

@@ -72,9 +72,11 @@ Since 1.14.0 the extension checks in with `api.authenticator.sh` for the free
 plan's account limit and for Pro. These are invariants; breaking one is a
 vulnerability:
 
-- **Nothing about an account leaves the device.** The check-in carries the
-  closed list of fields in the README ("What is sent to our server") — a count
-  of accounts, never a name, issuer, secret, code or site.
+- **Nothing about an account leaves the device in a form we can read.** The
+  check-in carries the closed list of fields in the README ("What is sent to
+  our server") — a count of accounts, never a name, issuer, secret, code or
+  site. The one exception is cloud backup, below, which the user turns on and
+  which sends only ciphertext.
 - **The limit can only stop an addition.** No billing state can hide, lock,
   remove or alter an account, or block showing codes, export, backups,
   restoring or sync.
@@ -86,6 +88,37 @@ vulnerability:
   checked with WebCrypto against the public keys compiled into the build
   (`src/billing/keys.ts`); a store build trusts the production key only
   (`scripts/check-bundle.ts` refuses a store build carrying any other).
+
+### Cloud backup
+
+Pro's cloud backup (`src/billing/cloud-backup.ts`, server `/v1/backup/*`) is
+off until the user turns it on. Its invariants:
+
+- **The server never holds a key.** Copies are encrypted in the browser with
+  AES-256-GCM under a key derived (HKDF-SHA256) from a 20-symbol recovery code
+  generated in the browser (~101 bits). The code is never sent to our server.
+  The server stores ciphertext, its size and time, the license, the sending
+  installation, `kid` — the first 8 bytes of a SHA-256 over the code with a
+  fixed prefix — and the SHA-256 of `auth`, a separate HKDF output of the code.
+  Neither opens a copy.
+- **The vault is not bypassed.** With password protection on, this profile's
+  stored code is encrypted under a key derived from the vault's master key,
+  from the moment protection is turned on, in local storage and in sync.
+- **Fetching, writing and deleting need the code.** The list of copies (times,
+  sizes, `kid`) is given to an installation holding the license (paid up or
+  not) or to the license key; a copy itself, an upload and turning off need
+  `auth` as well; starting over without the code needs the license key. An
+  install id alone — it leaves the browser in the uninstall link — reaches no
+  ciphertext and can neither add nor delete copies.
+- **One code per license.** The server refuses a copy under any code but the
+  license's current one, so every listed copy opens with the same code.
+- **Restoring only adds**, through the same merge as the automatic snapshots,
+  and is never gated on Pro being active.
+
+A way to read a copy without the recovery code, to read another license's
+copies without its key, to delete or replace copies without the code or the
+license key, or to make an installation upload in the clear, is a
+vulnerability.
 
 A way to get Pro without paying by editing the open-source code is not a
 vulnerability — the limit is not DRM. A way for one person to obtain or use

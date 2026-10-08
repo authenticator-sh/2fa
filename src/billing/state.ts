@@ -6,6 +6,7 @@
 // and the license key they bought.
 
 import { isSyncEnabled } from '@/utils/sync-preference';
+import { getVaultMeta } from '@/utils/vault';
 import { withLock } from '@/utils/write-lock';
 import { BILLING_FIRST_VERSION, BILLING_RELEASE_DATE } from './config';
 import { serverSilent, UNGATED, type GateSnapshot } from './gate';
@@ -19,6 +20,8 @@ export const BILLING_KEYS = {
   events: 'billingEvents',
   /** Opens of the extension per UTC day, until the server has them (opens.ts). */
   opens: 'billingOpens',
+  /** How far this install got towards a first account, and when its events last went out (onboarding.ts). */
+  onboarding: 'billingOnboarding',
   lastSync: 'billingLastSync',
   pendingCheckout: 'billingPendingCheckout',
   paywallSeenAt: 'billingPaywallSeenAt',
@@ -31,6 +34,11 @@ export const BILLING_KEYS = {
 export const BILLING_SYNC_KEYS = {
   legacy: 'billingLegacy',
   licenseKey: 'billingLicenseKey',
+  /**
+   * The cloud backup's recovery code (cloud-backup.ts), wrapped under the vault
+   * when there is one. Also kept in local under the same name.
+   */
+  cloudBackupCode: 'cloudBackupCode',
 } as const;
 
 const INSTALL_LOCK = 'authenticator-billing-install';
@@ -528,6 +536,20 @@ export async function reassertSyncedFacts(): Promise<void> {
     const install = await readInstall();
     if (!install) return;
     if (install.legacy) await writeLegacyMarker(install.legacySrc);
+    // The cloud backup code: not "billing" strictly, but the same kind of fact —
+    // what lets this person's other profiles open the copies they share. Only
+    // where sync has none: a different value there is another profile's newer
+    // code (after "start over"), or this same code sealed under a vault this
+    // profile has not unlocked yet — and writing ours over it would put back
+    // a stale code, or a readable one under a vault.
+    const code = await localGet<unknown>(BILLING_SYNC_KEYS.cloudBackupCode);
+    // Never a readable code into sync where there is a vault: one arrived
+    // through sync on a profile that has not unlocked yet to seal its own.
+    const readable = !!code && typeof code === 'object' && 'c' in (code as object);
+    if (code && typeof code === 'object' && !(readable && (await getVaultMeta().catch(() => null)))) {
+      const synced = (await chrome.storage.sync.get(BILLING_SYNC_KEYS.cloudBackupCode))[BILLING_SYNC_KEYS.cloudBackupCode];
+      if (synced === undefined) await chrome.storage.sync.set({ [BILLING_SYNC_KEYS.cloudBackupCode]: code });
+    }
     const key = await localGet<string>(BILLING_KEYS.licenseKey);
     if (typeof key !== 'string' || !(await readEntitlement(install.id))) return;
     const found = await chrome.storage.sync.get(BILLING_SYNC_KEYS.licenseKey);

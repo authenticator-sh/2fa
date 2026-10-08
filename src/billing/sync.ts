@@ -3,7 +3,7 @@
 // What goes out is the closed list in buildSyncRequest and nothing more: an
 // install id minted on this machine, the extension version, the interface and
 // browser language, whether this install predates the paywall, how many
-// accounts it holds (a number — never which ones), three settings, how many
+// accounts it holds (a number — never which ones), five settings, how many
 // times it was opened on each day since the last check-in (./opens), and the
 // queued events from ./events. What comes back is a signed policy and, if
 // this install holds one, a signed license.
@@ -17,6 +17,7 @@ import { isSyncEnabled } from '@/utils/sync-preference';
 import { isVaultEnabled } from '@/utils/vault';
 import { detectLanguage, SUPPORTED_LANGUAGES } from '@/utils/language';
 import { getOpenMode } from '@/utils/open-mode';
+import { readUiStyle, UI_STYLE_KEY } from '@/utils/appearance';
 import { BillingApiError, post } from './api';
 import { ackEvents, peekEvents, type QueuedEvent } from './events';
 import { ackOpens, peekOpens, type OpenDay } from './opens';
@@ -69,6 +70,10 @@ export interface SyncRequest {
   vault: boolean | null;
   sync: boolean | null;
   open_mode: string | null;
+  /** Which of the two styles is on ('classic' or 'apple'). A server from before it refuses the field: deploy it first. */
+  style: string;
+  /** Dark rather than light. Sent with style, so the admin sees all four combinations. */
+  dark: boolean;
   pid: string | null;
   lid: string | null;
   /** Whether this install holds a license key at all — what a server from before key_hint reads. */
@@ -157,7 +162,7 @@ export async function buildSyncRequest(install: InstallRecord): Promise<SyncRequ
     safe(() => isVaultEnabled(), null as boolean | null),
     safe(() => isSyncEnabled(), null as boolean | null),
     safe(() => getOpenMode(), null as string | null),
-    safe(() => chrome.storage.local.get('language'), {} as Record<string, unknown>),
+    safe(() => chrome.storage.local.get(['language', 'darkMode', UI_STYLE_KEY]), {} as Record<string, unknown>),
     safe(() => readPolicy(install.id), null),
     safe(() => readEntitlement(install.id), null),
     safe(() => peekEvents(50), [] as QueuedEvent[]),
@@ -178,6 +183,8 @@ export async function buildSyncRequest(install: InstallRecord): Promise<SyncRequ
     vault,
     sync: syncOn,
     open_mode: openMode,
+    style: readUiStyle(stored[UI_STYLE_KEY]),
+    dark: stored.darkMode === true,
     pid: policy?.pid ?? null,
     lid: entitlement?.lid ?? null,
     has_key: key !== null,

@@ -67,4 +67,8 @@ export const WHATS_NEW: Record<string, UpdateHighlightKey[]> = {
   // updates predates it, so there is nothing new for them to be shown — Pro is
   // not announced inside the extension. What the extension now sends is said
   // where it has to be: the privacy policy, the README and the store listing.
+  //
+  // 1.15.0 has no entry either: its one change for everyone, the second
+  // style, is in Settings for whoever looks, and cloud backup is Pro, which is
+  // not announced inside the extension.
 };

@@ -30,8 +30,9 @@ export function SettingToggle({ label, hint, checked, onChange, children }: Sett
           aria-checked={checked}
           aria-label={label}
           onClick={onChange}
+          data-ui="switch"
           className={`inline-flex items-center w-9 h-5 px-0.5 rounded-full flex-shrink-0 transition-colors ${
-            checked ? 'bg-[#1a73e8]' : 'bg-gray-300 dark:bg-dark-500'
+            checked ? 'bg-switch' : 'bg-gray-300 dark:bg-dark-500'
           }`}
         >
           {/* rtl:-translate-x-4 is not decoration: a CSS transform does not mirror

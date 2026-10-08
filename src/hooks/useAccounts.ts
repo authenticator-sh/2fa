@@ -13,6 +13,7 @@ import {
   lockedAwayCount,
 } from '@/utils/storage';
 import { autoBackup, getLatestBackup } from '@/utils/auto-backup';
+import { cloudBackupIfDue } from '@/billing/cloud-backup';
 import { VaultLockedError } from '@/utils/vault';
 
 /**
@@ -93,6 +94,10 @@ export function createAccountsLoader(publish: (patch: Partial<AccountsState>) =>
         getStoredAccounts()
           .then(stored => autoBackup(stored))
           .catch(err => console.error('Auto backup failed:', err));
+        // The cloud copy, for Pro with it turned on; a no-op otherwise, and
+        // only sends when the list differs from the last copy. Every change
+        // reloads the list, so this is also "after a change".
+        void cloudBackupIfDue(data);
       }
     } catch (error) {
       if (!current()) return;

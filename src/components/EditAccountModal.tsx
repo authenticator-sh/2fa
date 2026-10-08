@@ -121,10 +121,10 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
                 }}
                 aria-invalid={error ? true : undefined}
                 aria-describedby={error ? `${ids}-name-error` : undefined}
-                className={`w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500 ${
+                className={`w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border focus:ring-2 focus:ring-accent-500/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500 ${
                   error
                     ? 'border-red-400 dark:border-red-500 focus:border-red-500'
-                    : 'border-gray-300 dark:border-dark-600 focus:border-[#4285F4]'
+                    : 'border-gray-300 dark:border-dark-600 focus:border-accent-500'
                 }`}
               />
               {error && (
@@ -141,7 +141,7 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
                 type="text"
                 value={issuer}
                 onChange={(e) => setIssuer(e.target.value)}
-                className="w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-[#4285F4] focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500"
+                className="w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500"
               />
             </div>
 
@@ -165,10 +165,10 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
                     autoComplete="off"
                     spellCheck={false}
                     aria-invalid={secretError ? true : undefined}
-                    className={`w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm font-mono rounded-lg px-3 py-2 border focus:ring-2 focus:ring-[#4285F4]/20 outline-none transition-all ${
+                    className={`w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm font-mono rounded-lg px-3 py-2 border focus:ring-2 focus:ring-accent-500/20 outline-none transition-all ${
                       secretError
                         ? 'border-red-400 dark:border-red-500 focus:border-red-500'
-                        : 'border-gray-300 dark:border-dark-600 focus:border-[#4285F4]'
+                        : 'border-gray-300 dark:border-dark-600 focus:border-accent-500'
                     }`}
                   />
                   <p
@@ -219,7 +219,7 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
             <button
               type="submit"
               disabled={saving}
-              className="w-full rounded-lg bg-[#1a73e8] py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#1967D2] disabled:opacity-50"
+              className="w-full rounded-lg bg-accent-600 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-700 disabled:opacity-50"
             >
               {t('edit.save')}
             </button>

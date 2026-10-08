@@ -19,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, Fingerprint, Lock } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { SupportFooter } from '@/components/SupportFooter';
+import { appearanceClass, cachedAppearance, readUiStyle, rememberAppearance, UI_STYLE_KEY, type Appearance } from '@/utils/appearance';
 import {
   applyDocumentLanguage,
   createT,
@@ -67,6 +68,16 @@ function modeFromUrl(): Mode {
 export default function App() {
   const [language, setLanguage] = useState<Language>('en');
   const [status, setStatus] = useState<Status>({ kind: 'working' });
+  // The style and light/dark picked in the popup, as the scan page does: the
+  // cached copy for the first frame, then storage.
+  const [appearance, setAppearance] = useState<Appearance>(() => cachedAppearance());
+  useEffect(() => {
+    chrome.storage.local.get(['darkMode', UI_STYLE_KEY], result => {
+      const read = { style: readUiStyle(result[UI_STYLE_KEY]), dark: result.darkMode === true };
+      setAppearance(read);
+      rememberAppearance(read);
+    });
+  }, []);
   const mode = modeFromUrl();
   const t = createT(language);
   // The key staged for registration, once taken. Held for the life of this
@@ -199,64 +210,66 @@ export default function App() {
     mode === 'register' ? t('vault.passkey.confirmRegister') : t('vault.passkey.confirmUnlock');
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-gray-50 dark:bg-dark-900 p-6">
-      <Logo />
+    <div className={appearanceClass(appearance)}>
+      <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-gray-50 dark:bg-dark-900 p-6">
+        <Logo />
 
-      <div className="w-full max-w-sm bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-dark-600 p-6 text-center">
-        <div className="w-12 h-12 mx-auto rounded-full bg-gray-100 dark:bg-dark-700 flex items-center justify-center mb-4">
+        <div className="w-full max-w-sm bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-dark-600 p-6 text-center">
+          <div className="w-12 h-12 mx-auto rounded-full bg-gray-100 dark:bg-dark-700 flex items-center justify-center mb-4">
+            {status.kind === 'done' ? (
+              <Check className="text-green-600 dark:text-green-400" size={22} />
+            ) : status.kind === 'unsupported' || status.kind === 'error' ? (
+              <AlertTriangle className="text-amber-500" size={22} />
+            ) : status.kind === 'locked' ? (
+              <Lock className="text-gray-500 dark:text-gray-400" size={22} />
+            ) : (
+              <Fingerprint className="text-accent-500" size={22} />
+            )}
+          </div>
+
+          <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">
+            {t('vault.passkey.title')}
+          </h1>
+
           {status.kind === 'done' ? (
-            <Check className="text-green-600 dark:text-green-400" size={22} />
-          ) : status.kind === 'unsupported' || status.kind === 'error' ? (
-            <AlertTriangle className="text-amber-500" size={22} />
+            <p className="text-sm text-gray-600 dark:text-gray-300">{t('vault.passkey.done')}</p>
+          ) : status.kind === 'unsupported' ? (
+            <p className="text-sm text-gray-600 dark:text-gray-300">{t('vault.passkey.unsupported')}</p>
           ) : status.kind === 'locked' ? (
-            <Lock className="text-gray-500 dark:text-gray-400" size={22} />
+            <p className="text-sm text-gray-600 dark:text-gray-300">{t('vault.passkey.needsUnlock')}</p>
           ) : (
-            <Fingerprint className="text-[#4285F4]" size={22} />
+            <>
+              <p className="text-sm text-gray-600 dark:text-gray-300 mb-5">{heading}</p>
+
+              {status.kind === 'error' && (
+                <p role="alert" className="flex items-center justify-center gap-1.5 text-xs text-red-600 dark:text-red-400 mb-4">
+                  <AlertTriangle size={14} aria-hidden />
+                  {t(status.messageKey)}
+                </p>
+              )}
+
+              <button
+                onClick={run}
+                className="w-full flex items-center justify-center gap-2 bg-accent-600 hover:bg-accent-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
+              >
+                <Fingerprint size={16} />
+                {mode === 'register' ? t('vault.passkey.add') : t('vault.passkey.unlockButton')}
+              </button>
+            </>
+          )}
+
+          {status.kind === 'done' && (
+            <button
+              onClick={() => window.close()}
+              className="mt-5 w-full text-xs text-gray-500 dark:text-gray-400 hover:underline py-1"
+            >
+              {t('common.ok')}
+            </button>
           )}
         </div>
 
-        <h1 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-2">
-          {t('vault.passkey.title')}
-        </h1>
-
-        {status.kind === 'done' ? (
-          <p className="text-sm text-gray-600 dark:text-gray-300">{t('vault.passkey.done')}</p>
-        ) : status.kind === 'unsupported' ? (
-          <p className="text-sm text-gray-600 dark:text-gray-300">{t('vault.passkey.unsupported')}</p>
-        ) : status.kind === 'locked' ? (
-          <p className="text-sm text-gray-600 dark:text-gray-300">{t('vault.passkey.needsUnlock')}</p>
-        ) : (
-          <>
-            <p className="text-sm text-gray-600 dark:text-gray-300 mb-5">{heading}</p>
-
-            {status.kind === 'error' && (
-              <p role="alert" className="flex items-center justify-center gap-1.5 text-xs text-red-600 dark:text-red-400 mb-4">
-                <AlertTriangle size={14} aria-hidden />
-                {t(status.messageKey)}
-              </p>
-            )}
-
-            <button
-              onClick={run}
-              className="w-full flex items-center justify-center gap-2 bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
-            >
-              <Fingerprint size={16} />
-              {mode === 'register' ? t('vault.passkey.add') : t('vault.passkey.unlockButton')}
-            </button>
-          </>
-        )}
-
-        {status.kind === 'done' && (
-          <button
-            onClick={() => window.close()}
-            className="mt-5 w-full text-xs text-gray-500 dark:text-gray-400 hover:underline py-1"
-          >
-            {t('common.ok')}
-          </button>
-        )}
+        <SupportFooter language={language} />
       </div>
-
-      <SupportFooter language={language} />
     </div>
   );
 }

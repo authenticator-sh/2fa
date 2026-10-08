@@ -239,7 +239,7 @@ export function VaultSettings({
                 id="vault-auto-lock"
                 value={autoLockMinutes}
                 onChange={e => onAutoLockChange(Number(e.target.value))}
-                className="text-xs bg-white dark:bg-dark-800 border border-gray-300 dark:border-dark-500 rounded-md px-2 py-1 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-[#4285F4]"
+                className="text-xs bg-white dark:bg-dark-800 border border-gray-300 dark:border-dark-500 rounded-md px-2 py-1 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-accent-500"
               >
                 {AUTO_LOCK_OPTIONS.map(minutes => (
                   <option key={minutes} value={minutes}>

@@ -143,6 +143,9 @@ export async function run(): Promise<void> {
     check('an unknown language code is not applied', local({ language: 'xx' }).language === resolveLanguage(undefined));
     check('dark mode on', local({ darkMode: true }).darkMode === true);
     check('dark mode removed means off', local({ darkMode: undefined }).darkMode === false);
+    check('the other style', local({ uiStyle: 'apple' }).uiStyle === 'apple');
+    check('a removed style means classic', local({ uiStyle: undefined }).uiStyle === 'classic');
+    check('an unknown style means classic', local({ uiStyle: 'neon' }).uiStyle === 'classic');
     check('view mode', local({ viewMode: 'compact' }).viewMode === 'compact');
     check('a junk view mode falls back to normal', local({ viewMode: 'huge' }).viewMode === 'normal');
     check('avatars', local({ showAvatars: true }).showAvatars === true);

@@ -127,7 +127,7 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
           {step === 'password' && (
             <>
               <div className="flex items-center gap-2 mb-3">
-                <Lock className="text-[#4285F4]" size={20} />
+                <Lock className="text-accent-500" size={20} />
                 <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
                   {t('vault.setup.title')}
                 </h2>
@@ -154,7 +154,7 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   autoFocus
-                  className="w-full px-3 py-2 pe-9 text-sm rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4]"
+                  className="w-full px-3 py-2 pe-9 text-sm rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-accent-500"
                 />
                 <button
                   type="button"
@@ -187,7 +187,7 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleCreate()}
-                className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4] mb-3"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-accent-500 mb-3"
               />
 
               <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-2.5 mb-3 flex items-start gap-2">
@@ -210,7 +210,7 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
                 <button
                   onClick={handleCreate}
                   disabled={busy || !password || !confirmPassword}
-                  className="flex-1 bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
+                  className="flex-1 bg-accent-600 hover:bg-accent-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
                 >
                   {busy ? t('vault.setup.working') : t('vault.setup.continue')}
                 </button>
@@ -221,7 +221,7 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
           {step === 'recovery' && (
             <>
               <div className="flex items-center gap-2 mb-3">
-                <ShieldCheck className="text-[#4285F4]" size={20} />
+                <ShieldCheck className="text-accent-500" size={20} />
                 <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
                   {t('vault.recovery.title')}
                 </h2>
@@ -264,7 +264,7 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
                 onKeyDown={e => e.key === 'Enter' && handleConfirmRecovery()}
                 autoFocus
                 spellCheck={false}
-                className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4] mb-3"
+                className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-accent-500 mb-3"
               />
 
               {error && <p className="text-xs text-red-600 dark:text-red-400 mb-3">{error}</p>}
@@ -272,7 +272,7 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
               <button
                 onClick={handleConfirmRecovery}
                 disabled={busy || !typedRecovery}
-                className="w-full bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
+                className="w-full bg-accent-600 hover:bg-accent-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
               >
                 {busy ? t('vault.setup.working') : t('vault.recovery.finish')}
               </button>
@@ -301,7 +301,7 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
                     onClick={() => handleAutoLockChange(minutes)}
                     className={`text-xs font-medium py-2 px-2 rounded-lg border transition-colors ${
                       autoLock === minutes
-                        ? 'border-[#4285F4] bg-blue-50 dark:bg-blue-900/20 text-[#1a73e8] dark:text-[#669DF6]'
+                        ? 'border-accent-500 bg-blue-50 dark:bg-blue-900/20 text-accent-600 dark:text-accent-400'
                         : 'border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
                     }`}
                   >
@@ -321,7 +321,7 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
                 </button>
                 <button
                   onClick={handleFinish}
-                  className="flex-1 bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
+                  className="flex-1 bg-accent-600 hover:bg-accent-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
                 >
                   {t('update.gotIt')}
                 </button>

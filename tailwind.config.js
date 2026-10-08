@@ -1,3 +1,10 @@
+// Colours the two styles disagree on are CSS variables (src/styles/globals.css):
+// the classic values sit on :root, the other style redefines them under its
+// class. Channels rather than hex so opacity modifiers (`/20`) keep working.
+const token = (name) => `rgb(var(--${name}) / <alpha-value>)`;
+const scale = (name, steps) => Object.fromEntries(steps.map((step) => [step, token(`${name}-${step}`)]));
+const STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
+
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: 'class',
@@ -20,21 +27,22 @@ export default {
           800: '#075985',
           900: '#0c4a6e',
         },
-        dark: {
-          50: '#f8fafc',
-          100: '#f1f5f9',
-          200: '#e2e8f0',
-          300: '#cbd5e1',
-          400: '#94a3b8',
-          500: '#64748b',
-          600: '#475569',
-          700: '#334155',
-          800: '#1e293b',
-          900: '#0f172a',
-        }
+        gray: scale('gray', STEPS),
+        neutral: scale('neutral', STEPS),
+        dark: scale('dark', STEPS.slice(0, -1)),
+        /** The blue of buttons, links and codes: Google's in the classic style. */
+        accent: scale('accent', [50, 300, 400, 500, 600, 700]),
+        /** A switch that is on. */
+        switch: token('switch-on'),
+      },
+      borderRadius: {
+        DEFAULT: 'var(--radius)',
+        md: 'var(--radius-md)',
+        lg: 'var(--radius-lg)',
+        xl: 'var(--radius-xl)',
       },
       fontFamily: {
-        sans: ['system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+        sans: 'var(--font-sans)',
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
       },
       animation: {

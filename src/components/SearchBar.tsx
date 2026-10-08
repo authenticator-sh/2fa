@@ -22,6 +22,7 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           aria-label={placeholder}
+          data-ui="search"
           className="w-full bg-gray-50 dark:bg-dark-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 text-sm rounded-lg ps-9 pe-9 py-2 border border-gray-200 dark:border-dark-600 focus:border-gray-300 dark:focus:border-dark-500 focus:ring-1 focus:ring-gray-200 dark:focus:ring-dark-600 outline-none transition-all"
         />
         {value && (

@@ -39,7 +39,7 @@ export function SettingsSection({ title, hideTitle, children }: SettingsSectionP
       >
         {title}
       </h2>
-      <div className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white dark:divide-dark-600 dark:border-dark-600 dark:bg-dark-700">
+      <div data-ui="settings-card" className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white dark:divide-dark-600 dark:border-dark-600 dark:bg-dark-700">
         {children}
       </div>
     </section>
@@ -100,9 +100,9 @@ const TEXT_BUTTON = 'flex-shrink-0 text-xs font-medium hover:underline disabled:
 /** Every button on the Settings screen is one of these. */
 export const settingsButton = {
   /** The one thing the row is asking for. At most one per section. */
-  primary: `${BUTTON} bg-[#1a73e8] text-white hover:bg-[#1967D2]`,
+  primary: `${BUTTON} bg-accent-600 text-white hover:bg-accent-700`,
   secondary: `${BUTTON} border border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-dark-500 dark:text-gray-200 dark:hover:bg-dark-600`,
-  link: `${TEXT_BUTTON} text-[#1a73e8] dark:text-[#8AB4F8]`,
+  link: `${TEXT_BUTTON} text-accent-600 dark:text-accent-300`,
   danger: `${TEXT_BUTTON} text-red-600 dark:text-red-400`,
 };
 
@@ -111,4 +111,4 @@ export const settingsWell = 'mt-2 rounded-md bg-gray-100 dark:bg-dark-800';
 
 /** A text field inside a well. */
 export const settingsInput =
-  'w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#4285F4] dark:border-dark-500 dark:bg-dark-700 dark:text-gray-100';
+  'w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-accent-500 dark:border-dark-500 dark:bg-dark-700 dark:text-gray-100';

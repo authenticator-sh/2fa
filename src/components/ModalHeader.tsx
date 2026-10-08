@@ -44,7 +44,7 @@ export function ModalHeader({ title, back, onBack }: ModalHeaderProps) {
   }, []);
 
   return (
-    <div className="flex flex-shrink-0 items-center gap-2 border-b border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
+    <div data-ui="header" className="flex flex-shrink-0 items-center gap-2 border-b border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
       <button
         ref={backRef}
         onClick={onBack}

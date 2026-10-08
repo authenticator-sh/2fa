@@ -56,7 +56,7 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
       <div className="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 max-w-sm w-full max-h-[92vh] shadow-xl flex flex-col overflow-hidden">
         <div className="px-5 pt-5 pb-2 flex-shrink-0">
           <div className="flex items-center gap-2">
-            <Sparkles className="text-[#4285F4]" size={20} />
+            <Sparkles className="text-accent-500" size={20} />
             <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">{t('update.title')}</h2>
             <span className="ms-auto text-xs font-medium text-gray-500 dark:text-gray-400">v{version}</span>
             <button
@@ -73,7 +73,7 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
           <ul className="space-y-2 pb-3">
             {highlights.map((key) => (
               <li key={key} className="flex items-start gap-2 text-xs leading-relaxed text-gray-700 dark:text-gray-300">
-                <span className="text-[#1a73e8] dark:text-[#669DF6] mt-0.5">&bull;</span>
+                <span className="text-accent-600 dark:text-accent-400 mt-0.5">&bull;</span>
                 <span>{t(key)}</span>
               </li>
             ))}
@@ -86,7 +86,7 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
           <button
             type="button"
             onClick={() => openInTab(whatsNewUrl(language, version))}
-            className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[#1a73e8] dark:text-[#669DF6] hover:underline"
+            className="mb-2 flex items-center gap-1.5 text-xs font-medium text-accent-600 dark:text-accent-400 hover:underline"
           >
             <ArrowRight size={13} className="rtl:rotate-180" />
             {t('update.learnMore')}
@@ -98,7 +98,7 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
           <button
             type="button"
             onClick={() => openInTab(FEATURE_REQUEST_URL)}
-            className="mb-3 flex items-center gap-1.5 text-xs font-medium text-[#1a73e8] dark:text-[#669DF6] hover:underline"
+            className="mb-3 flex items-center gap-1.5 text-xs font-medium text-accent-600 dark:text-accent-400 hover:underline"
           >
             <Lightbulb size={13} />
             {t('common.requestFeature')}
@@ -139,7 +139,7 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
             className={`w-full font-medium text-sm py-2.5 rounded-lg transition-colors ${
               showRatingPrompt
                 ? 'border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
-                : 'bg-[#1a73e8] hover:bg-[#1967D2] text-white'
+                : 'bg-accent-600 hover:bg-accent-700 text-white'
             }`}
           >
             {t('update.gotIt')}

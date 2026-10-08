@@ -137,3 +137,12 @@ export function importErrorMessage(error: unknown, language: Language): string {
   if (error instanceof Error && error.name === 'VaultLockedError') return t('restore.locked');
   return t('import.failed');
 }
+
+/** The kind of a whole-file failure, for the report of where adds go wrong (billing/onboarding.ts) — never its words. */
+export function importErrorKind(error: unknown): string {
+  if (error instanceof ImportRejectedError) return error.reason;
+  if (error instanceof Error && error.name === 'WrongExportPasswordError') return 'wrong_password';
+  if (error instanceof Error && error.name === 'DamagedBackupFileError') return 'damaged';
+  if (error instanceof Error && error.name === 'VaultLockedError') return 'locked';
+  return 'failed';
+}

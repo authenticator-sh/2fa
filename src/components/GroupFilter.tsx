@@ -46,7 +46,7 @@ export function GroupFilter({
     // flex-shrink-0: the strip is a flex child of the fixed-height popup, so
     // without it a long account list squeezes the chips until their text is
     // clipped by their own pill.
-    <div className="flex-shrink-0 flex gap-1.5 overflow-x-auto scrollbar-hide px-4 py-2 bg-white dark:bg-dark-900 border-b border-gray-200 dark:border-dark-700">
+    <div data-ui="toolbar" className="flex-shrink-0 flex gap-1.5 overflow-x-auto scrollbar-hide px-4 py-2 bg-white dark:bg-dark-900 border-b border-gray-200 dark:border-dark-700">
       {chips.map(chip => {
         const isActive = chip.value === active;
         return (
@@ -56,7 +56,7 @@ export function GroupFilter({
             aria-pressed={isActive}
             className={`flex-shrink-0 max-w-[140px] flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full transition-colors ${
               isActive
-                ? 'bg-[#1a73e8] text-white'
+                ? 'bg-accent-600 text-white'
                 : 'bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-600'
             }`}
           >

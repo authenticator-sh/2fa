@@ -31,6 +31,7 @@ import {
 import { withAccountsLock } from './write-lock';
 import { admit, type AddOrigin } from '@/billing/gate';
 import { reassertSyncedFacts } from '@/billing/state';
+import { openCodeFromVault, sealCodeUnderVault } from '@/billing/cloud-backup-code';
 
 const STORAGE_KEY = 'authenticator_accounts';
 const SYNC_OVERFLOW_KEY = 'syncOverflow';
@@ -100,10 +101,11 @@ export async function setSyncEnabled(enabled: boolean): Promise<void> {
   // purge repeating on every later save here, as it used to: each time a
   // sync-on machine pushed, the next rename on this one wiped it again, so the
   // other machines effectively had no cloud copy at all.
-  // The two billing facts that ride along in sync (billing/state.ts) go too:
-  // "removed from Google's servers" is about everything we put there.
+  // The billing facts that ride along in sync (billing/state.ts) go too —
+  // the cloud backup code among them: "removed from Google's servers" is about
+  // everything we put there.
   await chrome.storage.sync
-    .remove([...(await syncKeysInUse()), VAULT_META_KEY, 'billingLegacy', 'billingLicenseKey'])
+    .remove([...(await syncKeysInUse()), VAULT_META_KEY, 'billingLegacy', 'billingLicenseKey', 'cloudBackupCode'])
     .catch(() => {});
 }
 
@@ -1951,6 +1953,11 @@ export async function prepareVault(password: string): Promise<PreparedVault> {
     // Metadata the vault does not cover but a stolen profile would expose:
     // which services the user holds, and which group they filed them under.
     await chrome.storage.local.remove([USAGE_HISTORY_KEY, ACTIVE_GROUP_KEY]).catch(() => {});
+
+    // And cloud backup's code: with it and this install's id, the copies on our
+    // server open without the password. Sealed now, while the key is in hand —
+    // not later, when something happens to read it.
+    await sealCodeUnderVault(masterKeyBytes, meta.vaultId);
   };
 
   // The whole commit under the accounts lock. Unlocked, an add in the scanner
@@ -2066,6 +2073,10 @@ export async function disableVault(password: string): Promise<void> {
       const opened = await openAll(now, meta.vaultId);
       await retryOperation(() => writeStamped(opened));
     }
+
+    // Cloud backup's code was sealed under this vault; once its metadata is
+    // gone nothing could open it, and backups would stop without a word.
+    await openCodeFromVault(masterKeyBytes, meta.vaultId);
 
     await clearVaultMeta();
   });

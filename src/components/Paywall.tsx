@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Infinity as InfinityIcon, KeyRound, Laptop, Loader2, Lock, Mail, MailCheck, MousePointerClick, X } from 'lucide-react';
+import { Cloud, Infinity as InfinityIcon, KeyRound, Loader2, Lock, Mail, MailCheck, X } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { useEscapeLayer, useReturnFocus } from '@/hooks/useLayer';
 import { createT, type Language, type TranslationKey } from '@/utils/i18n';
 import { toast } from '@/utils/ui-feedback';
 import { activateLicenseKey, recoverLicense, startCheckout } from '@/billing/actions';
 import { BillingApiError } from '@/billing/api';
-import type { PaywallRequest, PaywallResult } from '@/billing/bridge';
+import type { PaywallRequest, PaywallResult, PaywallTrigger } from '@/billing/bridge';
 import { track } from '@/billing/events';
 import { formatMoney, formatPrice, monthlyEquivalent, yearlySaving } from '@/billing/format';
 import { billingErrorMessage } from '@/billing/messages';
@@ -49,25 +49,42 @@ export const COPY: Record<string, { title: TranslationKey; body: TranslationKey 
   everything: { title: 'paywall.everything.title', body: 'paywall.everything.body' },
 };
 
+/**
+ * Opened from cloud backup's "Turn on": the person asked for a backup, not for
+ * room — most who see this have no limit at all (installs from before the
+ * paywall) — so the server's copy, written about the limit, would answer a
+ * question nobody asked. This text wins over it and over custom text.
+ */
+export const BACKUP_COPY: { title: TranslationKey; body: TranslationKey } = { title: 'paywall.backup.title', body: 'paywall.backup.body' };
+
+/** Opened to sell the backup: its "Turn on" or the banner over Settings. */
+const isBackupTrigger = (trigger: PaywallTrigger): boolean => trigger === 'backup' || trigger === 'backup_banner';
+
 // What Pro gives, in the buyer's terms (2026-10-04): room for every account,
-// one key across browsers, and the code put into the field with a right
-// click. Quick fill is not Pro's own — every plan has it — but it is what the
-// extension is used for, shown where the choice is made (owner, 2026-10-04).
-// It replaced "turns on instantly, no sign-up". "Codes keep working if Pro
-// ends" was true but read as an invitation to cancel (owner, 2026-10-04).
-// Privacy and open source are reasons to trust the purchase, not to make it —
-// they sit under the button instead.
+// one key across browsers, and an encrypted copy in the cloud. "Codes keep
+// working if Pro ends" was true but read as an invitation to cancel (owner,
+// 2026-10-04).
+//
+// The cloud copy (2026-10-07) took quick fill's place: quick fill was never
+// Pro's own — every plan has it — and the copy is the one thing here that
+// answers "what if I lose this computer". Still three: the columns are 88px.
+//
+// "One key for up to 5 browsers" gave way to "we can't see your keys"
+// (2026-10-08): a seat count reads as a limit at the moment of paying, and a
+// buyer who needs more seats gets them from support. The trust line under the
+// button ("secret keys never leave your browser · open source") went the same
+// day: it repeated this, and with the cloud backup it was no longer true.
 const BENEFITS = [
   { key: 'paywall.benefitUnlimited', Icon: InfinityIcon },
-  { key: 'paywall.benefitBrowsers', Icon: Laptop },
-  { key: 'paywall.benefitQuickFill', Icon: MousePointerClick },
+  { key: 'paywall.benefitPrivate', Icon: Lock },
+  { key: 'paywall.benefitBackup', Icon: Cloud },
 ] as const;
 
 type Failure = { at: 'checkout' | 'key' | 'restore'; text: string };
 
 /** The key and email fields. */
 const FIELD =
-  'h-9 min-w-0 flex-1 rounded-md border border-neutral-200 bg-white px-3 text-sm text-neutral-900 placeholder:text-neutral-400 transition-shadow focus:border-[#1a73e8] focus:outline-none focus:ring-[3px] focus:ring-[#1a73e8]/15 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-100 dark:focus:border-[#8AB4F8] dark:focus:ring-[#8AB4F8]/20';
+  'h-9 min-w-0 flex-1 rounded-md border border-neutral-200 bg-white px-3 text-sm text-neutral-900 placeholder:text-neutral-400 transition-shadow focus:border-accent-600 focus:outline-none focus:ring-[3px] focus:ring-accent-600/15 dark:border-neutral-800 dark:bg-neutral-950 dark:text-neutral-100 dark:focus:border-accent-300 dark:focus:ring-accent-300/20';
 
 function planLabel(price: DisplayPrice): TranslationKey {
   if (price.kind === 'life') return 'paywall.planLife';
@@ -133,7 +150,7 @@ export default function Paywall({ language, request }: PaywallProps) {
       // experiments' uninstall check is about.
       void track('paywall_view', {
         trigger: request.trigger,
-        copy: policy.paywall.text?.lang === language ? 'custom' : policy.paywall.copy,
+        copy: isBackupTrigger(request.trigger) ? 'backup' : policy.paywall.text?.lang === language ? 'custom' : policy.paywall.copy,
         plans: plans.join(','),
       }).then(() => syncFromWorker());
     }
@@ -170,11 +187,12 @@ export default function Paywall({ language, request }: PaywallProps) {
     });
   };
 
-  const copy = COPY[policy && policy !== 'loading' ? policy.paywall.copy : 'default'] ?? COPY.default!;
+  const fromBackup = isBackupTrigger(request.trigger);
+  const copy = fromBackup ? BACKUP_COPY : (COPY[policy && policy !== 'loading' ? policy.paywall.copy : 'default'] ?? COPY.default!);
   // Text the server wrote, when it is in the language on screen. After a
   // language switch the last policy still carries the old language until the
   // next check-in; the shipped text covers that gap rather than a mixed screen.
-  const custom = policy && policy !== 'loading' && policy.paywall.text?.lang === language ? policy.paywall.text : null;
+  const custom = !fromBackup && policy && policy !== 'loading' && policy.paywall.text?.lang === language ? policy.paywall.text : null;
   const prices = policy && policy !== 'loading' ? policy.prices : {};
   const monthly = Object.values(prices).find(p => p.kind === 'sub' && p.interval === 'month');
   const selectedPrice = prices[selected];
@@ -327,7 +345,7 @@ export default function Paywall({ language, request }: PaywallProps) {
           />
           {/* The small popup is 480px tall; there the mark gives its place to the plans. */}
           {/* The disc alone: on white the logo's white tile only drew an outline of nothing. */}
-          <div className="relative mx-auto mb-3 w-fit rounded-full ring-[6px] ring-[#4285F4]/10 dark:ring-[#4285F4]/20 [@media(max-height:520px)]:hidden" aria-hidden>
+          <div className="relative mx-auto mb-3 w-fit rounded-full ring-[6px] ring-accent-500/10 dark:ring-accent-500/20 [@media(max-height:520px)]:hidden" aria-hidden>
             <Logo bare size={40} className="block" />
           </div>
           {/* Room for the cross: a long title must wrap before it reaches the corner. */}
@@ -342,7 +360,7 @@ export default function Paywall({ language, request }: PaywallProps) {
           </p>
           {limitLine && (
             <p className="relative mx-auto mt-2.5 inline-flex max-w-sm items-center gap-2 rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs leading-snug text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
-              <span aria-hidden className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[#1a73e8] dark:bg-[#8AB4F8]" />
+              <span aria-hidden className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent-600 dark:bg-accent-300" />
               <span>{limitLine}</span>
             </p>
           )}
@@ -362,7 +380,7 @@ export default function Paywall({ language, request }: PaywallProps) {
           <ul className="mb-4 mt-1 grid grid-cols-3 gap-x-3">
             {BENEFITS.map(({ key: k, Icon }) => (
               <li key={k} className="flex min-w-0 flex-col items-center gap-1.5 text-center text-xs leading-snug text-neutral-600 dark:text-neutral-400">
-                <Icon size={16} strokeWidth={1.75} className="flex-shrink-0 text-[#1a73e8] dark:text-[#8AB4F8]" aria-hidden />
+                <Icon size={16} strokeWidth={1.75} className="flex-shrink-0 text-accent-600 dark:text-accent-300" aria-hidden />
                 <span className="max-w-full hyphens-auto text-balance [hyphenate-limit-chars:13_5_5] [overflow-wrap:anywhere]">{t(k)}</span>
               </li>
             ))}
@@ -380,7 +398,7 @@ export default function Paywall({ language, request }: PaywallProps) {
               <button
                 type="button"
                 onClick={() => void load(true)}
-                className="mt-2 text-sm font-medium text-[#1967D2] underline-offset-4 hover:underline dark:text-[#8AB4F8]"
+                className="mt-2 text-sm font-medium text-accent-700 underline-offset-4 hover:underline dark:text-accent-300"
               >
                 {t('paywall.retry')}
               </button>
@@ -402,14 +420,14 @@ export default function Paywall({ language, request }: PaywallProps) {
                     onClick={() => setSelected(id)}
                     className={`flex w-full items-center gap-3 rounded-lg border bg-white px-3.5 py-2 text-start transition-[border-color,box-shadow] dark:bg-neutral-950 ${
                       active
-                        ? 'border-[#1a73e8] shadow-[0_0_0_1px_#1a73e8] dark:border-[#8AB4F8] dark:shadow-[0_0_0_1px_#8AB4F8]'
+                        ? 'border-accent-600 shadow-[0_0_0_1px_#1a73e8] dark:border-accent-300 dark:shadow-[0_0_0_1px_#8AB4F8]'
                         : 'border-neutral-200 hover:border-neutral-400 dark:border-neutral-800 dark:hover:border-neutral-600'
                     }`}
                   >
                     <span
                       aria-hidden
                       className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border transition-colors ${
-                        active ? 'border-[#1a73e8] bg-[#1a73e8] dark:border-[#8AB4F8] dark:bg-[#8AB4F8]' : 'border-neutral-300 dark:border-neutral-700'
+                        active ? 'border-accent-600 bg-accent-600 dark:border-accent-300 dark:bg-accent-300' : 'border-neutral-300 dark:border-neutral-700'
                       }`}
                     >
                       {active && <span className="h-1.5 w-1.5 rounded-full bg-white dark:bg-neutral-950" />}
@@ -418,7 +436,7 @@ export default function Paywall({ language, request }: PaywallProps) {
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{t(planLabel(price))}</span>
                         {saving !== null && (
-                          <span className="rounded-full bg-[#E8F0FE] px-1.5 py-px text-[10px] font-medium text-[#1967D2] dark:bg-[#1967D2]/25 dark:text-[#8AB4F8]">
+                          <span className="rounded-full bg-accent-50 px-1.5 py-px text-[10px] font-medium text-accent-700 dark:bg-accent-700/25 dark:text-accent-300">
                             {t('paywall.save', saving)}
                           </span>
                         )}
@@ -448,7 +466,7 @@ export default function Paywall({ language, request }: PaywallProps) {
                 type="button"
                 onClick={() => void checkout()}
                 disabled={!selected || busy !== null}
-                className="flex min-h-[44px] w-full flex-wrap items-center justify-center gap-x-2 rounded-lg bg-[#1a73e8] px-4 py-2.5 text-[15px] font-medium text-white transition-colors hover:bg-[#1967D2] disabled:opacity-60"
+                className="flex min-h-[44px] w-full flex-wrap items-center justify-center gap-x-2 rounded-lg bg-accent-600 px-4 py-2.5 text-[15px] font-medium text-white transition-colors hover:bg-accent-700 disabled:opacity-60"
               >
                 {busy === 'checkout' && <Loader2 size={16} className="animate-spin" aria-hidden />}
                 {busy === 'checkout' ? t('paywall.opening') : t('paywall.continue')}
@@ -477,10 +495,6 @@ export default function Paywall({ language, request }: PaywallProps) {
 
             {failure('checkout')}
 
-            <p className="mt-3 flex items-start justify-center gap-1.5 text-xs leading-snug text-neutral-500 dark:text-neutral-400">
-              <Lock size={12} className="mt-[2px] flex-shrink-0" aria-hidden />
-              <span>{t('paywall.trust')}</span>
-            </p>
           </div>
 
           <div className="mt-1 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-[13px]">
@@ -526,7 +540,7 @@ export default function Paywall({ language, request }: PaywallProps) {
                   <button
                     type="submit"
                     disabled={!key.trim() || busy !== null}
-                    className="h-9 flex-shrink-0 rounded-md bg-[#1a73e8] px-3 text-sm font-medium text-white transition-colors hover:bg-[#1967D2] disabled:opacity-60"
+                    className="h-9 flex-shrink-0 rounded-md bg-accent-600 px-3 text-sm font-medium text-white transition-colors hover:bg-accent-700 disabled:opacity-60"
                   >
                     {busy === 'key' ? <Loader2 size={16} className="animate-spin" aria-hidden /> : t('paywall.activate')}
                   </button>
@@ -540,7 +554,7 @@ export default function Paywall({ language, request }: PaywallProps) {
                 role="status"
                 className="mt-3 flex items-start gap-2 rounded-lg border border-neutral-200 px-3 py-2.5 text-sm leading-snug text-neutral-700 dark:border-neutral-800 dark:text-neutral-300"
               >
-                <MailCheck size={16} className="mt-0.5 flex-shrink-0 text-[#1a73e8] dark:text-[#8AB4F8]" aria-hidden />
+                <MailCheck size={16} className="mt-0.5 flex-shrink-0 text-accent-600 dark:text-accent-300" aria-hidden />
                 <span className="min-w-0">
                   {t('paywall.restoreSent')}
                   <span className="mt-0.5 block break-all font-medium text-neutral-900 dark:text-neutral-100" dir="ltr">

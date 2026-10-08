@@ -25,6 +25,8 @@ import { VaultSetupModal } from '@/components/VaultSetupModal';
 import { EmptyStateGuide, type GuidePath } from '@/components/EmptyStateGuide';
 import { AccountsUnavailable } from '@/components/AccountsUnavailable';
 import { RestoreBackups, RestoreOffer } from '@/components/RestoreBackups';
+import { CloudBackupSettings } from '@/components/CloudBackupSettings';
+import { CloudBackupBanner } from '@/components/CloudBackupBanner';
 import { GroupFilter } from '@/components/GroupFilter';
 import { SupportFooter } from '@/components/SupportFooter';
 import {
@@ -39,6 +41,7 @@ import {
 } from '@/utils/time-sync';
 import { applyDocumentLanguage, createT, loadLanguage, resolveLanguage, type Language } from '@/utils/i18n';
 import { settingsFromChanges } from '@/utils/settings-watch';
+import { appearanceClass, cachedAppearance, readUiStyle, rememberAppearance, UI_STYLE_KEY, type UiStyle } from '@/utils/appearance';
 import {
   chooseListView,
   matchesSearch,
@@ -52,10 +55,11 @@ import { addMultipleAccounts, getAccounts } from '@/utils/storage';
 import { listBackupSummaries, type BackupSummary } from '@/utils/auto-backup';
 import { shouldShowBackupReminder, markBackupDone } from '@/utils/backup-reminder';
 import { shouldShowVaultPrompt, markVaultPromptShown } from '@/utils/vault-prompt';
-import { describeImport, importErrorMessage } from '@/utils/import-message';
+import { describeImport, importErrorKind, importErrorMessage } from '@/utils/import-message';
 import { confirmDialog, dismissToast, promptDialog, subscribe as subscribeFeedback, toast } from '@/utils/ui-feedback';
 import { useStableCallback } from '@/hooks/useStableCallback';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { StylePicker } from '@/components/StylePicker';
 import { FeedbackHost } from '@/components/FeedbackHost';
 import { PaywallHost } from '@/components/PaywallHost';
 import { ProSettings } from '@/components/ProSettings';
@@ -64,6 +68,7 @@ import { subscribePaywall } from '@/billing/bridge';
 import { dismissHeldAdd, finishHeldAdd, heldAddToMention } from '@/billing/held-add';
 import { BILLING_KEYS, recentlySawPaywall } from '@/billing/state';
 import { countOpen } from '@/billing/opens';
+import { reasonOfKey, reportAddCancel, reportAddFail, reportAddStep, reportFirstOpen, reportOnboardView } from '@/billing/onboarding';
 import { hasPendingCheckout, syncBilling } from '@/billing/sync';
 import { shouldShowPromoBanner, recordFirstOpen } from '@/utils/promo-banner';
 import { recordOpen, shouldShowReviewPrompt, snoozeReviewPrompt } from '@/utils/review-prompt';
@@ -166,7 +171,10 @@ function App() {
   const [clockStatus, setClockStatus] = useState<ClockStatus | null>(null);
   const [clockChecking, setClockChecking] = useState(false);
   const [language, setLanguage] = useState<Language>('en');
-  const [darkMode, setDarkMode] = useState(false);
+  // Seeded from the synchronous mirror, like the size below, so the first
+  // paint is already in the chosen style and theme.
+  const [darkMode, setDarkMode] = useState(() => cachedAppearance().dark);
+  const [uiStyle, setUiStyle] = useState<UiStyle>(() => cachedAppearance().style);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [sharingAccount, setSharingAccount] = useState<Account | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -219,7 +227,7 @@ function App() {
 
   // Load saved preferences
   useEffect(() => {
-    chrome.storage.local.get(['language', 'darkMode', 'viewMode', 'popupSize', 'showAvatars', SORT_ORDER_KEY], (result) => {
+    chrome.storage.local.get(['language', 'darkMode', UI_STYLE_KEY, 'viewMode', 'popupSize', 'showAvatars', SORT_ORDER_KEY], (result) => {
       // A stored language is a choice the user made and outranks everything.
       // Without one, follow the browser: twenty translated interfaces were
       // reachable only from a dropdown, so every install began in English no
@@ -230,9 +238,10 @@ function App() {
         // would be English and then visibly flip.
         loadLanguage(language).then(() => setLanguage(language));
       }
-      if (result.darkMode) {
-        setDarkMode(true);
-      }
+      const appearance = { style: readUiStyle(result[UI_STYLE_KEY]), dark: result.darkMode === true };
+      setDarkMode(appearance.dark);
+      setUiStyle(appearance.style);
+      rememberAppearance(appearance);
       setShowAvatars(result.showAvatars === true);
       setSortOrder(readSortOrder(result[SORT_ORDER_KEY]));
       if (result.viewMode) {
@@ -269,6 +278,7 @@ function App() {
   // half an hour away — those stay open for days, and coming back is a use.
   useEffect(() => {
     void countOpen();
+    void reportFirstOpen();
     if (HOST === 'popup') return;
     let hiddenAt: number | null = null;
     const onVisibility = () => {
@@ -307,7 +317,14 @@ function App() {
       const patch = settingsFromChanges(changes, areaName);
       const nextLanguage = patch.language;
       if (nextLanguage) loadLanguage(nextLanguage).then(() => setLanguage(nextLanguage));
-      if (patch.darkMode !== undefined) setDarkMode(patch.darkMode);
+      if (patch.darkMode !== undefined) {
+        setDarkMode(patch.darkMode);
+        rememberAppearance({ dark: patch.darkMode });
+      }
+      if (patch.uiStyle) {
+        setUiStyle(patch.uiStyle);
+        rememberAppearance({ style: patch.uiStyle });
+      }
       if (patch.viewMode) setViewMode(patch.viewMode);
       if (patch.showAvatars !== undefined) setShowAvatars(patch.showAvatars);
       if (patch.sortOrder) setSortOrder(patch.sortOrder);
@@ -518,11 +535,21 @@ function App() {
     chrome.storage.local.set({ popupSize: size });
   };
 
-  const handleThemeToggle = () => {
-    const newDarkMode = !darkMode;
-    setDarkMode(newDarkMode);
-    chrome.storage.local.set({ darkMode: newDarkMode });
+  const handleDarkModeChange = (dark: boolean) => {
+    setDarkMode(dark);
+    rememberAppearance({ dark });
+    chrome.storage.local.set({ darkMode: dark });
   };
+
+  const handleThemeToggle = () => handleDarkModeChange(!darkMode);
+
+  const handleUiStyleChange = (style: UiStyle) => {
+    setUiStyle(style);
+    rememberAppearance({ style });
+    chrome.storage.local.set({ [UI_STYLE_KEY]: style });
+  };
+
+  const rootTheme = appearanceClass({ style: uiStyle, dark: darkMode });
 
   const t = createT(language);
 
@@ -582,6 +609,20 @@ function App() {
   // Only while the guide itself is what is on screen: Settings has the header
   // to itself, and the branch stays open underneath for the way back.
   const guidePath = !showSettings && listView === 'empty' ? openGuidePath : null;
+
+  // "Add your first account" on screen: reported once per open (billing/onboarding.ts).
+  const onboardSeen = useRef(false);
+  useEffect(() => {
+    if (listView !== 'empty' || showSettings || onboardSeen.current) return;
+    onboardSeen.current = true;
+    void reportOnboardView();
+  }, [listView, showSettings]);
+
+  /** Back out of a branch of the guide, from its own button or the header's arrow. */
+  const leaveGuidePath = () => {
+    if (openGuidePath) void reportAddCancel('guide', openGuidePath.id);
+    setOpenGuidePath(null);
+  };
 
   // The row that opened the branch is gone once its steps are up, so focus
   // moves to the way out instead of falling back to <body>.
@@ -668,7 +709,11 @@ function App() {
   ): Promise<boolean> => {
     if (Array.isArray(account)) {
       const added = await addWithLimit('migration', origin => addMultipleAccounts(account, origin));
-      if (!added) return false;
+      if (!added) {
+        void reportAddFail('qr', 'limit');
+        return false;
+      }
+      if (added.added === 0 && !added.updated) void reportAddFail('qr', 'all_already_here');
       const result = { ...added, unsupported };
       reload();
       revealAccount(account[0]);
@@ -688,14 +733,17 @@ function App() {
     // Kept if the person goes on to Checkout, and added once Pro is on: in the
     // popup this page is gone by then, and with it what was typed or scanned.
     const added = await addWithLimit(via, origin => addAccount(account, origin), { hold: [account] });
+    const flow = via === 'qr' ? 'qr' : 'manual';
     if (added === null) {
       blockedAddIdRef.current = account.id;
+      void reportAddFail(flow, 'limit');
       return false;
     }
     // A seed already in the list is skipped, and saying "Account added" over
     // a list that did not change sends the user looking for a row that is
     // not there.
     if (!added) {
+      void reportAddFail(flow, 'duplicate');
       toast('info', t('accounts.alreadyExists'));
       return true;
     }
@@ -861,6 +909,7 @@ function App() {
   });
 
   const handleImportClick = () => {
+    void reportAddStep('import', 'picker');
     importInputRef.current?.click();
   };
 
@@ -877,9 +926,13 @@ function App() {
     }
   };
 
-  const importLinks = async (text: string) => {
+  const importLinks = async (text: string, flow: 'import' | 'paste') => {
     const outcome = await addWithLimit('uri', origin => importURIList(text, language, origin));
-    if (!outcome) return;
+    if (!outcome) {
+      void reportAddFail(flow, 'limit');
+      return;
+    }
+    if (outcome.kind === 'error' || !outcome.added) void reportAddFail(flow, outcome.kind === 'error' ? 'links_error' : 'links_nothing_added');
     if (outcome.added !== undefined) {
       await markBackupDone((await getAccounts()).length);
       setShowBackupReminder(false);
@@ -899,11 +952,16 @@ function App() {
       confirmLabel: t('settings.import'),
       cancelLabel: t('common.cancel'),
     });
-    if (!text || !text.trim()) return;
+    if (!text || !text.trim()) {
+      void reportAddCancel('paste', 'dialog');
+      return;
+    }
+    void reportAddStep('paste', 'submitted');
     try {
-      await importLinks(text);
+      await importLinks(text, 'paste');
     } catch (error) {
       console.error('Import failed:', error);
+      void reportAddFail('paste', importErrorKind(error));
       toast('error', importErrorMessage(error, language));
     }
   };
@@ -913,12 +971,15 @@ function App() {
 
     try {
       if (file.type.startsWith('image/')) {
+        void reportAddStep('import', 'image');
         await handleQRImport(file);
       } else if (((text = await file.text()), looksLikeURIList(text))) {
         // The .txt this extension writes has to come back in through the input
         // the onboarding points at, not only through the one in Settings.
-        await importLinks(text);
+        void reportAddStep('import', 'links');
+        await importLinks(text, 'import');
       } else {
+        void reportAddStep('import', 'backup');
         const imported = await importBackupText(text, () =>
           promptDialog({
             title: t('import.passwordTitle'),
@@ -929,6 +990,9 @@ function App() {
           }),
           file.name
         );
+        // Null: the password prompt cancelled, or the paywall closed — the two are not told apart here.
+        if (!imported) void reportAddCancel('import', 'backup_stopped');
+        else if (!imported.added && !(imported as { updated?: number }).updated) void reportAddFail('import', 'backup_nothing_added');
         if (imported) {
           const currentAccounts = await getAccounts();
           await markBackupDone(currentAccounts.length);
@@ -942,6 +1006,7 @@ function App() {
       }
     } catch (error) {
       console.error('Import failed:', error);
+      void reportAddFail('import', importErrorKind(error));
       // The same wording as Settings → Import: an encrypted Aegis or 2FAS
       // export, or an Alibaba Cloud backup, each needs its own next step.
       toast('error', importErrorMessage(error, language));
@@ -958,10 +1023,12 @@ function App() {
       // that sentence used to be the toast: "The source image could not be
       // decoded.", in English, whatever language the popup was in.
       console.error('Could not open the image:', error);
+      void reportAddFail('import', 'image_unreadable');
       toast('error', t('import.imageUnreadable'));
       return;
     }
     if (!text) {
+      void reportAddFail('import', 'no_qr');
       toast('error', t('addAccount.errorNoQr'));
       return;
     }
@@ -971,12 +1038,14 @@ function App() {
       parsed = parseQRCode(text);
     } catch (error) {
       console.error('QR import failed:', error);
+      void reportAddFail('import', reasonOfKey(qrFailureKey(text, error)));
       // Understood, and refused on purpose — saying "invalid QR" here would
       // send the user off to re-export a code that can never work.
       toast('error', t(qrFailureKey(text, error)));
       return;
     }
     if (!parsed) {
+      void reportAddFail('import', reasonOfKey(qrFailureKey(text)));
       toast('error', t(qrFailureKey(text)));
       return;
     }
@@ -1000,10 +1069,15 @@ function App() {
       const added = await addWithLimit(migration ? 'migration' : 'qr', origin => addMultipleAccounts(accountsToAdd, origin), {
         hold: migration ? undefined : accountsToAdd,
       });
-      if (!added) return;
+      if (!added) {
+        void reportAddFail('import', 'limit');
+        return;
+      }
+      if (added.added === 0 && !added.updated) void reportAddFail('import', 'all_already_here');
       result = { ...added, unsupported: parsed.skipped ?? 0 };
     } catch (error) {
       console.error('Could not save the scanned accounts:', error);
+      void reportAddFail('import', 'save_failed');
       toast('error', saveErrorMessage(error, t));
       return;
     }
@@ -1333,7 +1407,7 @@ function App() {
   // and on a 2FA app the latter reads as "my accounts are gone".
   if (vault.enabled === null) {
     return (
-      <div style={rootSizeStyle(HOST, popupSize)} className={`flex items-center justify-center bg-white dark:bg-dark-900 ${darkMode ? 'dark' : ''}`}>
+      <div style={rootSizeStyle(HOST, popupSize)} className={`flex items-center justify-center bg-white dark:bg-dark-900 ${rootTheme}`}>
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-gray-300 dark:border-dark-600 border-t-gray-900 dark:border-t-gray-300" />
       </div>
     );
@@ -1345,7 +1419,7 @@ function App() {
   // own, so there is nothing here to leak.
   if (vault.enabled === true && vault.locked) {
     return (
-      <div style={rootSizeStyle(HOST, popupSize)} className={`overflow-hidden flex flex-col ${darkMode ? 'dark' : ''}`}>
+      <div style={rootSizeStyle(HOST, popupSize)} className={`overflow-hidden flex flex-col ${rootTheme}`}>
         <div className="flex-1 flex flex-col bg-white dark:bg-dark-900 overflow-hidden">
           <div className="bg-white dark:bg-dark-900 border-b border-gray-200 dark:border-dark-700 p-4">
             <div className="flex items-center justify-between">
@@ -1387,8 +1461,8 @@ function App() {
   const behindOverlay = (overlayOpen ? { inert: '' } : {}) as { inert?: string };
 
   return (
-    <div style={rootSizeStyle(HOST, popupSize)} className={`overflow-hidden flex flex-col ${darkMode ? 'dark' : ''}`}>
-      <div className="flex-1 flex flex-col bg-white dark:bg-dark-900 overflow-hidden">
+    <div style={rootSizeStyle(HOST, popupSize)} className={`overflow-hidden flex flex-col ${rootTheme}`}>
+      <div data-ui="app-column" className="flex-1 flex flex-col bg-white dark:bg-dark-900 overflow-hidden">
       {/* display:contents, so this changes nothing about the layout and only
           carries `inert` for everything a full-screen view covers. It has to
           close before the views themselves, which are rendered further down
@@ -1398,7 +1472,7 @@ function App() {
       {/* Header */}
       {/* With the chips up, the header's own bottom padding stacks on the strip's
           top padding — trimmed so search and chips read as one block. */}
-      <div className={`flex-shrink-0 bg-white dark:bg-dark-900 p-4 ${showGroupFilter ? 'pb-2' : 'border-b border-gray-200 dark:border-dark-700'}`}>
+      <div data-ui="header" className={`flex-shrink-0 bg-white dark:bg-dark-900 p-4 ${showGroupFilter ? 'pb-2' : 'border-b border-gray-200 dark:border-dark-700'}`}>
         <div className="flex items-center justify-between">
           {/* min-w-0 + truncate + flex-shrink-0, all three: nothing here could
               shrink and nothing could ellipsize, so a long title pushed the icon
@@ -1425,7 +1499,7 @@ function App() {
                 ref={headerBackRef}
                 onClick={() => {
                   if (!showSettings) {
-                    setOpenGuidePath(null);
+                    leaveGuidePath();
                     return;
                   }
                   setShowSettings(false);
@@ -1595,6 +1669,9 @@ function App() {
               from the same parts (see SettingsSection). A new setting goes into
               the section it belongs to, not onto the end. */}
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
+            {/* Above everything, until it is closed or there is nothing to offer. */}
+            <CloudBackupBanner language={language} />
+
             {/* First, and only when there is something to say (see ProSettings). */}
             <ProSettings language={language} />
 
@@ -1619,6 +1696,7 @@ function App() {
               {/* Always here, whatever state the list is in: the copies are most
                   useful to someone who knew about them before they needed them. */}
               <RestoreBackups backups={backups} language={language} onRestored={handleRestored} />
+              <CloudBackupSettings language={language} onRestored={handleRestored} />
 
               <SettingToggle
                 label={t('settings.sync')}
@@ -1633,6 +1711,35 @@ function App() {
                   </p>
                 )}
               </SettingToggle>
+            </SettingsSection>
+
+            {/* How it looks, before what the list shows: the style and light or
+                dark are independent, and the header's sun/moon is the same
+                switch as the second row. */}
+            <SettingsSection title={t('settings.sectionAppearance')}>
+              <SettingRow label={t('settings.style')}>
+                <StylePicker
+                  label={t('settings.style')}
+                  value={uiStyle}
+                  dark={darkMode}
+                  labels={{ classic: t('settings.styleClassic'), apple: t('settings.styleApple') }}
+                  onChange={handleUiStyleChange}
+                />
+              </SettingRow>
+              <SettingRow
+                label={t('settings.theme')}
+                control={
+                  <SegmentedControl
+                    label={t('settings.theme')}
+                    value={darkMode ? 'dark' : 'light'}
+                    options={[
+                      ['light', t('settings.themeLight')],
+                      ['dark', t('settings.themeDark')],
+                    ]}
+                    onChange={mode => handleDarkModeChange(mode === 'dark')}
+                  />
+                }
+              />
             </SettingsSection>
 
             <SettingsSection title={t('settings.sectionList')}>
@@ -1836,6 +1943,7 @@ function App() {
       // FAB, so the pane takes the list's colour: two codes otherwise sat on a
       // white strip over a grey void.
       <div
+        data-ui="list-pane"
         className={`flex-1 overflow-y-auto ${
           listView === 'list' ? 'bg-white dark:bg-dark-800' : 'bg-gray-50 dark:bg-dark-900'
         } ${listView === 'empty' ? 'flex flex-col' : ''}`}
@@ -1886,7 +1994,7 @@ function App() {
                   setSearchQuery('');
                   handleGroupChange(null);
                 }}
-                className="text-xs font-medium text-[#1a73e8] dark:text-[#669DF6] hover:underline"
+                className="text-xs font-medium text-accent-600 dark:text-accent-400 hover:underline"
               >
                 {t('accounts.clearFilters')}
               </button>
@@ -1906,7 +2014,7 @@ function App() {
                 language={language}
                 openPath={openGuidePath}
                 onOpenPath={setOpenGuidePath}
-                onBack={() => setOpenGuidePath(null)}
+                onBack={leaveGuidePath}
                 onAddAccount={() => openAddAccount()}
                 onEnterKey={() => openAddAccount('manual')}
                 onImport={handleImportClick}
@@ -1918,13 +2026,13 @@ function App() {
             </>
           )
         ) : (
-          <div className="bg-white dark:bg-dark-800 pb-20">
+          <div data-ui="account-list" className="bg-white dark:bg-dark-800 pb-20">
             {suggestedAccount && (
               <>
                 {/* AccountCard must stay the last child so its own `last:after:hidden`
                     divider rule kicks in — the section strip below handles separation. */}
                 <div>
-                  <div className="px-4 pt-2.5 pb-1 flex items-center gap-1.5 text-[11px] font-medium text-[#1a73e8] dark:text-[#669DF6]">
+                  <div className="px-4 pt-2.5 pb-1 flex items-center gap-1.5 text-[11px] font-medium text-accent-600 dark:text-accent-400">
                     <Sparkles size={12} />
                     <span>{t('accounts.suggested')}</span>
                     {currentDomain && (
@@ -2014,7 +2122,7 @@ function App() {
       {!showSettings && accounts.length > 0 && (
         <button
           onClick={() => openAddAccount()}
-          className="fixed bottom-4 end-4 w-14 h-14 bg-[#1a73e8] hover:bg-[#1967D2] text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center"
+          className="fixed bottom-4 end-4 w-14 h-14 bg-accent-600 hover:bg-accent-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center"
           title={t('accounts.addAccount')}
           aria-label={t('accounts.addAccount')}
         >

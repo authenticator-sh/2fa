@@ -164,7 +164,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
           onKeyDown={e => e.key === 'Enter' && confirmed && !busy && handleFinishRecovery()}
           autoFocus
           spellCheck={false}
-          className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4] mb-3"
+          className="w-full px-3 py-2 text-sm font-mono rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-accent-500 mb-3"
         />
 
         {error && (
@@ -177,7 +177,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
         <button
           onClick={handleFinishRecovery}
           disabled={!confirmed || busy}
-          className="w-full bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
+          className="w-full bg-accent-600 hover:bg-accent-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50"
         >
           {t('vault.recovery.finish')}
         </button>
@@ -226,7 +226,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
                 placeholder={t('vault.lock.password')}
                 aria-label={t('vault.lock.password')}
                 autoFocus
-                className="w-full px-3 py-2.5 pe-9 text-sm rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4]"
+                className="w-full px-3 py-2.5 pe-9 text-sm rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-accent-500"
               />
               <button
                 type="button"
@@ -253,7 +253,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
             <button
               onClick={handleUnlock}
               disabled={busy || !password}
-              className="w-full bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50 mb-3"
+              className="w-full bg-accent-600 hover:bg-accent-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50 mb-3"
             >
               {t('vault.lock.unlock')}
             </button>
@@ -273,7 +273,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
                 setMode('recovery');
                 setError(null);
               }}
-              className="w-full text-xs text-[#1a73e8] dark:text-[#669DF6] hover:underline"
+              className="w-full text-xs text-accent-600 dark:text-accent-400 hover:underline"
             >
               {t('vault.lock.forgot')}
             </button>
@@ -293,7 +293,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
               aria-label={t('vault.recover.placeholder')}
               autoFocus
               spellCheck={false}
-              className="w-full px-3 py-2.5 text-sm font-mono rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4] mb-2"
+              className="w-full px-3 py-2.5 text-sm font-mono rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-accent-500 mb-2"
             />
             <input
               type="password"
@@ -302,7 +302,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
               onKeyDown={e => e.key === 'Enter' && handleRecover()}
               placeholder={t('vault.recover.newPassword')}
               aria-label={t('vault.recover.newPassword')}
-              className="w-full px-3 py-2.5 text-sm rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-[#4285F4] mb-3"
+              className="w-full px-3 py-2.5 text-sm rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-accent-500 mb-3"
             />
 
             {error && (
@@ -315,7 +315,7 @@ export function LockScreen({ language, onUnlock, onRecovered }: LockScreenProps)
             <button
               onClick={handleRecover}
               disabled={busy || !recoveryCode || !newPassword}
-              className="w-full bg-[#1a73e8] hover:bg-[#1967D2] text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50 mb-3"
+              className="w-full bg-accent-600 hover:bg-accent-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors disabled:opacity-50 mb-3"
             >
               {t('vault.recover.submit')}
             </button>
