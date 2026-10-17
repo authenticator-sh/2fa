@@ -109,9 +109,10 @@ export async function addAccountByHand(page: Page, name: string, secret = SECRET
   const before = await cards(page).count();
   const fab = page.getByRole('button', { name: 'Add Account', exact: true });
   if (before === 0 && !(await fab.isVisible())) {
-    await page.getByRole('button', { name: "I'm turning on 2-factor authentication right now" }).click();
+    await page.getByRole('button', { name: 'I have a secret key' }).click();
+  } else {
+    await fab.click();
   }
-  await fab.click();
 
   const dialog = page.getByRole('dialog', { name: 'Add Account' });
   await expect(dialog).toBeVisible();

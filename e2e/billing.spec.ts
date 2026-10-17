@@ -46,7 +46,7 @@ interface MockState {
   /** The yearly price the policy shows, in cents (14.99 by default). */
   yearAmount?: number;
   /** Checkouts asked for, in order. */
-  checkouts?: Array<{ plan: string; trigger: unknown }>;
+  checkouts?: Array<{ plan: string; trigger: unknown; banner?: unknown }>;
   /** The next checkout is refused: the price moved to this many cents since the last policy. */
   priceMovesTo?: number;
   /** No plans in the policy: a country where no one can pay. */
@@ -55,6 +55,10 @@ interface MockState {
   backups?: Array<{ id: string; iid: string; kid: string; data: string; at: number }>;
   /** The license's current backup code, as the server keeps it (kid and auth); null = off. */
   backupKey?: { kid: string; auth: string } | null;
+  /** policy.banner as the server issues it; left out = a policy from before banners were the server's. */
+  banner?: unknown;
+  /** policy.notices as the server issues them; left out = none. */
+  notices?: unknown;
 }
 
 async function mockBilling(context: BrowserContext, state: MockState): Promise<void> {
@@ -95,6 +99,8 @@ async function mockBilling(context: BrowserContext, state: MockState): Promise<v
               pro_life: { kind: 'life', interval: null, pass_days: null, amount: 2999, currency: 'usd', exp: 2, approx: !!state.approx },
             },
         ui: { pro_in_settings: false, import_partial: true },
+        ...(state.banner !== undefined ? { banner: state.banner } : {}),
+        ...(state.notices !== undefined ? { notices: state.notices } : {}),
         exps: [],
       });
       const events = Array.isArray(body.events) ? (body.events as Array<{ id: string }>) : [];
@@ -120,7 +126,7 @@ async function mockBilling(context: BrowserContext, state: MockState): Promise<v
     }
     if (path === '/v1/checkout') {
       const checkouts = (state.checkouts ??= []);
-      checkouts.push({ plan: String(body.plan), trigger: body.trigger });
+      checkouts.push({ plan: String(body.plan), trigger: body.trigger, banner: body.banner });
       if (state.priceMovesTo !== undefined) {
         state.yearAmount = state.priceMovesTo;
         state.priceMovesTo = undefined;
@@ -330,10 +336,14 @@ test('closing the paywall adds nothing and leaves every account working', async 
   await syncNow(page);
   await addAccountByHand(page, 'only@example.com', otherSecret(4));
 
+  // Counted from before the paywall opens: the check-in its opening may start
+  // reaches the mock before or after the paywall is on screen, and counting
+  // from there lost limit_blocked and paywall_view about one run in three.
+  // paywall_close still has to come from a check-in made by the close.
+  const syncsBefore = state.syncs.length;
   const { dialog, paywall } = await addOverLimit(page, 'more@example.com', otherSecret(6));
   // The check-in on open has just run; the one the close makes is a day later here.
   await page.evaluate(() => chrome.storage.local.remove('billingLastSync'));
-  const syncsBefore = state.syncs.length;
   await paywall.getByRole('button', { name: 'Close' }).click();
   await expect(paywall).toBeHidden();
   // Back on the add screen with what was typed, nothing saved.
@@ -601,24 +611,200 @@ test('the cloud backup banner over Settings counts its views, opens the backup p
     const sent = state.syncs.flatMap((s) => (Array.isArray(s.events) ? (s.events as Array<{ n: string; p?: Record<string, unknown> }>) : []));
     return [...queued, ...sent];
   };
-  await expect.poll(async () => (await seen()).filter((e) => e.n === 'backup_banner_view').length).toBe(1);
+  await expect.poll(async () => (await seen()).filter((e) => e.n === 'banner_view' && e.p?.id === 'backup').length).toBe(1);
   await expect.poll(async () => (await seen()).some((e) => e.n === 'paywall_view' && e.p?.trigger === 'backup_banner')).toBe(true);
 
   // Every Settings opening it shows in is a view of its own.
   await page.reload();
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(banner).toBeVisible();
-  await expect.poll(async () => (await seen()).filter((e) => e.n === 'backup_banner_view').length).toBe(2);
+  await expect.poll(async () => (await seen()).filter((e) => e.n === 'banner_view' && e.p?.id === 'backup').length).toBe(2);
 
   await banner.getByRole('button', { name: 'Close' }).click();
   await expect(banner).toHaveCount(0);
-  await expect.poll(async () => (await seen()).some((e) => e.n === 'backup_banner_close')).toBe(true);
+  await expect.poll(async () => (await seen()).some((e) => e.n === 'banner_close' && e.p?.id === 'backup')).toBe(true);
   await page.reload();
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByText('Backup & Restore')).toBeVisible();
   await expect(banner).toHaveCount(0);
   // The row's own "Turn on" stays.
   await expect(page.getByRole('button', { name: 'Turn on cloud backup' })).toBeVisible();
+});
+
+test('a server banner over the accounts: in its place, its own paywall, its id through to Checkout; closing it leaves the next one', async ({ context, extensionId, serviceWorker }) => {
+  const state: MockState = {
+    freeLimit: 5,
+    licensed: new Set(),
+    syncs: [],
+    banner: {
+      id: 'pro-1',
+      action: 'paywall',
+      place: 'accounts',
+      text: { lang: 'en', eyebrow: 'Pro', title: 'Every account you protect, with no limit', cta: 'See plans', paywall_title: 'Unlimited accounts', paywall_body: 'Pro removes the account limit and keeps an encrypted copy in the cloud.' },
+    },
+  };
+  await mockBilling(context, state);
+  const page = await openPage(context, extensionId, 'popup.html');
+  await syncNow(page);
+  for (let i = 1; i <= 2; i++) await addAccountByHand(page, `u${i}@example.com`, otherSecret(20 + i));
+
+  const banner = page.getByRole('region', { name: 'Pro' }).filter({ hasText: 'Every account you protect' });
+  await expect(banner).toBeVisible();
+  // Over the list: above the first account, inside the list's own column.
+  const [bannerBox, cardBox] = [await banner.boundingBox(), await cards(page).first().boundingBox()];
+  expect(bannerBox && cardBox && bannerBox.y + bannerBox.height <= cardBox.y).toBe(true);
+  if (process.env.BANNER_SHOTS) {
+    await page.screenshot({ path: `${process.env.BANNER_SHOTS}/accounts-light.png` });
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.screenshot({ path: `${process.env.BANNER_SHOTS}/accounts-dark.png` });
+    await page.emulateMedia({ colorScheme: 'light' });
+  }
+
+  // Not in Settings: it names the accounts, and it replaces the backup banner there.
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByText('Backup & Restore')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Pro' }).filter({ hasText: 'Every account you protect' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Cloud backup' })).toHaveCount(0);
+  await page.reload();
+
+  const seen = async () => {
+    const queued = (await serviceWorker.evaluate(async () => (await chrome.storage.local.get('billingEvents')).billingEvents ?? [])) as Array<{ n: string; p?: Record<string, unknown> }>;
+    const sent = state.syncs.flatMap((s) => (Array.isArray(s.events) ? (s.events as Array<{ n: string; p?: Record<string, unknown> }>) : []));
+    return [...queued, ...sent];
+  };
+  await page.getByRole('region', { name: 'Pro' }).filter({ hasText: 'Every account you protect' }).getByRole('button', { name: /Every account you protect/ }).click();
+  const paywall = page.getByRole('dialog', { name: 'Unlimited accounts' });
+  await expect(paywall).toBeVisible();
+  await expect.poll(async () => (await seen()).some((e) => e.n === 'banner_view' && e.p?.id === 'pro-1' && e.p?.place === 'accounts')).toBe(true);
+  await expect.poll(async () => (await seen()).some((e) => e.n === 'banner_click' && e.p?.id === 'pro-1')).toBe(true);
+  await expect.poll(async () => (await seen()).some((e) => e.n === 'paywall_view' && e.p?.trigger === 'banner' && e.p?.banner === 'pro-1')).toBe(true);
+  await paywall.getByRole('button', { name: 'Continue' }).click();
+  await expect.poll(() => state.checkouts?.[0]).toMatchObject({ trigger: 'banner', banner: 'pro-1' });
+
+  // While that purchase is pending, nothing is sold again.
+  const again = await openPage(context, extensionId, 'popup.html');
+  await expect(cards(again)).toHaveCount(2);
+  await expect(again.getByRole('region', { name: 'Pro' }).filter({ hasText: 'Every account you protect' })).toHaveCount(0);
+  // Abandoned: closed, that id is gone for good, and the next banner the server sets still shows.
+  await again.evaluate(() => chrome.storage.local.remove('billingPendingCheckout'));
+  await again.reload();
+  await again.getByRole('region', { name: 'Pro' }).filter({ hasText: 'Every account you protect' }).getByRole('button', { name: 'Close' }).click();
+  await expect(again.getByRole('region', { name: 'Pro' }).filter({ hasText: 'Every account you protect' })).toHaveCount(0);
+  await again.reload();
+  await expect(cards(again)).toHaveCount(2);
+  await expect(again.getByRole('region', { name: 'Pro' }).filter({ hasText: 'Every account you protect' })).toHaveCount(0);
+
+  state.banner = { id: 'pm-1', action: 'url', place: 'settings', url: 'https://www.authenticator.sh/password-manager', text: { lang: 'en', title: 'Passwords too, in the same place', cta: 'Have a look' } };
+  await again.evaluate(() => chrome.storage.local.remove('billingLastSync'));
+  await again.reload();
+  await again.getByRole('button', { name: 'Settings' }).click();
+  const next = again.getByRole('region', { name: 'Passwords too, in the same place' });
+  await expect(next).toBeVisible({ timeout: 20_000 });
+  if (process.env.BANNER_SHOTS) await again.screenshot({ path: `${process.env.BANNER_SHOTS}/settings-url.png` });
+});
+
+test('the bell: what the server sends, a red dot while unread, read once opened, each row its own action, closed for good', async ({ context, extensionId, serviceWorker }) => {
+  const state: MockState = {
+    freeLimit: 5,
+    licensed: new Set(),
+    syncs: [],
+    banner: null,
+    notices: [
+      { id: 'news-1', action: 'none', text: { lang: 'en', title: 'Groups are here', body: 'Sort your accounts into groups: work, personal, games.' } },
+      { id: 'vault-n', action: 'vault' },
+      {
+        id: 'pro-n',
+        action: 'paywall',
+        text: { lang: 'en', title: 'No limit on accounts', body: 'Pro removes the free limit and backs your codes up.', cta: 'See plans', paywall_title: 'Unlimited accounts', paywall_body: 'Pro removes the account limit.' },
+      },
+    ],
+  };
+  await mockBilling(context, state);
+  const page = await openPage(context, extensionId, 'popup.html');
+  await syncNow(page);
+  // Whoever the server sends them to, a new install too.
+  const bell = page.getByRole('button', { name: /^Notifications/ });
+  await expect(bell).toHaveAccessibleName('Notifications (New: 3)');
+  await addAccountByHand(page, 'bell@example.com', otherSecret(40));
+  await expect(bell).toHaveAccessibleName('Notifications (New: 3)');
+  if (process.env.BANNER_SHOTS) {
+    await page.setViewportSize({ width: 400, height: 600 });
+    await page.screenshot({ path: `${process.env.BANNER_SHOTS}/bell-dot.png`, clip: { x: 0, y: 0, width: 400, height: 140 } });
+  }
+  const seen = async () => {
+    const queued = (await serviceWorker.evaluate(async () => (await chrome.storage.local.get('billingEvents')).billingEvents ?? [])) as Array<{ n: string; p?: Record<string, unknown> }>;
+    const sent = state.syncs.flatMap((s) => (Array.isArray(s.events) ? (s.events as Array<{ n: string; p?: Record<string, unknown> }>) : []));
+    return [...queued, ...sent];
+  };
+
+  await bell.click();
+  const panel = page.getByRole('region', { name: 'Notifications' });
+  await expect(panel.getByRole('listitem')).toHaveCount(3);
+  await expect(panel.getByRole('listitem').nth(1)).toContainText('Protect your codes with a password');
+  await expect(panel.getByRole('img', { name: 'New' })).toHaveCount(3);
+  // The dot on the bell is out as soon as it opens; the rows keep theirs until it closes.
+  await expect(bell).toHaveAccessibleName('Notifications');
+  await expect.poll(async () => (await seen()).some((e) => e.n === 'bell_open' && e.p?.unread === 3 && e.p?.total === 3)).toBe(true);
+  await expect.poll(async () => (await seen()).filter((e) => e.n === 'banner_view' && e.p?.place === 'bell').length).toBe(3);
+  if (process.env.BANNER_SHOTS) {
+    await page.screenshot({ path: `${process.env.BANNER_SHOTS}/bell-light.png` });
+    for (const lang of ['en', 'ru', 'tr']) {
+      await page.evaluate(async (l) => {
+        localStorage.setItem('popupSize', 'small');
+        await chrome.storage.local.set({ popupSize: 'small', language: l });
+      }, lang);
+      await page.reload();
+      await page.getByRole('button', { name: /^Notifications|^Уведомления|^Bildirimler/ }).click();
+      await page.screenshot({ path: `${process.env.BANNER_SHOTS}/bell-320-${lang}.png`, clip: { x: 0, y: 0, width: 400, height: 500 } });
+    }
+    await page.evaluate(async () => {
+      localStorage.setItem('popupSize', 'medium');
+      await chrome.storage.local.set({ popupSize: 'medium', language: 'en' });
+    });
+    await page.reload();
+    await bell.click();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Toggle theme' }).click();
+    await bell.click();
+    await page.screenshot({ path: `${process.env.BANNER_SHOTS}/bell-dark.png` });
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Toggle theme' }).click();
+    await bell.click();
+  }
+  await page.keyboard.press('Escape');
+  await expect(panel).toHaveCount(0);
+  await expect(bell).toBeFocused();
+
+  // Read on this browser for good: another popup has no dot either.
+  await page.reload();
+  await expect(cards(page)).toHaveCount(1);
+  await expect(page.getByRole('button', { name: /^Notifications/ })).toHaveAccessibleName('Notifications');
+  await page.getByRole('button', { name: /^Notifications/ }).click();
+  await expect(page.getByRole('region', { name: 'Notifications' }).getByRole('img', { name: 'New' })).toHaveCount(0);
+
+  // A row's button: the paywall with its own words and its id, as a banner's.
+  await page.getByRole('region', { name: 'Notifications' }).getByRole('button', { name: 'See plans' }).click();
+  const paywall = page.getByRole('dialog', { name: 'Unlimited accounts' });
+  await expect(paywall).toBeVisible();
+  await expect.poll(async () => (await seen()).some((e) => e.n === 'banner_click' && e.p?.id === 'pro-n' && e.p?.place === 'bell')).toBe(true);
+  await expect.poll(async () => (await seen()).some((e) => e.n === 'paywall_view' && e.p?.trigger === 'banner' && e.p?.banner === 'pro-n')).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(paywall).toHaveCount(0);
+
+  // Closed: gone, and stays gone.
+  await page.getByRole('button', { name: /^Notifications/ }).click();
+  await page.getByRole('region', { name: 'Notifications' }).getByRole('listitem').filter({ hasText: 'Groups are here' }).getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByRole('region', { name: 'Notifications' }).getByRole('listitem')).toHaveCount(2);
+  await expect.poll(async () => (await seen()).some((e) => e.n === 'banner_close' && e.p?.id === 'news-1' && e.p?.place === 'bell')).toBe(true);
+
+  // A notification with a new id lights the dot again.
+  state.notices = [{ id: 'news-2', action: 'none', text: { lang: 'en', title: 'Faster scanning', body: 'QR codes are read sooner now.' } }, ...(state.notices as unknown[])];
+  await page.evaluate(() => chrome.storage.local.remove('billingLastSync'));
+  await page.reload();
+  await expect(page.getByRole('button', { name: /^Notifications/ })).toHaveAccessibleName('Notifications (New: 1)', { timeout: 20_000 });
+  await page.getByRole('button', { name: /^Notifications/ }).click();
+  await expect(page.getByRole('region', { name: 'Notifications' }).getByRole('listitem')).toHaveCount(3);
+  await expect(page.getByRole('region', { name: 'Notifications' }).getByRole('listitem').first()).toContainText('Faster scanning');
 });
 
 test('a new profile restored with the license key gets the accounts, and Pro with them', async ({ context, extensionId }) => {

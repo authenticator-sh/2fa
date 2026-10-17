@@ -36,12 +36,15 @@ export async function startCheckout(
     beforeOpen?: () => Promise<void>;
     /** The price the person saw: the server charges exactly it, or answers price_changed. */
     shown?: { amount: number; currency: string; approx: boolean };
+    /** The server banner that opened the paywall, for its funnel. */
+    banner?: string | null;
   } = {}
 ): Promise<void> {
   const install = await ensureInstall();
   const shown = options.shown ? { shown: { amount: options.shown.amount, currency: options.shown.currency.toLowerCase(), approx: options.shown.approx } } : {};
+  const banner = options.banner ? { banner: options.banner } : {};
   const create = () =>
-    post<{ url: string; checkout_id: string }>('/v1/checkout', { iid: install.id, plan, trigger, ...shown }, 15_000);
+    post<{ url: string; checkout_id: string }>('/v1/checkout', { iid: install.id, plan, trigger, ...shown, ...banner }, 15_000);
 
   let result: { url: string; checkout_id: string };
   try {

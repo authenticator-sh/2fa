@@ -137,7 +137,7 @@ export function sortAccounts<T extends Pick<Account, 'name' | 'issuer'>>(
 /**
  * The order to write after an undone delete puts an account back.
  *
- * Re-adding appends it, so it would come back at the bottom of a list it was
+ * Re-adding puts it at the top, so it would come back first in a list it was
  * taken from the middle of. It goes back after the nearest account that stood
  * before it and still exists — not at its old index, which counts rows another
  * window may have added or deleted in the meantime. Null when it is already

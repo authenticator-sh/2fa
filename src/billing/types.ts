@@ -35,9 +35,53 @@ export interface Policy {
   };
   prices: Record<string, DisplayPrice>;
   ui: { pro_in_settings: boolean; import_partial: boolean; import_free: boolean };
+  /** The banners the server sets (billing/banner.ts), at most one per place; empty = none. */
+  banners: Banner[];
+  /** The notifications behind the bell (billing/notices.ts), newest first; empty = none, and no bell. */
+  notices: Notice[];
   exps: { id: string; layer: string; var: string }[];
   /** When the server signed it (seconds), if it said. */
   iat: number | null;
+}
+
+export interface Banner {
+  /** Closing hides this id for good on this browser; a new id shows again. */
+  id: string;
+  /**
+   * backup: offers cloud backup; paywall: opens the paywall; url: opens `url`;
+   * vault: offers password protection to those with accounts and none yet.
+   */
+  action: 'backup' | 'paywall' | 'url' | 'vault';
+  /** The top of Settings, or above the list of accounts. */
+  place: 'settings' | 'accounts';
+  url: string | null;
+  /** In one language; null = the shipped words (backup and vault only). */
+  text: {
+    lang: string;
+    eyebrow: string | null;
+    title: string;
+    cta: string;
+    paywall_title: string | null;
+    paywall_body: string | null;
+  } | null;
+}
+
+export interface Notice {
+  /** Unread until the bell is opened with it in the list; closing hides this id for good. */
+  id: string;
+  /** A banner's actions (Banner['action']), shown under the same conditions, or none: words, no button. */
+  action: 'backup' | 'paywall' | 'url' | 'vault' | 'none';
+  url: string | null;
+  /** In one language; null = the shipped words (backup and vault only). */
+  text: {
+    lang: string;
+    title: string;
+    body: string;
+    /** null only for none. */
+    cta: string | null;
+    paywall_title: string | null;
+    paywall_body: string | null;
+  } | null;
 }
 
 export interface Entitlement {
@@ -79,6 +123,8 @@ export type ApiErrorCode =
   | 'payments_unavailable'
   /** Checkout: the plan's price is not the one this install's last policy showed. */
   | 'price_changed'
+  /** Checkout: this install's license already grants Pro — sync, and the entitlement arrives. */
+  | 'already_pro'
   /** Cloud backup: no such copy for this license. */
   | 'backup_not_found'
   /** Cloud backup: the license has no current code — turned off, or never on. */

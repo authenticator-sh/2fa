@@ -1365,17 +1365,23 @@ export async function addAccount(account: Account, origin: AddOrigin): Promise<b
       return { accounts: next, result: true };
     }
     admit(origin, accounts.length, 1);
-    return { accounts: [...accounts, account], result: true };
+    // At the top: the account just added is the one the person is about to
+    // type a code from, and at the bottom of a long list it was out of sight.
+    return { accounts: [account, ...accounts], result: true };
   });
 }
 
 export async function addMultipleAccounts(
   newAccounts: Account[],
-  origin: AddOrigin
+  origin: AddOrigin,
+  options: { continuesBatch?: boolean } = {}
 ): Promise<{ added: number; skipped: number; total: number; updated: number; leftOut: number }> {
   return mutateAccounts((accounts, stored) => {
     const merged = mergeIncoming(newAccounts, accounts, stored, 'added');
-    const admitted = withinLimit(merged, accounts.length, origin);
+    const limited = withinLimit(merged, accounts.length, origin);
+    const admitted = options.continuesBatch
+      ? { ...limited, accounts: belowRecent(limited.accounts, limited.added, accounts) }
+      : limited;
     const result = {
       added: admitted.added,
       skipped: newAccounts.length - merged.added - merged.updated,
@@ -1388,16 +1394,40 @@ export async function addMultipleAccounts(
 }
 
 /**
- * The merged list cut to what the limit admits. New accounts are the tail of
- * the merged list (mergeIncoming appends them in order), so keeping the first
- * `n` of them is keeping the first `n` the person brought — the order of the
- * file, or of the export QR. Upgrades of accounts already here are not new
+ * The second and later codes of one Google Authenticator export.
+ *
+ * New accounts go to the top, so each code of a split export landed above the
+ * one before it: three codes came out as 21–30, 11–20, 1–10. A code with a
+ * batch index past 1 goes below the accounts added just before it instead —
+ * the earlier codes of the same export, scanned a minute ago — and above the
+ * rest, so the export reads in its own order. "Just before" is the run at the
+ * top created in the last quarter of an hour: the export's own codes carry no
+ * shared id the list keeps.
+ */
+const BATCH_WINDOW_MS = 15 * 60_000;
+
+function belowRecent(merged: Account[], added: number, before: Account[]): Account[] {
+  if (added === 0) return merged;
+  const since = Date.now() - BATCH_WINDOW_MS;
+  let at = 0;
+  while (at < before.length && (before[at].createdAt ?? 0) >= since) at++;
+  if (at === 0) return merged;
+  const fresh = merged.slice(0, added);
+  const rest = merged.slice(added);
+  return [...rest.slice(0, at), ...fresh, ...rest.slice(at)];
+}
+
+/**
+ * The merged list cut to what the limit admits. New accounts are the head of
+ * the merged list (mergeIncoming puts them first, in order), so keeping the
+ * first `n` of them is keeping the first `n` the person brought — the order of
+ * the file, or of the export QR. Upgrades of accounts already here are not new
  * accounts and always stay.
  */
 function withinLimit(merged: Merged, count: number, origin: AddOrigin): { accounts: Account[]; added: number } {
   const keep = admit(origin, count, merged.added, merged.updated);
   if (keep >= merged.added) return { accounts: merged.accounts, added: merged.added };
-  return { accounts: merged.accounts.slice(0, count + keep), added: keep };
+  return { accounts: [...merged.accounts.slice(0, keep), ...merged.accounts.slice(merged.added)], added: keep };
 }
 
 export async function reorderAccounts(accountIds: string[]): Promise<void> {
@@ -1650,9 +1680,9 @@ export async function restoreFromSnapshot(records: StoredAccount[]): Promise<Res
     // the list, and whatever it holds, the list is what the user has since
     // made of it.
     const merged = mergeIncoming(usable, existingAccounts, stored, 'restored');
-    const additions = merged.accounts.slice(existingAccounts.length);
+    const additions = merged.accounts.slice(0, merged.added);
     return {
-      accounts: [...existingAccounts, ...additions],
+      accounts: [...additions, ...existingAccounts],
       result: {
         added: additions.length,
         skipped: usable.length - additions.length,
@@ -1689,9 +1719,9 @@ function asSteam(existing: Account, incoming: Account): Account {
 }
 
 interface Merged {
-  /** The existing list, upgraded where it needed to be, then the new accounts. */
+  /** The new accounts, in the order they came, then the existing list, upgraded where it needed to be. */
   accounts: Account[];
-  /** New accounts appended. */
+  /** New accounts, at the head of `accounts`. */
   added: number;
   /** Accounts already here that the incoming list changed — Steam over TOTP. */
   updated: number;
@@ -1715,7 +1745,9 @@ function mergeIncoming(
   idSuffix: string
 ): Merged {
   const list = [...existingAccounts];
-  /** Where each seed already in the list, or already added, sits in `list`. */
+  /** Accounts not here before, in the order they came; they go above the existing ones. */
+  const fresh: Account[] = [];
+  /** Where each seed already in the list sits in `list`, or — from list.length on — in `fresh`. */
   const known = new Map(list.map((acc, index) => [secretKey(acc.secret), index]));
   // Ids from the stored records too, not only the decoded ones: a record this
   // device cannot read still occupies its id, and it is invisible to the list
@@ -1731,15 +1763,19 @@ function mergeIncoming(
     const key = secretKey(account.secret);
     const at = known.get(key);
     if (at !== undefined) {
-      if (becomesSteam(list[at], account)) {
-        list[at] = asSteam(list[at], account);
-        // An account that was here before this import; one the same file
-        // added a line earlier is a duplicate inside the file, not an update.
-        if (at < existingAccounts.length) updated.add(at);
+      // An account that was here before this import; one the same file
+      // added a line earlier is a duplicate inside the file, not an update.
+      if (at < list.length) {
+        if (becomesSteam(list[at], account)) {
+          list[at] = asSteam(list[at], account);
+          updated.add(at);
+        }
+      } else if (becomesSteam(fresh[at - list.length], account)) {
+        fresh[at - list.length] = asSteam(fresh[at - list.length], account);
       }
       continue;
     }
-    known.set(key, list.length);
+    known.set(key, list.length + fresh.length);
     added++;
 
     // Same id, different secret: two accounts, one identity. `deleteAccount`
@@ -1749,16 +1785,16 @@ function mergeIncoming(
     if (usedIds.has(account.id)) {
       let candidate = `${account.id}-${idSuffix}`;
       for (let n = 2; usedIds.has(candidate); n++) candidate = `${account.id}-${idSuffix}-${n}`;
-      list.push({ ...account, id: candidate });
+      fresh.push({ ...account, id: candidate });
       usedIds.add(candidate);
       continue;
     }
 
     usedIds.add(account.id);
-    list.push(account);
+    fresh.push(account);
   }
 
-  return { accounts: list, added, updated: updated.size };
+  return { accounts: [...fresh, ...list], added, updated: updated.size };
 }
 
 // --- vault migration ------------------------------------------------------

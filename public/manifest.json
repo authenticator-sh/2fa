@@ -3,7 +3,7 @@
   "name": "__MSG_appName__",
   "description": "__MSG_appDesc__",
   "default_locale": "en",
-  "version": "1.15.0",
+  "version": "1.15.1",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -24,6 +24,9 @@
     "scripting",
     "sidePanel"
   ],
+  "externally_connectable": {
+    "matches": ["https://www.authenticator.sh/*", "https://authenticator.sh/*"]
+  },
   "side_panel": {
     "default_path": "sidepanel.html"
   },

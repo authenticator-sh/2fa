@@ -10,7 +10,7 @@ import type { PaywallRequest, PaywallResult, PaywallTrigger } from '@/billing/br
 import { track } from '@/billing/events';
 import { formatMoney, formatPrice, monthlyEquivalent, yearlySaving } from '@/billing/format';
 import { billingErrorMessage } from '@/billing/messages';
-import { BILLING_KEYS, readInstall, readPolicy } from '@/billing/state';
+import { BILLING_KEYS, readEntitlement, readInstall, readPolicy } from '@/billing/state';
 import { syncBilling, syncFromWorker } from '@/billing/sync';
 import type { DisplayPrice, Policy } from '@/billing/types';
 
@@ -150,8 +150,9 @@ export default function Paywall({ language, request }: PaywallProps) {
       // experiments' uninstall check is about.
       void track('paywall_view', {
         trigger: request.trigger,
-        copy: isBackupTrigger(request.trigger) ? 'backup' : policy.paywall.text?.lang === language ? 'custom' : policy.paywall.copy,
+        copy: bannerPaywallText(policy) ? 'banner' : isBackupTrigger(request.trigger) ? 'backup' : policy.paywall.text?.lang === language ? 'custom' : policy.paywall.copy,
         plans: plans.join(','),
+        ...(request.banner ? { banner: request.banner } : {}),
       }).then(() => syncFromWorker());
     }
   }, [policy, plans, selected, request.trigger]);
@@ -187,12 +188,51 @@ export default function Paywall({ language, request }: PaywallProps) {
     });
   };
 
+  /** Pro reached this install while the paywall stood open: nothing is left to buy. */
+  const proOn = () => {
+    if (settled.current) return;
+    toast('success', t('billing.activated'));
+    finish('activated');
+  };
+
+  /** The paywall words of the banner or notification that opened this paywall, in the language on screen. */
+  function bannerPaywallText(current: Policy): { title: string; body: string } | null {
+    const banner = current.banners.find(b => b.id === request.banner) ?? current.notices.find(n => n.id === request.banner);
+    if (!banner || banner.text?.lang !== language) return null;
+    return banner.text.paywall_title && banner.text.paywall_body ? { title: banner.text.paywall_title, body: banner.text.paywall_body } : null;
+  }
+
+  const holdsPro = async () => {
+    const install = await readInstall();
+    return !!install && !!(await readEntitlement(install.id));
+  };
+
+  // A license can land while the paywall is open — a key typed on another of
+  // the person's browsers comes through Chrome sync, a purchase finishes in
+  // another tab. Left open, the paywall sold Pro to someone who had it
+  // (2026-10-08: a checkout 42 s after the license arrived).
+  useEffect(() => {
+    const onChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area !== 'local' || !changes[BILLING_KEYS.entitlement]?.newValue) return;
+      void holdsPro().then(on => {
+        if (on) proOn();
+      });
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const fromBackup = isBackupTrigger(request.trigger);
+  // Words the banner that opened this paywall brought with it: they win over
+  // the backup's and the server's paywall text alike, being about the very
+  // thing the person clicked.
+  const fromBanner = policy && policy !== 'loading' ? bannerPaywallText(policy) : null;
   const copy = fromBackup ? BACKUP_COPY : (COPY[policy && policy !== 'loading' ? policy.paywall.copy : 'default'] ?? COPY.default!);
   // Text the server wrote, when it is in the language on screen. After a
   // language switch the last policy still carries the old language until the
   // next check-in; the shipped text covers that gap rather than a mixed screen.
-  const custom = !fromBackup && policy && policy !== 'loading' && policy.paywall.text?.lang === language ? policy.paywall.text : null;
+  const custom = fromBanner ?? (!fromBackup && policy && policy !== 'loading' && policy.paywall.text?.lang === language ? policy.paywall.text : null);
   const prices = policy && policy !== 'loading' ? policy.prices : {};
   const monthly = Object.values(prices).find(p => p.kind === 'sub' && p.interval === 'month');
   const selectedPrice = prices[selected];
@@ -225,6 +265,7 @@ export default function Paywall({ language, request }: PaywallProps) {
     try {
       await startCheckout(selected, request.trigger, {
         shown: selectedPrice ? { amount: selectedPrice.amount, currency: selectedPrice.currency, approx: selectedPrice.approx } : undefined,
+        banner: request.banner,
         // The last moment a popup is alive: the close goes on disk, the
         // blocked account is kept for when Pro arrives, and the worker —
         // which outlives the popup — sends this visit's events.
@@ -246,6 +287,15 @@ export default function Paywall({ language, request }: PaywallProps) {
         await syncBilling({ force: true, urgent: true });
         await load(false);
         setError({ at: 'checkout', text: t('paywall.priceChanged') });
+      } else if (e instanceof BillingApiError && e.code === 'already_pro') {
+        // The server knows of a license here that this install has not heard
+        // of yet: fetch it, and the paywall has nothing more to do.
+        await syncBilling({ force: true, urgent: true });
+        if (await holdsPro()) {
+          proOn();
+          return;
+        }
+        setError({ at: 'checkout', text: billingErrorMessage(e, t) });
       } else {
         setError({ at: 'checkout', text: billingErrorMessage(e, t) });
       }
@@ -259,8 +309,7 @@ export default function Paywall({ language, request }: PaywallProps) {
     setError(null);
     try {
       await activateLicenseKey(key);
-      toast('success', t('billing.activated'));
-      finish('activated');
+      proOn();
     } catch (e) {
       setError({ at: 'key', text: billingErrorMessage(e, t) });
       setBusy(null);

@@ -5,10 +5,10 @@
 
 /**
  * Where the paywall was opened from; `backup` is cloud backup's "Turn on" in
- * Settings, for anyone without Pro, and `backup_banner` the banner at the top
- * of Settings offering the same.
+ * Settings, for anyone without Pro, `backup_banner` a server banner offering
+ * the same, and `banner` a server banner that opens the paywall itself.
  */
-export type PaywallTrigger = 'form' | 'qr' | 'migration' | 'file' | 'uri' | 'scan' | 'settings' | 'backup' | 'backup_banner';
+export type PaywallTrigger = 'form' | 'qr' | 'migration' | 'file' | 'uri' | 'scan' | 'settings' | 'backup' | 'backup_banner' | 'banner';
 
 export interface LimitContext {
   /** Accounts already stored. */
@@ -39,6 +39,8 @@ export interface PaywallRequest {
    * (billing/held-add.ts). Must not throw.
    */
   beforeCheckout: (() => Promise<void>) | null;
+  /** The id of the server banner whose click opened it, for that banner's funnel. */
+  banner: string | null;
   resolve: (result: PaywallResult) => void;
 }
 
@@ -62,6 +64,7 @@ export function openPaywall(options: {
   limit?: LimitContext | null;
   allowPartial?: boolean;
   beforeCheckout?: (() => Promise<void>) | null;
+  banner?: string | null;
 }): Promise<PaywallResult> {
   current?.resolve('closed');
   return new Promise(resolve => {
@@ -72,6 +75,7 @@ export function openPaywall(options: {
       limit: options.limit ?? null,
       allowPartial: options.allowPartial ?? false,
       beforeCheckout: options.beforeCheckout ?? null,
+      banner: options.banner ?? null,
       resolve: result => {
         if (current?.id === id) {
           current = null;

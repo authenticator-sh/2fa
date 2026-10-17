@@ -117,6 +117,55 @@ test('a list of otpauth:// links goes in straight from the first-run guide', asy
   expect((await storedAccounts(page)).map((account) => account.secret).sort()).toEqual([otherSecret(11), otherSecret(12)].sort());
 });
 
+// The tab is only captured when asked, and here nothing grants the capture
+// (no toolbar click), so what is checked is that the button is the scan itself
+// and that a miss leaves the dialog open on its hint and its other ways in.
+test('the first-run guide scans the page at once, and a miss stays in the add dialog', async ({ context, extensionId }) => {
+  const page = await openPage(context, extensionId, 'popup.html');
+
+  await page.getByRole('button', { name: 'Scan the QR code on this page' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Add Account' });
+  // Opened as a tab here, with no click on the icon: no activeTab, and the
+  // message says how to get it rather than blaming the page.
+  await expect(dialog.getByRole('alert')).toHaveText(/can read a page only when you open it from its icon/);
+  await expect(dialog.getByRole('button', { name: 'Choose Image' })).toBeVisible();
+});
+
+test('"turning on 2FA" ends in the scan, with the key form beside it', async ({ context, extensionId }) => {
+  const page = await openPage(context, extensionId, 'popup.html');
+
+  await page.getByRole('button', { name: "I'm turning on 2-factor authentication right now" }).click();
+  await expect(page.getByRole('button', { name: 'Scan QR from screen', exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'No QR code? Type the key instead' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add Account' });
+  await expect(dialog.getByRole('button', { name: 'Manual', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('a site asking for a code nobody set up has its own way in', async ({ context, extensionId }) => {
+  const page = await openPage(context, extensionId, 'popup.html');
+
+  await page.getByRole('button', { name: "A site asks for a code, but I don't have one" }).click();
+  await expect(page.getByText(/backup codes the site gave you/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Scan QR from screen', exact: true })).toBeVisible();
+
+  // Back lands on the chooser again.
+  await page.getByText('Back', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Scan the QR code on this page' })).toBeVisible();
+});
+
+test('the phone branch offers a picture of the code beside the camera', async ({ context, extensionId }) => {
+  const page = await openPage(context, extensionId, 'popup.html');
+
+  await page.getByRole('button', { name: 'In Google Authenticator on my phone' }).click();
+  await expect(page.getByRole('button', { name: 'Scan QR with camera' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'No camera? Use a picture of the QR code' }).click();
+  // Not the next page to open: the install's welcome tab may be that.
+  await expect.poll(() => context.pages().some(tab => tab.url().includes('scan.html?mode=image'))).toBe(true);
+});
+
 test('"I have a secret key" opens the form where a key is typed', async ({ context, extensionId }) => {
   const page = await openPage(context, extensionId, 'popup.html');
 

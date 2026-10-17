@@ -8,6 +8,11 @@ type TranslationKeys = {
   'header.settings': string;
   'header.language': string;
 
+  // The bell in the header and its notifications (NotificationBell)
+  'notices.title': string;
+  'notices.empty': string;
+  'notices.new': string;
+
   // Search
   'search.placeholder': string;
 
@@ -63,6 +68,7 @@ type TranslationKeys = {
   'onboarding.ga.sub': string;
   'onboarding.ga.steps': string;
   'onboarding.ga.more': string;
+  'onboarding.ga.noCamera': string;
   'onboarding.new.label': string;
   'onboarding.new.sub': string;
   'onboarding.new.steps': string;
@@ -77,6 +83,10 @@ type TranslationKeys = {
   'onboarding.key.sub': string;
   'onboarding.key.steps': string;
   'onboarding.key.more': string;
+  'onboarding.page.scan': string;
+  'onboarding.new.noQr': string;
+  'onboarding.asked.label': string;
+  'onboarding.asked.steps': string;
 
   // Settings
   'settings.backupRestore': string;
@@ -113,7 +123,14 @@ type TranslationKeys = {
   'addAccount.pastedMigration': string;
   'addAccount.errorScanFailed': string;
   'addAccount.errorNoQr': string;
+  'addAccount.errorNameMissing': string;
+  'addAccount.errorSecretMissing': string;
+  'addAccount.errorSecretIsCode': string;
+  'addAccount.errorSecretShort': string;
+  'addAccount.errorSecretChars': string;
+  'addAccount.errorNoQrScreen': string;
   'addAccount.errorScreenHint': string;
+  'addAccount.errorNoAccess': string;
   'addAccount.errorDropImage': string;
 
   // Add Account Modal - tips
@@ -383,6 +400,17 @@ type VaultTranslationKeys = {
   'scan.addedBody': string;
   'scan.deniedTitle': string;
   'scan.deniedBody': string;
+  'scan.deniedStep1': string;
+  'scan.deniedStep2': string;
+  'scan.deniedStep3': string;
+  'scan.dismissedTitle': string;
+  'scan.dismissedBody': string;
+  'scan.allowLabel': string;
+  'scan.waitingHint': string;
+  'scan.systemTitle': string;
+  'scan.systemBody': string;
+  'scan.busyTitle': string;
+  'scan.busyBody': string;
   'scan.noCameraTitle': string;
   'scan.noCameraBody': string;
   'scan.lockedTitle': string;

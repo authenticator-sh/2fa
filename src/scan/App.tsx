@@ -11,7 +11,9 @@
 // and "activeTab".
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CameraOff, Check, Loader2, Lock, Upload } from 'lucide-react';
+import { AlertTriangle, CameraOff, Check, Loader2, Lock, Upload, Video } from 'lucide-react';
+import { BlockedGuide, PromptMock } from '@/components/CameraHelp';
+import { cameraPermissionState, classifyDenial, type DenialKind } from '@/utils/camera-denial';
 import type jsQRType from 'jsqr';
 import { Logo } from '@/components/Logo';
 import { FeedbackHost } from '@/components/FeedbackHost';
@@ -39,6 +41,9 @@ import { saveErrorKey } from '@/utils/save-error';
 
 type Status =
   | { kind: 'starting' }
+  // Opened from "No camera?" (scan.html?mode=image): a picture is asked for
+  // and the camera is not, until the person says so.
+  | { kind: 'image' }
   | { kind: 'scanning' }
   // `group` is the filter the popup had on when it opened the scanner, if any —
   // named in the result so the accounts are not simply missing later.
@@ -47,8 +52,12 @@ type Status =
   // Stopped by the free limit on the way to Checkout: kept, and added here once
   // Pro is on (billing/held-add.ts). `label` names it; `ids` are its accounts.
   | { kind: 'held'; label: string; ids: string[]; group?: string }
-  | { kind: 'denied' }
+  // `how` is why: a setting that says Block, a question closed unanswered, or
+  // the operating system — three different things to do (utils/camera-denial.ts).
+  | { kind: 'denied'; how: DenialKind }
   | { kind: 'noCamera' }
+  // Found, but taken: another app has it open, or the system could not start it.
+  | { kind: 'busy' }
   // `title` defaults to the camera failing to start, the original case; a
   // failed save or a refused code is not that and must not say so.
   //
@@ -63,7 +72,13 @@ export default function App() {
   const [language, setLanguage] = useState<Language>('en');
   const [darkMode, setDarkMode] = useState(() => cachedAppearance().dark);
   const [uiStyle, setUiStyle] = useState(() => cachedAppearance().style);
-  const [status, setStatus] = useState<Status>({ kind: 'starting' });
+  /** Read once: the address does not change under the page. */
+  const imageModeRef = useRef(
+    typeof location !== 'undefined' && new URLSearchParams(location.search).get('mode') === 'image'
+  );
+  const [status, setStatus] = useState<Status>(() =>
+    imageModeRef.current ? { kind: 'image' } : { kind: 'starting' }
+  );
 
   // Reported for the admin's view of where adds go wrong (billing/onboarding.ts):
   // the page opening, the camera running, every way a scan ends without an
@@ -75,11 +90,40 @@ export default function App() {
   useEffect(() => {
     lastStatus.current = status.kind;
     if (status.kind === 'scanning') void reportAddStep('camera', 'scanning');
-    else if (status.kind === 'denied') void reportAddFail('camera', 'camera_denied');
-    else if (status.kind === 'noCamera') void reportAddFail('camera', 'no_camera');
-    else if (status.kind === 'locked') void reportAddFail('camera', 'locked');
-    else if (status.kind === 'held') void reportAddFail('camera', 'limit_held');
-    else if (status.kind === 'error') void reportAddFail('camera', reasonOfKey(status.body));
+    else {
+      const reason =
+        status.kind === 'denied'
+          ? { blocked: 'camera_denied', dismissed: 'camera_dismissed', system: 'camera_system' }[status.how]
+          : status.kind === 'noCamera'
+            ? 'no_camera'
+            : status.kind === 'busy'
+              ? 'camera_busy'
+              : status.kind === 'locked'
+                ? 'locked'
+                : status.kind === 'held'
+                  ? 'limit_held'
+                  : status.kind === 'error'
+                    ? reasonOfKey(status.body)
+                    : null;
+      // The same refusal again on "Try again" is the same person stuck, not a
+      // new one: counted once in a row, so the admin's numbers are people.
+      // Kept across the "starting" in between — "Try again" passes through it,
+      // and forgetting there sent each retry again. A scan that worked, or a
+      // different refusal, starts a new row.
+      if (reason && reason !== lastFail.current) void reportAddFail('camera', reason);
+      if (reason) lastFail.current = reason;
+      else if (status.kind === 'added') lastFail.current = null;
+    }
+  }, [status]);
+  const lastFail = useRef<string | null>(null);
+
+  // The browser's question is still up: after a moment it is worth pointing at.
+  const [slowStart, setSlowStart] = useState(false);
+  useEffect(() => {
+    setSlowStart(false);
+    if (status.kind !== 'starting') return;
+    const timer = setTimeout(() => setSlowStart(true), 1200);
+    return () => clearTimeout(timer);
   }, [status]);
   useEffect(() => {
     const leaving = () => {
@@ -203,6 +247,31 @@ export default function App() {
     streamRef.current = null;
   }, []);
 
+  // A blocked camera is fixed in the browser's own settings, outside this
+  // page. When the setting flips to Allow, carry on without being asked: a
+  // reload, because Chrome keeps answering a page that was refused with its
+  // earlier No until it is loaded again.
+  useEffect(() => {
+    if (status.kind !== 'denied' || status.how !== 'blocked') return;
+    let watched: PermissionStatus | null = null;
+    let gone = false;
+    const onChange = () => {
+      if (watched?.state === 'granted') location.reload();
+    };
+    navigator.permissions
+      ?.query({ name: 'camera' as PermissionName })
+      .then(result => {
+        if (gone) return;
+        watched = result;
+        result.addEventListener('change', onChange);
+      })
+      .catch(() => {});
+    return () => {
+      gone = true;
+      watched?.removeEventListener('change', onChange);
+    };
+  }, [status]);
+
   const handleDecoded = useCallback(
     async (text: string) => {
       let parsed;
@@ -263,7 +332,8 @@ export default function App() {
         // page is a new account — and is kept through Checkout, so the code
         // does not have to be scanned again after paying.
         const single = parsed.type !== 'migration';
-        const result = await addWithLimit('scan', origin => addMultipleAccounts(accounts, origin), {
+        const continuesBatch = !single && (parsed.batch?.index ?? 1) > 1;
+        const result = await addWithLimit('scan', origin => addMultipleAccounts(accounts, origin, { continuesBatch }), {
           import: !single,
           hold: single ? accounts : undefined,
         });
@@ -339,20 +409,34 @@ export default function App() {
         // the dropdown, ask for it by id. `ideal`, not `exact`: a remembered
         // camera that got unplugged should fall back, not dead-end the page.
         const chosen = chosenCameraRef.current;
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            ...(chosen ? { deviceId: { ideal: chosen } } : { facingMode: 'environment' }),
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: false,
-        });
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              ...(chosen ? { deviceId: { ideal: chosen } } : { facingMode: 'environment' }),
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          });
+        } catch (error) {
+          // A camera that cannot do what was asked (a size, a facing) is not a
+          // camera that cannot work: ask for whatever it has.
+          const name = error instanceof DOMException ? error.name : '';
+          if (name !== 'OverconstrainedError' && name !== 'ConstraintNotSatisfiedError') throw error;
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        }
       } catch (error) {
         const name = error instanceof DOMException ? error.name : '';
-        if (name === 'NotAllowedError' || name === 'SecurityError') {
-          setStatus({ kind: 'denied' });
+        if (!navigator.mediaDevices?.getUserMedia || error instanceof TypeError) {
+          // No media API at all (an unusual browser or a locked-down one).
+          setStatus({ kind: 'noCamera' });
+        } else if (name === 'NotAllowedError' || name === 'SecurityError') {
+          const message = error instanceof DOMException ? error.message : '';
+          setStatus({ kind: 'denied', how: classifyDenial(name, message, await cameraPermissionState()) });
         } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
           setStatus({ kind: 'noCamera' });
+        } else if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') {
+          setStatus({ kind: 'busy' });
         } else {
           console.error('Could not start the camera:', error);
           setStatus({ kind: 'error', body: 'scan.errorBody' });
@@ -530,7 +614,9 @@ export default function App() {
           // camera path keeps running, but this path froze. Restart it.
           void reportAddFail('camera', 'image_not_otpauth');
           toast('error', tRef.current('addAccount.errorInvalidQR'));
-          start();
+          // Back to the camera only if it was the camera that was running.
+          if (imageModeRef.current) handledRef.current = false;
+          else start();
         }
       } catch (error) {
         console.error('Could not read the uploaded image:', error);
@@ -547,7 +633,9 @@ export default function App() {
   );
 
   useEffect(() => {
-    start();
+    // Image mode asks for no camera: the permission question must not appear
+    // for someone who came here because they have none.
+    if (!imageModeRef.current) start();
     return stopCamera;
     // Intentionally once: restarts go through the retry button.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -587,7 +675,15 @@ export default function App() {
   const message = () => {
     switch (status.kind) {
       case 'denied':
+        if (status.how === 'dismissed')
+          return { icon: Video, tone: 'yellow', title: t('scan.dismissedTitle'), body: t('scan.dismissedBody') };
+        if (status.how === 'system')
+          return { icon: CameraOff, tone: 'red', title: t('scan.systemTitle'), body: t('scan.systemBody') };
         return { icon: CameraOff, tone: 'red', title: t('scan.deniedTitle'), body: t('scan.deniedBody') };
+      case 'image':
+        return { icon: Upload, tone: 'blue', title: t('onboarding.ga.noCamera'), body: t('scan.uploadHint') };
+      case 'busy':
+        return { icon: CameraOff, tone: 'yellow', title: t('scan.busyTitle'), body: t('scan.busyBody') };
       case 'noCamera':
         return { icon: CameraOff, tone: 'red', title: t('scan.noCameraTitle'), body: t('scan.noCameraBody') };
       case 'locked':
@@ -607,7 +703,7 @@ export default function App() {
   // neither the input nor a label around it could take focus, and the one way
   // in for anyone whose camera cannot read the code was the mouse. The same
   // pattern as AddAccountModal's "Choose image".
-  const uploadButton = (
+  const renderUpload = (primary: boolean) => (
     <>
       <input
         ref={fileInputRef}
@@ -626,7 +722,11 @@ export default function App() {
         type="button"
         onClick={() => fileInputRef.current?.click()}
         disabled={decodingImage}
-        className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-wait dark:border-dark-500 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600"
+        className={`flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-colors disabled:cursor-wait ${
+          primary
+            ? 'bg-accent-600 text-white hover:bg-accent-700'
+            : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-dark-500 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'
+        }`}
       >
         {decodingImage ? <Loader2 className="animate-spin" size={16} /> : <Upload size={16} />}
         {t('addAccount.chooseImage')}
@@ -690,7 +790,14 @@ export default function App() {
                   finishes the job, so it stops being the quiet one. */}
               <div className="flex gap-2">
                 <button
-                  onClick={start}
+                  onClick={() => {
+                    if (imageModeRef.current) {
+                      handledRef.current = false;
+                      setStatus({ kind: 'image' });
+                    } else {
+                      void start();
+                    }
+                  }}
                   className={`flex-1 text-sm font-medium py-2.5 rounded-lg transition-colors ${
                     moreCodes
                       ? 'bg-accent-600 hover:bg-accent-700 text-white'
@@ -717,26 +824,68 @@ export default function App() {
                 className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3 ${
                   problem.tone === 'red'
                     ? 'bg-red-100 dark:bg-red-900/30'
-                    : 'bg-yellow-100 dark:bg-yellow-900/30'
+                    : problem.tone === 'blue'
+                      ? 'bg-blue-100 dark:bg-blue-900/30'
+                      : 'bg-yellow-100 dark:bg-yellow-900/30'
                 }`}
               >
                 <problem.icon
-                  className={problem.tone === 'red' ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'}
+                  className={
+                    problem.tone === 'red'
+                      ? 'text-red-600 dark:text-red-400'
+                      : problem.tone === 'blue'
+                        ? 'text-accent-600 dark:text-accent-400'
+                        : 'text-yellow-600 dark:text-yellow-400'
+                  }
                   size={24}
                 />
               </div>
               <h2 className="text-base font-medium text-gray-900 dark:text-gray-100 mb-1">{problem.title}</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{problem.body}</p>
-              <button
-                onClick={start}
-                className="w-full bg-accent-600 hover:bg-accent-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
-              >
-                {t('scan.retry')}
-              </button>
+              {status.kind === 'denied' && status.how === 'blocked' && (
+                <BlockedGuide
+                  steps={[t('scan.deniedStep1'), t('scan.deniedStep2'), t('scan.deniedStep3')]}
+                  allow={t('scan.allowLabel')}
+                />
+              )}
+              {status.kind === 'denied' && status.how === 'dismissed' && (
+                <div className="mb-4">
+                  <PromptMock allow={t('scan.allowLabel')} />
+                </div>
+              )}
+              {/* A retry cannot work until something outside this page changes
+                  — the setting, the system, the hardware — so the picture of
+                  the code is what leads there; where a retry asks again (the
+                  question was closed, the camera was busy), it leads. */}
+              {(() => {
+                const retryFirst = status.kind === 'busy' || status.kind === 'error' || (status.kind === 'denied' && status.how === 'dismissed');
+                const retry = (
+                  <button
+                    onClick={start}
+                    className={
+                      retryFirst
+                        ? 'w-full bg-accent-600 hover:bg-accent-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors'
+                        : 'w-full border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 font-medium text-sm py-2.5 rounded-lg transition-colors'
+                    }
+                  >
+                    {status.kind === 'image' ? t('addAccount.scanWithCamera') : t('scan.retry')}
+                  </button>
+                );
+                return retryFirst ? (
+                  <>
+                    {retry}
+                    <div className="mt-2">{renderUpload(false)}</div>
+                  </>
+                ) : (
+                  <>
+                    {renderUpload(true)}
+                    <div className="mt-2">{retry}</div>
+                  </>
+                );
+              })()}
               {/* The way out that does not depend on the thing that just
                   failed. Every state on this card — denied, no camera, error —
                   is one a picture of the code walks straight past. */}
-              <div className="mt-2">{uploadButton}</div>
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{t('scan.uploadHint')}</p>
             </div>
           ) : (
@@ -788,11 +937,16 @@ export default function App() {
               {/* Plain text on purpose: with an icon in front it read as a
                   third button — same layout as the two real ones below it —
                   and it did nothing when clicked. */}
+              {status.kind === 'starting' && slowStart && (
+                <div className="mt-4">
+                  <PromptMock allow={t('scan.allowLabel')} />
+                </div>
+              )}
               <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
-                {status.kind === 'starting' ? t('scan.starting') : t('scan.hint')}
+                {status.kind === 'starting' ? (slowStart ? t('scan.waitingHint') : t('scan.starting')) : t('scan.hint')}
               </p>
 
-              <div className="mt-3">{uploadButton}</div>
+              <div className="mt-3">{renderUpload(false)}</div>
               <p className="mt-2 text-center text-xs text-gray-500 dark:text-gray-400">
                 {t('scan.uploadHint')}
               </p>

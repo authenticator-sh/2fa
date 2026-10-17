@@ -239,7 +239,7 @@ export async function run(): Promise<void> {
 
     const partial = await storage.addMultipleAccounts(batch, { ...origin, take: 3 });
     const ids = (await storage.getAccounts()).map(a => a.id);
-    check('exactly the first three new ones', partial.added === 3 && partial.leftOut === 2 && ids.join() === 'acc1,acc2,acc10,acc11,acc12');
+    check('exactly the first three new ones', partial.added === 3 && partial.leftOut === 2 && ids.join() === 'acc10,acc11,acc12,acc1,acc2');
 
     let full: unknown = null;
     try {
@@ -604,6 +604,106 @@ export async function run(): Promise<void> {
     check('an overlong title is ignored', read({ lang: 'de', title: 'x'.repeat(81), body: 'ok' }) === null);
     check('a language that is not a code is ignored', read({ lang: '../x', title: 'a', body: 'b' }) === null);
     check('control characters become spaces', read({ lang: 'en', title: 'a\nb', body: 'c' })?.title === 'a b');
+  }
+
+  scenario('The server banner: parsed safely, shown in its place and language, closed one id at a time');
+  {
+    const banner = await import('@/billing/banner');
+    const iid = '11111111-1111-4111-8111-111111111111';
+    const readAll = (value: unknown) => state.readPolicyPayload(policyPayload(iid, 5, { banner: value }))?.banners ?? [];
+    const read = (value: unknown) => readAll(value)[0] ?? null;
+    const before = state.readPolicyPayload(policyPayload(iid, 5))?.banners;
+    check('a policy from before banners shows the shipped backup banner', before?.length === 1 && before[0]!.id === 'backup');
+    check('null means no banner', readAll(null).length === 0);
+    const two = readAll([
+      { id: 'backup', action: 'backup', place: 'settings', text: null },
+      { id: 'vault-1', action: 'vault', place: 'accounts', text: null },
+      { id: 'pro-9', action: 'paywall', place: 'accounts', text: { lang: 'en', title: 'a', cta: 'b' } },
+      { id: 'x', action: 'popup', place: 'settings' },
+    ]);
+    check('a list carries one banner per place, the first for each', two.map(b => b.id).join() === 'backup,vault-1');
+    const url = read({ id: 'pm-1', action: 'url', place: 'accounts', url: 'https://chromewebstore.google.com/detail/pm', text: { lang: 'en', title: 'Try it', cta: 'Open' } });
+    check('a url banner on an allowed host is kept', url?.url === 'https://chromewebstore.google.com/detail/pm' && url.place === 'accounts');
+    check('a url banner elsewhere is dropped whole', read({ id: 'x', action: 'url', place: 'accounts', url: 'https://evil.example/', text: { lang: 'en', title: 'a', cta: 'b' } }) === null);
+    check('plain http is dropped too', read({ id: 'x', action: 'url', place: 'accounts', url: 'http://www.authenticator.sh/', text: { lang: 'en', title: 'a', cta: 'b' } }) === null);
+    check('an unknown action or place is dropped', read({ id: 'x', action: 'popup', place: 'settings' }) === null && read({ id: 'x', action: 'backup', place: 'toolbar' }) === null);
+    check('a half paywall pair is not used', read({ id: 'x', action: 'paywall', place: 'settings', text: { lang: 'en', title: 'a', cta: 'b', paywall_title: 'only' } })?.text?.paywall_title === null);
+
+    const vaultRead = read({ id: 'vault-1', action: 'vault', place: 'accounts', text: { lang: 'en', title: 'Lock it', cta: 'Set', paywall_title: 'A', paywall_body: 'B' } });
+    check('a vault banner is kept, without a paywall pair', vaultRead?.action === 'vault' && vaultRead.text?.paywall_title === null);
+    check('and without words of its own', read({ id: 'vault-1', action: 'vault', place: 'accounts', text: null })?.text === null);
+
+    const ctx = { place: 'settings' as const, language: 'en', offersBackup: true, canBuy: true, offersVault: false, dismissed: [] as string[] };
+    const shipped = banner.SHIPPED_BANNER;
+    check('the backup banner shows where backup is offered', banner.bannerToShow(shipped, ctx)?.id === 'backup');
+    check('not where it is not', banner.bannerToShow(shipped, { ...ctx, offersBackup: false }) === null);
+    check('only in its own place', banner.bannerToShow(shipped, { ...ctx, place: 'accounts' }) === null);
+    const pro = { id: 'pro-1', action: 'paywall' as const, place: 'accounts' as const, url: null, text: { lang: 'de', eyebrow: null, title: 'Pro', cta: 'Los', paywall_title: null, paywall_body: null } };
+    check('a paywall banner needs its words in the language on screen', banner.bannerToShow(pro, { ...ctx, place: 'accounts', language: 'en' }) === null);
+    check('and someone who can buy', banner.bannerToShow(pro, { ...ctx, place: 'accounts', language: 'de', canBuy: false }) === null);
+    check('then it shows', banner.bannerToShow(pro, { ...ctx, place: 'accounts', language: 'de' })?.id === 'pro-1');
+    const backupDe = { ...shipped, id: 'backup-2', text: { ...pro.text } };
+    check('a backup banner in another language falls back to the shipped words', banner.bannerToShow(backupDe, ctx)?.text === null);
+    const vault = { id: 'vault-1', action: 'vault' as const, place: 'accounts' as const, url: null, text: null };
+    const onAccounts = { ...ctx, place: 'accounts' as const };
+    check('a vault banner shows only where a password is offered', banner.bannerToShow(vault, onAccounts) === null);
+    check('then in the shipped words', banner.bannerToShow(vault, { ...onAccounts, offersVault: true })?.text === null);
+    check('its words only in the language on screen', banner.bannerToShow({ ...vault, text: { ...pro.text } }, { ...onAccounts, offersVault: true })?.text === null);
+    check('each place shows its own banner from the list', banner.pickBanner(two, ctx)?.id === 'backup' && banner.pickBanner(two, { ...onAccounts, offersVault: true })?.id === 'vault-1');
+    check('and nothing where its banner is not offered', banner.pickBanner(two, onAccounts) === null);
+
+    await resetState();
+    await banner.dismissBanner('pro-1');
+    const dismissed = await banner.readDismissedBanners();
+    check('closing one banner hides that id', banner.bannerToShow(pro, { ...ctx, place: 'accounts', language: 'de', dismissed }) === null);
+    check('and no other', banner.bannerToShow(shipped, { ...ctx, dismissed })?.id === 'backup');
+    areas.local.cloudBackupBannerDismissed = true;
+    check('the flag 1.15.0 kept still hides the backup banner', (await banner.readDismissedBanners()).includes('backup'));
+    check('but not a banner with a new id', !(await banner.readDismissedBanners()).includes('backup-2'));
+  }
+
+  scenario('The bell: notifications parsed safely, shown under their banner conditions, read when the bell opens, closed one id at a time');
+  {
+    const notices = await import('@/billing/notices');
+    const iid = '11111111-1111-4111-8111-111111111111';
+    const readAll = (value: unknown) => state.readPolicyPayload(policyPayload(iid, 5, { notices: value }))?.notices ?? [];
+    check('a policy without notifications has none', state.readPolicyPayload(policyPayload(iid, 5))?.notices.length === 0);
+    check('nor does a malformed field', readAll({ id: 'x', action: 'none' }).length === 0);
+    const en = { lang: 'en', title: 'New', body: 'Groups are here.' };
+    const list = readAll([
+      { id: 'news-1', action: 'none', text: en },
+      { id: 'news-1', action: 'none', text: en },
+      { id: 'Bad Id', action: 'none', text: en },
+      { id: 'vault-1', action: 'vault' },
+      { id: 'blog', action: 'url', url: 'https://www.authenticator.sh/blog', text: { ...en, cta: 'Read' } },
+      { id: 'evil', action: 'url', url: 'https://evil.example/', text: { ...en, cta: 'Read' } },
+      { id: 'beep', action: 'beep', text: en },
+    ]);
+    check('each is parsed on its own; repeats, bad ids, foreign hosts and unknown actions are dropped', list.map(n => n.id).join() === 'news-1,vault-1,blog');
+    check('none has no button even if one is sent', readAll([{ id: 'n', action: 'none', text: { ...en, cta: 'Go' } }])[0]?.text?.cta === null);
+    check('every other action needs one', readAll([{ id: 'p', action: 'paywall', text: en }])[0]?.text === null);
+    check('a list is cut at ten', readAll(Array.from({ length: 12 }, (_, i) => ({ id: `n${i}`, action: 'none', text: en }))).length === 10);
+
+    const ctx = { language: 'en', offersBackup: false, canBuy: true, offersVault: false, dismissed: [] as string[] };
+    check('the vault one waits for a password to be offered', notices.noticesToShow(list, ctx).map(n => n.id).join() === 'news-1,blog');
+    check('then shows in the shipped words, in order', notices.noticesToShow(list, { ...ctx, offersVault: true }).map(n => `${n.id}:${n.text ? 'own' : 'shipped'}`).join() === 'news-1:own,vault-1:shipped,blog:own');
+    check('words in another language show nothing for none and url', notices.noticesToShow(list, { ...ctx, language: 'de' }).length === 0);
+    const pro = readAll([{ id: 'pro-1', action: 'paywall', text: { ...en, cta: 'See plans' } }]);
+    check('a paywall one needs someone who can buy', notices.noticesToShow(pro, { ...ctx, canBuy: false }).length === 0 && notices.noticesToShow(pro, ctx).length === 1);
+    const backup = readAll([{ id: 'backup-1', action: 'backup' }]);
+    check('a backup one shows where backup is offered', notices.noticesToShow(backup, ctx).length === 0 && notices.noticesToShow(backup, { ...ctx, offersBackup: true }).length === 1);
+
+    await resetState();
+    const shown = notices.noticesToShow(list, { ...ctx, offersVault: true });
+    check('all unread at first', notices.unreadNotices(shown, await notices.readReadNotices()).length === 3);
+    await notices.markNoticesRead(['news-1', 'blog']);
+    check('opening the bell reads what it listed', notices.unreadNotices(shown, await notices.readReadNotices()).map(n => n.id).join() === 'vault-1');
+    const added = readAll([{ id: 'news-2', action: 'none', text: en }, { id: 'news-1', action: 'none', text: en }]);
+    check('a new id is unread again', notices.unreadNotices(notices.noticesToShow(added, ctx), await notices.readReadNotices()).map(n => n.id).join() === 'news-2');
+    await notices.dismissNotice('blog');
+    const dismissed = await notices.readDismissedNotices();
+    check('closing one hides that id and no other', notices.noticesToShow(list, { ...ctx, dismissed }).map(n => n.id).join() === 'news-1');
+    check('and is kept apart from the banners closed', !(await (await import('@/billing/banner')).readDismissedBanners()).includes('blog'));
   }
 
   scenario('The event queue stays bounded');

@@ -25,8 +25,11 @@ import { track, type EventName, type EventProps } from './events';
 import { BILLING_KEYS, readInstall } from './state';
 import { syncBilling, syncFromWorker } from './sync';
 
-/** The ways on the empty screen (components/EmptyStateGuide.tsx). */
-export type OnboardOption = 'ga' | 'new' | 'other' | 'manual' | 'key';
+/**
+ * The ways on the empty screen (components/EmptyStateGuide.tsx): its five rows,
+ * the scan of the page above them, and the "a site asks for a code" link below.
+ */
+export type OnboardOption = 'ga' | 'new' | 'other' | 'manual' | 'key' | 'page' | 'asked';
 
 /**
  * Where an add happens: the empty screen's steps, the scan page's camera, the
@@ -57,6 +60,8 @@ const KEY_MOMENT_GAP_MS = 15_000;
 
 interface State {
   firstOpen?: boolean;
+  /** Opened by the welcome page (background/site-open.ts), reported apart from firstOpen. */
+  firstShown?: boolean;
   firstCode?: boolean;
   added?: boolean;
   stage?: string;
@@ -202,15 +207,27 @@ export function markInstalled(): Promise<void> {
   return setStage('installed', true);
 }
 
-/** The popup, window or side panel opened. Reported the first time only. */
-export async function reportFirstOpen(): Promise<void> {
-  if (!(await update(state => (state.firstOpen || !followed(state) ? null : { firstOpen: true })))) return;
-  await report('first_open', async () => ({ secs: await secondsSinceInstall() }), 'opened', true);
+/**
+ * The popup, window or side panel opened. Reported the first time only — and
+ * the first time the welcome page opened it (`site`), once more and apart:
+ * that is the page's doing, not someone finding the extension, so it carries
+ * `site: true`, the admin does not count it as an open, and the uninstall stage
+ * stays where it was. The person's own first open still comes when it comes.
+ */
+export async function reportFirstOpen(site = false): Promise<void> {
+  const flag = site ? 'firstShown' : 'firstOpen';
+  if (!(await update(state => (state[flag] || !followed(state) ? null : { [flag]: true })))) return;
+  await report(
+    'first_open',
+    async () => ({ secs: await secondsSinceInstall(), ...(site ? { site: true } : {}) }),
+    site ? null : 'opened',
+    true
+  );
 }
 
-/** The "add your first account" screen shown. */
-export function reportOnboardView(): Promise<void> {
-  return report('onboard_view', undefined, 'onboard');
+/** The "add your first account" screen shown; `site` as for reportFirstOpen. */
+export function reportOnboardView(site = false): Promise<void> {
+  return report('onboard_view', site ? { site: true } : undefined, site ? null : 'onboard');
 }
 
 /** A way picked on it. */
@@ -256,6 +273,15 @@ export async function reportAccountAdded(via: AddVia, n: number): Promise<void> 
   if (n <= 0) return;
   const first = await update(state => (state.added || !followed(state) ? null : { added: true }));
   await report('account_added', async () => ({ via, n, first, secs: first ? await secondsSinceInstall() : null }), `added:${via}`, first);
+}
+
+/**
+ * The welcome page asked the extension to open itself, and whether it did —
+ * with the mode it tried, and whether the page asked as it loaded (`auto`) or
+ * from its button. Not a stage: what follows it (first_open) is.
+ */
+export function reportSiteOpen(ok: boolean, mode: string, auto: boolean): Promise<void> {
+  return report('site_open', { ok, mode, auto }, null, true);
 }
 
 /** A code copied or filled in. Reported the first time only. */

@@ -69,6 +69,36 @@ export async function run(): Promise<void> {
   check('writing fewer than the visible accounts is still refused',
     await throwsNamed('Error', () => storage.saveAccounts([ACCOUNTS[0]])));
 
+  scenario('A new account goes to the top of the list; an import keeps its own order above the rest');
+  await resetState();
+  await storage.saveAccounts(ACCOUNTS.map(a => ({ ...a })));
+  await storage.addAccount({ ...extra } as any, USER_ADD);
+  check('the added account is first', (await storage.getAccounts()).map(a => a.id).join() === 'a4,a1,a2,a3');
+  await storage.addMultipleAccounts([
+    { ...extra, id: 'a5', secret: 'ONSWG4TFORZTA5DI' },
+    { ...ACCOUNTS[0] },
+    { ...extra, id: 'a6', secret: 'PJSXG33VOQQDCMBA' },
+  ] as any, USER_ADD);
+  check('the imported ones are on top, in the order of the file, and nothing already here moved',
+    (await storage.getAccounts()).map(a => a.id).join() === 'a5,a6,a4,a1,a2,a3',
+    (await storage.getAccounts()).map(a => a.id).join());
+
+  scenario('A Google Authenticator export split over several codes keeps its own order');
+  await resetState();
+  await storage.saveAccounts(ACCOUNTS.map(a => ({ ...a })));
+  const now = Date.now();
+  await storage.addMultipleAccounts([
+    { ...extra, id: 'b1', secret: 'ONSWG4TFORZTA5DI', createdAt: now },
+    { ...extra, id: 'b2', secret: 'PJSXG33VOQQDCMBA', createdAt: now + 1 },
+  ] as any, USER_ADD);
+  await storage.addMultipleAccounts([
+    { ...extra, id: 'b3', secret: 'MZXW6YTBOI======', createdAt: now + 2 },
+    { ...extra, id: 'b4', secret: 'GEZDGNBVGY3TQOJQ', createdAt: now + 3 },
+  ] as any, USER_ADD, { continuesBatch: true });
+  check('the second code goes below the first, above the older accounts',
+    (await storage.getAccounts()).map(a => a.id).join() === 'b1,b2,b3,b4,a1,a2,a3',
+    (await storage.getAccounts()).map(a => a.id).join());
+
   // A fresh install holds its first push until sync has had time to download.
   // The replay of that push used to carry local only, and prune the rest.
   scenario('Replaying a held push keeps the accounts that arrived from sync');

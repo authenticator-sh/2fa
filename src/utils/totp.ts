@@ -428,6 +428,22 @@ export function isUsableSecret(secret: unknown): boolean {
   return cleaned.replace(/=+$/, '').length >= 2 && BASE32.test(cleaned);
 }
 
+/**
+ * What is wrong with a secret the manual form refused, so the message can say
+ * it. One sentence for every refusal ("must be Base32") told nobody what to
+ * change: the people it stopped had typed the 6-digit code instead of the key,
+ * copied half of it, or read an O as a zero.
+ */
+export type SecretProblem = 'code' | 'short' | 'chars';
+
+export function secretProblem(secret: string): SecretProblem | null {
+  const cleaned = cleanSecret(secret);
+  if (/^\d{6,8}$/.test(cleaned)) return 'code';
+  if (!BASE32.test(cleaned)) return 'chars';
+  if (cleaned.length < 16) return 'short';
+  return null;
+}
+
 export function validateSecret(secret: string): boolean {
   const cleaned = cleanSecret(secret);
   return BASE32.test(cleaned) && cleaned.length >= 16;

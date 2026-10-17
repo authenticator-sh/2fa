@@ -33,8 +33,15 @@ export const EVENT_NAMES = [
   'add_cancel',
   'account_added',
   'first_code',
-  'backup_banner_view',
-  'backup_banner_close',
+  // The welcome page's button asked the extension to open (background/site-open.ts).
+  'site_open',
+  // The server's banner (billing/banner.ts), each with its id, action and place;
+  // the notifications behind the bell (billing/notices.ts) send them too, place 'bell'.
+  'banner_view',
+  'banner_click',
+  'banner_close',
+  // The bell opened: how many notifications it held, how many unread.
+  'bell_open',
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

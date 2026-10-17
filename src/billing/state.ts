@@ -8,6 +8,8 @@
 import { isSyncEnabled } from '@/utils/sync-preference';
 import { getVaultMeta } from '@/utils/vault';
 import { withLock } from '@/utils/write-lock';
+import { readBanners, SHIPPED_BANNER } from './banner';
+import { readNotices } from './notices';
 import { BILLING_FIRST_VERSION, BILLING_RELEASE_DATE } from './config';
 import { serverSilent, UNGATED, type GateSnapshot } from './gate';
 import { verifyToken } from './jws';
@@ -385,6 +387,9 @@ export function readPolicyPayload(payload: Record<string, unknown>): Policy | nu
     prices: readPrices(payload.prices),
     // Absent from a policy issued before the field existed: imports free, the owner's call.
     ui: { pro_in_settings: ui.pro_in_settings === true, import_partial: ui.import_partial !== false, import_free: ui.import_free !== false },
+    // Absent from a policy issued before banners were the server's: the backup banner 1.15.0 showed by itself.
+    banners: 'banner' in payload ? readBanners(payload.banner) : [SHIPPED_BANNER],
+    notices: readNotices(payload.notices),
     iat: num(payload.iat),
     exps: Array.isArray(payload.exps)
       ? payload.exps.filter(

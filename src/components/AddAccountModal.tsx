@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useId } from 'react';
 import { Upload, Monitor, Loader2, Camera, ChevronDown } from 'lucide-react';
 import type { Account } from '@/types';
-import { validateSecret, cleanSecret } from '@/utils/totp';
+import { validateSecret, cleanSecret, secretProblem } from '@/utils/totp';
 import { parseQRCode, parseOTPAuthURL, generateRandomColor, qrFailureKey, UnsupportedOTPTypeError } from '@/utils/qr-parser';
 import { saveErrorMessage } from '@/utils/save-error';
 import { captureCurrentTab } from '@/utils/screen-capture';
@@ -35,13 +35,20 @@ interface AddAccountModalProps {
   defaultGroup?: string;
   /** The tab to open on. The first-run guide's "I have a secret key" asks for the form. */
   initialTab?: 'manual' | 'qr';
+  /**
+   * Scan the tab behind the popup as soon as the dialog opens: the first-run
+   * guide's "Scan QR from screen" is that click already, and making the reader
+   * find the same button again on a second screen lost half of them. A miss
+   * leaves the dialog open on the QR tab with its error and every other way in.
+   */
+  scanScreen?: boolean;
 }
 
 /** Every text field on this form. */
 const FIELD =
   'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-all placeholder-gray-400 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-100 dark:placeholder-gray-500';
 
-export function AddAccountModal({ onClose, onAdd, language, groups = [], defaultGroup = '', initialTab = 'qr' }: AddAccountModalProps) {
+export function AddAccountModal({ onClose, onAdd, language, groups = [], defaultGroup = '', initialTab = 'qr', scanScreen = false }: AddAccountModalProps) {
   const t = createT(language);
   const ids = useId();
   const [tab, setTab] = useState<'manual' | 'qr'>(initialTab);
@@ -91,6 +98,13 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
     void reportAddFail(flow, reasonOfKey(key));
   };
 
+  /** The field a refusal is about: marked, and where the cursor goes. */
+  const [badField, setBadField] = useState<'name' | 'secret' | null>(null);
+  const pointAt = (field: 'name' | 'secret') => {
+    setBadField(field);
+    document.getElementById(`${ids}-${field}`)?.focus();
+  };
+
   /** A save that threw: its own words on screen, only the fact in the report. */
   const failSave = (flow: 'manual' | 'qr', message: string) => {
     setError(message);
@@ -119,8 +133,19 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
     if (saving) return;
     setError('');
 
-    if (!name || !secret) {
-      fail('manual', 'addAccount.errorNameRequired');
+    // Said field by field, and the field pointed at: one sentence for "name
+    // and secret are required" left the person to work out which of two boxes
+    // it meant. A name left empty beside a filled-in issuer is not an error at
+    // all — the issuer is the name.
+    const accountName = name.trim() || issuer.trim();
+    // Spaces alone are no key: cleanSecret drops them, and "only letters A–Z"
+    // is no answer to an empty field.
+    const secretGiven = cleanSecret(secret) !== '';
+    if (!accountName || !secretGiven) {
+      if (!accountName && !secretGiven) fail('manual', 'addAccount.errorNameRequired');
+      else if (!secretGiven) fail('manual', 'addAccount.errorSecretMissing');
+      else fail('manual', 'addAccount.errorNameMissing');
+      pointAt(!secretGiven ? 'secret' : 'name');
       return;
     }
 
@@ -134,7 +159,18 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
     }
 
     if (!validateSecret(usableSecret)) {
-      fail('manual', 'addAccount.errorInvalidSecret');
+      const problem = secretProblem(usableSecret);
+      fail(
+        'manual',
+        problem === 'code'
+          ? 'addAccount.errorSecretIsCode'
+          : problem === 'short'
+            ? 'addAccount.errorSecretShort'
+            : problem === 'chars'
+              ? 'addAccount.errorSecretChars'
+              : 'addAccount.errorInvalidSecret'
+      );
+      pointAt('secret');
       return;
     }
 
@@ -149,7 +185,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
     const account: Account = codeType === 'steam'
       ? {
           id: Date.now().toString() + Math.random().toString(36).substring(7),
-          name,
+          name: accountName,
           issuer: issuer || 'Steam',
           secret: cleanSecret(usableSecret),
           algorithm: 'SHA1',
@@ -162,8 +198,8 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
         }
       : {
           id: Date.now().toString() + Math.random().toString(36).substring(7),
-          name,
-          issuer: issuer || name,
+          name: accountName,
+          issuer: issuer || accountName,
           secret: cleanSecret(usableSecret),
           algorithm,
           digits,
@@ -261,13 +297,16 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
     setError('');
   };
 
-  const processQRFile = async (file: File) => {
+  const processQRFile = async (file: File, source: 'file' | 'screen' = 'file') => {
     try {
       setError('');
       const result = await decodeQrFromImage(file);
 
       if (!result) {
-        fail('qr', 'addAccount.errorNoQr');
+        // The capture is of the tab this popup sits over, and most of the
+        // empty ones were taken with no code on it: that is a different
+        // instruction from "try a clearer picture".
+        fail('qr', source === 'screen' ? 'addAccount.errorNoQrScreen' : 'addAccount.errorNoQr');
         return;
       }
 
@@ -422,17 +461,30 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
         const blob = await response.blob();
         const file = new File([blob], 'screenshot.png', { type: 'image/png' });
 
-        await processQRFile(file);
+        await processQRFile(file, 'screen');
       } catch (err) {
         console.error('Screen scan failed:', err);
-        // captureVisibleTab throws on restricted pages (chrome://, Web Store,
-        // PDFs, other extensions). Show an actionable hint instead of the raw
-        // system error, which reads as "it just broke".
-        fail('qr', 'addAccount.errorScreenHint');
+        // Two refusals, two instructions. No activeTab for that tab — the
+        // extension was not opened from its icon there: the welcome page opened
+        // it, or a side panel or window outlived the tab it was opened on. Or
+        // a restricted page (chrome://, Web Store, PDFs, other extensions).
+        // Either beats the raw system error, which reads as "it just broke".
+        const noAccess = /activeTab|all_urls|permission/i.test(err instanceof Error ? err.message : String(err));
+        fail('qr', noAccess ? 'addAccount.errorNoAccess' : 'addAccount.errorScreenHint');
       } finally {
         setScanning(false);
       }
     });
+
+  // Once per opening, held by a ref: a second capture would be a second
+  // screenshot of the page nobody asked for.
+  const scannedOnOpen = useRef(false);
+  useEffect(() => {
+    if (!scanScreen || scannedOnOpen.current) return;
+    scannedOnOpen.current = true;
+    void handleScanFromScreen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Prevent default drag behavior on the entire modal to avoid browser opening the file
   const handleModalDragOver = (e: React.DragEvent) => {
@@ -492,9 +544,13 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                   id={`${ids}-name`}
                   type="text"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    if (badField === 'name') setBadField(null);
+                  }}
                   placeholder={t('addAccount.accountNamePlaceholder')}
-                  className={FIELD}
+                  aria-invalid={badField === 'name' || undefined}
+                  className={`${FIELD} ${badField === 'name' ? 'border-red-400 dark:border-red-500' : ''}`}
                 />
               </div>
 
@@ -506,9 +562,13 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                   id={`${ids}-secret`}
                   type="text"
                   value={secret}
-                  onChange={(e) => handleSecretChange(e.target.value)}
+                  onChange={(e) => {
+                    handleSecretChange(e.target.value);
+                    if (badField === 'secret') setBadField(null);
+                  }}
                   placeholder={t('addAccount.secretKeyPlaceholder')}
-                  className={`${FIELD} font-mono placeholder:font-sans`}
+                  aria-invalid={badField === 'secret' || undefined}
+                  className={`${FIELD} font-mono placeholder:font-sans ${badField === 'secret' ? 'border-red-400 dark:border-red-500' : ''}`}
                 />
                 {/* The heading is the toggle, so the string is reused with its
                     trailing colon trimmed — in every language, rather than

@@ -26,7 +26,8 @@ import { EmptyStateGuide, type GuidePath } from '@/components/EmptyStateGuide';
 import { AccountsUnavailable } from '@/components/AccountsUnavailable';
 import { RestoreBackups, RestoreOffer } from '@/components/RestoreBackups';
 import { CloudBackupSettings } from '@/components/CloudBackupSettings';
-import { CloudBackupBanner } from '@/components/CloudBackupBanner';
+import { ServerBanner } from '@/components/ServerBanner';
+import { NotificationBell } from '@/components/NotificationBell';
 import { GroupFilter } from '@/components/GroupFilter';
 import { SupportFooter } from '@/components/SupportFooter';
 import {
@@ -69,6 +70,7 @@ import { dismissHeldAdd, finishHeldAdd, heldAddToMention } from '@/billing/held-
 import { BILLING_KEYS, recentlySawPaywall } from '@/billing/state';
 import { countOpen } from '@/billing/opens';
 import { reasonOfKey, reportAddCancel, reportAddFail, reportAddStep, reportFirstOpen, reportOnboardView } from '@/billing/onboarding';
+import { openedBySite } from '@/utils/site-opened';
 import { hasPendingCheckout, syncBilling } from '@/billing/sync';
 import { shouldShowPromoBanner, recordFirstOpen } from '@/utils/promo-banner';
 import { recordOpen, shouldShowReviewPrompt, snoozeReviewPrompt } from '@/utils/review-prompt';
@@ -160,6 +162,10 @@ function App() {
   const [showAddModal, setShowAddModal] = useState(false);
   // Which tab the add form opens on: the QR one, unless the way in asked for the key.
   const [addTab, setAddTab] = useState<'manual' | 'qr'>('qr');
+  /** The add dialog opens by scanning the page behind it (the first-run guide's own scan). */
+  const [addScan, setAddScan] = useState(false);
+  /** Opened by the welcome page, not by a click on the icon: no activeTab, so no capture of the tab. */
+  const [openedBySiteState, setOpenedBySiteState] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   // Which branch of the first-run guide is open. Lives here, not in the guide,
   // because the header names it and holds the way back, as it does for Settings.
@@ -278,7 +284,10 @@ function App() {
   // half an hour away — those stay open for days, and coming back is a use.
   useEffect(() => {
     void countOpen();
-    void reportFirstOpen();
+    void openedBySite().then(site => {
+      setOpenedBySiteState(site);
+      void reportFirstOpen(site);
+    });
     if (HOST === 'popup') return;
     let hiddenAt: number | null = null;
     const onVisibility = () => {
@@ -615,7 +624,7 @@ function App() {
   useEffect(() => {
     if (listView !== 'empty' || showSettings || onboardSeen.current) return;
     onboardSeen.current = true;
-    void reportOnboardView();
+    void openedBySite().then(site => reportOnboardView(site));
   }, [listView, showSettings]);
 
   /** Back out of a branch of the guide, from its own button or the header's arrow. */
@@ -708,7 +717,7 @@ function App() {
     via: 'form' | 'qr' = 'form'
   ): Promise<boolean> => {
     if (Array.isArray(account)) {
-      const added = await addWithLimit('migration', origin => addMultipleAccounts(account, origin));
+      const added = await addWithLimit('migration', origin => addMultipleAccounts(account, origin, { continuesBatch: (batch?.index ?? 1) > 1 }));
       if (!added) {
         void reportAddFail('qr', 'limit');
         return false;
@@ -757,8 +766,9 @@ function App() {
    * left: the limit is met on Add, once the account is typed or scanned
    * (handleAddAccount), and nothing on the way there mentions it.
    */
-  const openAddAccount = (tab: 'manual' | 'qr' = 'qr') => {
+  const openAddAccount = (tab: 'manual' | 'qr' = 'qr', scan = false) => {
     setAddTab(tab);
+    setAddScan(scan);
     setShowAddModal(true);
   };
 
@@ -777,7 +787,7 @@ function App() {
       const added = await addAccount(account, { kind: 'undo' });
       if (added) {
         const order = restoredOrder((await getAccounts()).map(a => a.id), account.id, previousIds);
-        // Best-effort: the account is back either way, and at the bottom of the
+        // Best-effort: the account is back either way, and at the top of the
         // list is a smaller problem than a failure message over a success.
         if (order) await reorderAccounts(order).catch(error => console.warn('Could not restore the position:', error));
       }
@@ -1066,7 +1076,8 @@ function App() {
     let result;
     try {
       const migration = parsed.type === 'migration';
-      const added = await addWithLimit(migration ? 'migration' : 'qr', origin => addMultipleAccounts(accountsToAdd, origin), {
+      const continuesBatch = migration && (parsed.batch?.index ?? 1) > 1;
+      const added = await addWithLimit(migration ? 'migration' : 'qr', origin => addMultipleAccounts(accountsToAdd, origin, { continuesBatch }), {
         hold: migration ? undefined : accountsToAdd,
       });
       if (!added) {
@@ -1243,6 +1254,8 @@ function App() {
   // three without once seeing the offer.
   const vaultPromptVisible =
     showVaultPrompt && !showBackupReminder && !error && timeOffsetSec === null && !showSettings;
+  // The server's vault banner asks what VaultPrompt asks, so never both at once.
+  const offersVaultBanner = vault.enabled === false && accounts.length > 0 && !vaultPromptVisible;
   const vaultPromptCounted = useRef(false);
   useEffect(() => {
     if (!vaultPromptVisible || vaultPromptCounted.current) return;
@@ -1535,6 +1548,14 @@ function App() {
             </h1>
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
+            {/* The server's notifications (NotificationBell), there only while
+                one of them is for this install — the server decides who, new
+                installs included. Not inside a branch of the guide, whose
+                title needs the room. With it the icons are four again, and at
+                320px the longest titles end in an ellipsis. */}
+            {!guidePath && (
+              <NotificationBell language={language} offersVault={vault.enabled === false} onVault={() => setShowVaultSetup(true)} />
+            )}
             {/* Not while a branch of the guide is open: someone following steps
                 with a phone in the other hand is not choosing a theme, and the
                 title — a whole sentence there — needs the room. Help and
@@ -1669,8 +1690,8 @@ function App() {
               from the same parts (see SettingsSection). A new setting goes into
               the section it belongs to, not onto the end. */}
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
-            {/* Above everything, until it is closed or there is nothing to offer. */}
-            <CloudBackupBanner language={language} />
+            {/* Above everything, when the server's banner stands here (ServerBanner). */}
+            <ServerBanner language={language} place="settings" offersVault={offersVaultBanner} onVault={() => setShowVaultSetup(true)} />
 
             {/* First, and only when there is something to say (see ProSettings). */}
             <ProSettings language={language} />
@@ -2015,18 +2036,28 @@ function App() {
                 openPath={openGuidePath}
                 onOpenPath={setOpenGuidePath}
                 onBack={leaveGuidePath}
-                onAddAccount={() => openAddAccount()}
+                onScanScreen={() => openAddAccount('qr', true)}
+                canScanPage={!openedBySiteState}
                 onEnterKey={() => openAddAccount('manual')}
                 onImport={handleImportClick}
                 onPasteLinks={() => void handlePasteLinks()}
                 onScanWithCamera={() =>
                   chrome.tabs.create({ url: chrome.runtime.getURL('scan.html') })
                 }
+                onScanWithImage={() =>
+                  chrome.tabs.create({ url: chrome.runtime.getURL('scan.html?mode=image') })
+                }
               />
             </>
           )
         ) : (
           <div data-ui="account-list" className="bg-white dark:bg-dark-800 pb-20">
+            {/* The server's banner, when it stands over the accounts. Not in a
+                filtered view, where it would push the result down, and not
+                under the What's New modal, which is an ask of its own. */}
+            {!isFiltered && whatsNewVersion === null && (
+              <ServerBanner language={language} place="accounts" offersVault={offersVaultBanner} onVault={() => setShowVaultSetup(true)} />
+            )}
             {suggestedAccount && (
               <>
                 {/* AccountCard must stay the last child so its own `last:after:hidden`
@@ -2140,6 +2171,7 @@ function App() {
           groups={groups.map(group => group.name)}
           defaultGroup={activeGroup ?? ''}
           initialTab={addTab}
+          scanScreen={addScan}
         />
       )}
 

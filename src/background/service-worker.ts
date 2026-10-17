@@ -3,6 +3,7 @@
 
 import { COMMAND_ID, MENU_ID, startQuickFill, syncContextMenu } from './quick-fill';
 import { applyOpenMode, registerOpenMode } from './open-mode';
+import { registerSiteOpen } from './site-open';
 import { QUICK_FILL_ENABLED_KEY } from '@/utils/quick-fill';
 import { restoreBadge, showUpdateBadge } from '@/utils/update-badge';
 import {
@@ -155,6 +156,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // until the next browser restart.
 void applyOpenMode();
 registerOpenMode();
+registerSiteOpen();
 
 // Both entry points grant `activeTab` for this one invocation, which is what
 // makes reading the tab's address and injecting into it possible without any

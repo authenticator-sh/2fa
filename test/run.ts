@@ -43,6 +43,8 @@ const suites = [
   ['toasts, dialogs, Escape and the order of the list', () => import('./ui-feedback.test')],
   ['the free limit, the license and what leaves the machine', () => import('./billing.test')],
   ['the way to a first account', () => import('./onboarding.test')],
+  ['why a camera is refused', () => import('./camera-denial.test')],
+  ['what is wrong with a refused secret', () => import('./secret-problem.test')],
   ['the store listing against the manifest', () => import('./listing.test')],
 ] as const;
 
