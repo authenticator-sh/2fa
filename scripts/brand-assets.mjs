@@ -1,6 +1,13 @@
 // Renders the images the README and the GitHub repository page show:
-// the wordmark banner (light and dark), and the social preview card GitHub
-// puts on a link to this repository.
+// the wordmark banner, and the social preview card GitHub puts on a link to
+// this repository.
+//
+// One banner, not a light and a dark one behind <picture>: GitHub hands the
+// choice to prefers-color-scheme, which is the operating system's theme, not
+// the one picked on GitHub. Dark system + light GitHub showed the dark
+// variant's pale wordmark on white, all but invisible. The wordmark is now the
+// mark's own blue (#1a73e8), which holds 4.6:1 on GitHub's white and 4:1 on its
+// dark #0d1117 — enough for type this size on either.
 //
 //   npm run brand-assets
 //
@@ -74,7 +81,7 @@ function socialPreview() {
   ${mark(340, 120, 96)}
   <text x="460" y="200" font-family='${FONT}' font-size="76" font-weight="500" fill="#202124">Authenticator</text>
   <text x="640" y="312" text-anchor="middle" font-family='${FONT}' font-size="38" fill="#3c4043">Open-source TOTP codes in Chrome</text>
-  <text x="640" y="382" text-anchor="middle" font-family='${FONT}' font-size="30" fill="#5f6368">No servers · No analytics · No host permissions</text>
+  <text x="640" y="382" text-anchor="middle" font-family='${FONT}' font-size="30" fill="#5f6368">Your secrets never leave your device · No host permissions</text>
   <rect x="490" y="442" width="300" height="4" rx="2" fill="#4285f4" opacity="0.35"/>
   <text x="640" y="518" text-anchor="middle" font-family='${FONT}' font-size="26" fill="#80868b">github.com/authenticator-sh/2fa</text>
 </svg>`;
@@ -93,8 +100,7 @@ async function writeBanner(name, color) {
 
 mkdirSync(OUT, { recursive: true });
 
-await writeBanner("banner-light.png", "#202124");
-await writeBanner("banner-dark.png", "#e6edf3");
+await writeBanner("banner.png", "#1a73e8");
 
 await sharp(Buffer.from(socialPreview()))
   .png({ compressionLevel: 9 })

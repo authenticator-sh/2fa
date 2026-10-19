@@ -1,9 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.png">
-  <img src=".github/assets/banner-light.png" alt="Authenticator" width="360">
-</picture>
+<img src=".github/assets/banner.png" alt="Authenticator" width="360">
 
 **TOTP codes in Chrome. Your secrets never leave your device. No host permissions.**
 
