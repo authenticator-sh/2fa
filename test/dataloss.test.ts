@@ -662,4 +662,30 @@ export async function run(): Promise<void> {
   const revisionBefore = areas.local.authenticator_accounts_rev;
   check('gone', (await storage.updateAccount('deleted-elsewhere', { name: 'x' })) === false);
   check('and nothing is written', areas.local.authenticator_accounts_rev === revisionBefore);
+
+  // The selection bar's Delete: one write for all of them, each retired as a
+  // single delete is — and Undo brings every one back past its marker.
+  scenario('Deleting several accounts at once: none comes back from a stale sync copy');
+  await resetState();
+  await storage.saveAccounts(ACCOUNTS);
+  await flush();
+  faults.failSyncSet = true; // the sync copy never catches up
+  areas.sync.authenticator_accounts_0 = ACCOUNTS.map(a => ({ ...a }));
+  const kept = ACCOUNTS.filter(a => a.id !== 'a1' && a.id !== 'a3').map(a => a.id).join();
+  const before = await storage.getAccounts();
+  const removed = await storage.deleteAccounts(['a1', 'a3', 'not-there']);
+  await flush();
+  {
+    const ids = (await storage.getAccounts()).map(a => a.id).join();
+    faults.failSyncSet = false;
+    check('both are deleted, the unknown id ignored', removed === 2, String(removed));
+    check('and they stay deleted', ids === kept, ids);
+  }
+  scenario('Undo puts all of them back');
+  await storage.addMultipleAccounts(before.filter(a => a.id === 'a1' || a.id === 'a3'), { kind: 'undo' });
+  await flush();
+  {
+    const ids = (await storage.getAccounts()).map(a => a.id).sort().join();
+    check('every account is back', ids === ACCOUNTS.map(a => a.id).sort().join(), ids);
+  }
 }

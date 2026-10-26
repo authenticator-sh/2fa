@@ -373,7 +373,7 @@ export function installMocks(): void {
         },
       },
     },
-    runtime: { getManifest: () => ({ version: 'test' }) },
+    runtime: { getManifest: () => ({ version: 'test' }), getPlatformInfo: async () => ({ os: 'mac', arch: 'arm64', nacl_arch: 'arm' }) },
   };
 
   (globalThis as any).indexedDB = {

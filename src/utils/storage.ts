@@ -1075,15 +1075,19 @@ export async function getAccounts(): Promise<Account[]> {
 }
 
 /**
- * How many accounts this device holds, from local storage alone. For the
+ * How many accounts this device holds, and in how many groups, from local
+ * storage alone. For the
  * billing check-in: a full read merges sync and starts the sync download
  * window, and the service worker checks in at install time — before a new
  * computer has received its synced accounts. Started there, the window had
  * run out by the time they arrived, and the first account added by hand could
  * then overwrite the only cloud copy. Throws like getAccounts (locked vault).
  */
-export async function countLocalAccounts(): Promise<number> {
-  return (await decodeAccounts(await readLocalRecords())).length;
+export async function countLocalAccounts(): Promise<{ accounts: number; groups: number }> {
+  const accounts = await decodeAccounts(await readLocalRecords());
+  // Distinct names as the popup's filter shows them (trimmed, blank = ungrouped).
+  const groups = new Set(accounts.map(account => account.group?.trim()).filter(Boolean));
+  return { accounts: accounts.length, groups: groups.size };
 }
 
 export interface SaveOptions {
@@ -1469,6 +1473,12 @@ export async function updateAccount(id: string, updates: Partial<Account>): Prom
 
       const merged = { ...accounts[index], ...updates };
 
+      // Moved to another group by the edit form: the rank belonged to the old
+      // one (see regrouped).
+      if ('group' in updates && (updates.group?.trim() ?? '') !== (accounts[index].group?.trim() ?? '') && !('groupRank' in updates)) {
+        delete merged.groupRank;
+      }
+
       // An explicit `undefined` means "clear this field" — clearing an account's
       // group, say. Spreading it leaves the key present with an undefined value,
       // which chrome.storage serialises as null, and `null.trim()` throws on the
@@ -1497,6 +1507,137 @@ export async function updateAccount(id: string, updates: Partial<Account>): Prom
     { beforeSave: ({ retired }) => (retired ? markRetired(retired) : Promise.resolve()) }
   );
   return outcome.found;
+}
+
+/**
+ * What an account's grouping was before a group edit, so the edit can be taken
+ * back: `group` and `groupRank` absent mean it had none.
+ */
+export interface GroupPlacement {
+  id: string;
+  group?: string;
+  groupRank?: number;
+}
+
+function placementOf(account: Account): GroupPlacement {
+  const placement: GroupPlacement = { id: account.id };
+  if (account.group !== undefined) placement.group = account.group;
+  if (account.groupRank !== undefined) placement.groupRank = account.groupRank;
+  return placement;
+}
+
+/**
+ * The account in `group`, or in none when it is blank.
+ *
+ * Its rank goes with the old group: the new one's place in the strip is held
+ * by the accounts already in it, and a rank carried over would drag the group
+ * it joins to wherever the one it left used to stand.
+ */
+function regrouped(account: Account, group: string | undefined): Account {
+  const changed = { ...account };
+  // Deleted rather than set to undefined, as in updateAccount: chrome.storage
+  // turns an undefined value into null, and null.trim() throws on the next read.
+  delete changed.groupRank;
+  const name = group?.trim();
+  if (name) changed.group = name;
+  else delete changed.group;
+  return changed;
+}
+
+/**
+ * Move every account in group `from` into `to`, or out of any group when `to`
+ * is undefined — renaming a group and deleting one, which are the same edit.
+ *
+ * One write for the whole group rather than an updateAccount per member: a
+ * popup closed halfway through ten of those left the group split in two, half
+ * under the old name and half under the new. Renaming onto a name already in
+ * use merges the two, which is what typing that name into each account would
+ * have done.
+ *
+ * A rename keeps the group where it stood in the strip; a delete clears the
+ * ranks, which mean nothing outside a group.
+ *
+ * Matched on the trimmed name, the same way the filter strip counts them, so an
+ * account typed as "Work " moves with the rest of "Work". Returns where each
+ * moved account was, for undo — empty when the group was emptied in another
+ * window meanwhile.
+ */
+export async function renameGroup(from: string, to: string | undefined): Promise<GroupPlacement[]> {
+  const target = to?.trim() || undefined;
+  return mutateAccounts<GroupPlacement[]>(accounts => {
+    const before: GroupPlacement[] = [];
+    const next = accounts.map(account => {
+      if (account.group?.trim() !== from) return account;
+      before.push(placementOf(account));
+      if (target === undefined) return regrouped(account, undefined);
+      return { ...account, group: target };
+    });
+    return { accounts: before.length > 0 ? next : null, result: before };
+  });
+}
+
+/**
+ * Put these accounts in `group`, or in none when it is blank — the bulk move
+ * from the selection bar and the one-account move from a card's menu.
+ *
+ * Returns where each account was before, for undo. Accounts deleted in another
+ * window meanwhile are skipped, not recreated.
+ */
+export async function moveToGroup(ids: readonly string[], group: string | undefined): Promise<GroupPlacement[]> {
+  const wanted = new Set(ids);
+  const target = group?.trim() || undefined;
+  return mutateAccounts<GroupPlacement[]>(accounts => {
+    const before: GroupPlacement[] = [];
+    const next = accounts.map(account => {
+      if (!wanted.has(account.id) || (account.group?.trim() || undefined) === target) return account;
+      before.push(placementOf(account));
+      return regrouped(account, target);
+    });
+    return { accounts: before.length > 0 ? next : null, result: before };
+  });
+}
+
+/** Put accounts back where a group edit found them — the undo of the three above. */
+export async function restoreGroupPlacements(placements: readonly GroupPlacement[]): Promise<void> {
+  const byId = new Map(placements.map(placement => [placement.id, placement]));
+  await mutateAccounts<void>(accounts => {
+    let changed = false;
+    const next = accounts.map(account => {
+      const placement = byId.get(account.id);
+      if (!placement) return account;
+      changed = true;
+      const restored = { ...account };
+      delete restored.group;
+      delete restored.groupRank;
+      if (placement.group !== undefined) restored.group = placement.group;
+      if (placement.groupRank !== undefined) restored.groupRank = placement.groupRank;
+      return restored;
+    });
+    return { accounts: changed ? next : null, result: undefined };
+  });
+}
+
+/**
+ * The order of the group chips, as the user dragged them.
+ *
+ * Written into the accounts, not kept as a list of names beside them: with a
+ * vault on, a list of group names in chrome.storage would put "Crypto" and
+ * "Work — Acme" on disk in the clear — the metadata the vault exists to hide,
+ * see active-group.ts. Inside the account records the order is encrypted with
+ * everything else, and travels in exports and cloud backups for free.
+ */
+export async function reorderGroups(names: readonly string[]): Promise<void> {
+  const rank = new Map(names.map((name, index) => [name, index]));
+  await mutateAccounts<void>(accounts => {
+    let changed = false;
+    const next = accounts.map(account => {
+      const at = rank.get(account.group?.trim() ?? '');
+      if (at === undefined || account.groupRank === at) return account;
+      changed = true;
+      return { ...account, groupRank: at };
+    });
+    return { accounts: changed ? next : null, result: undefined };
+  });
 }
 
 export async function deleteAccount(id: string): Promise<void> {
@@ -1534,6 +1675,36 @@ export async function deleteAccount(id: string): Promise<void> {
       beforeSave: markRetired,
     }
   );
+}
+
+/**
+ * Delete several accounts in one write — the selection bar's Delete.
+ *
+ * One write rather than a deleteAccount per account for the reason the group
+ * edits give: a popup closed halfway through left some of the selection gone
+ * and some not, with no way to tell which from the list. Each account is
+ * retired exactly as a single delete retires it — every stored copy of its
+ * seed, marked before the write — so sync cannot bring any of them back.
+ * Returns how many were deleted; ids already gone are skipped.
+ */
+export async function deleteAccounts(ids: readonly string[]): Promise<number> {
+  const wanted = new Set(ids);
+  const outcome = await mutateAccounts<{ removed: number; retired: Retired }>(
+    (accounts, stored, seedOf) => {
+      const targets = accounts.filter(acc => wanted.has(acc.id));
+      if (targets.length === 0) return { accounts: null, result: { removed: 0, retired: { identities: [], secrets: [] } } };
+      const retired: Retired = { identities: [], secrets: [] };
+      for (const target of targets) {
+        const copies = retiredCopies(stored, seedOf, target.id, secretKey(target.secret));
+        retired.identities.push(...copies.identities);
+        retired.secrets.push(...copies.secrets);
+      }
+      return { accounts: accounts.filter(acc => !wanted.has(acc.id)), result: { removed: targets.length, retired } };
+    },
+    // As deleteAccount, and for the same reasons: see there.
+    { allowShrink: true, awaitSync: true, beforeSave: ({ retired }) => markRetired(retired) }
+  );
+  return outcome.removed;
 }
 
 export async function exportAccounts(): Promise<string> {

@@ -28,7 +28,8 @@ async function askingPage(context: BrowserContext, origin: string, extensionId: 
 
 test('our site opens the popup without a click, the popup really opens, and it is not counted as the person opening it', async ({ context, extensionId, serviceWorker }) => {
   const out = await askingPage(context, 'https://www.authenticator.sh', extensionId);
-  await expect(out).toContainText('ping {"ok":true}');
+  // Says whether the icon is on the toolbar: a fresh profile has it behind the puzzle.
+  await expect(out).toContainText('ping {"ok":true,"pinned":false}');
   await expect(out).toContainText('open {"ok":true}');
   // Written by the popup page as it starts, not by the message handler — and
   // as the page's open, not the person's: no first open, the stage untouched.

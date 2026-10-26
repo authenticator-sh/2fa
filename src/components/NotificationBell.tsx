@@ -176,7 +176,7 @@ export function NotificationBell({ language, offersVault, onVault }: { language:
           role="region"
           aria-label={t('notices.title')}
           style={{ top }}
-          className="fixed inset-x-3 z-50 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800"
+          className="fixed inset-x-3 z-50 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg dark:border-dark-600 dark:bg-dark-800 anim-menu"
         >
           <div className="border-b border-gray-100 px-3.5 py-2.5 text-sm font-semibold text-gray-900 dark:border-dark-700 dark:text-gray-100">
             {t('notices.title')}

@@ -30,11 +30,18 @@ export function ServerBanner({
   language,
   place,
   offersVault = false,
+  hasAccounts = false,
   onVault,
 }: {
   language: Language;
   place: Banner['place'];
   offersVault?: boolean;
+  /**
+   * Any accounts here. The backup banner waits for one: a copy of nothing is
+   * nothing to sell, and in October 2026 a third of those who opened its
+   * paywall had no account at all (327 of 1,080), most gone in seconds.
+   */
+  hasAccounts?: boolean;
   onVault?: () => void;
 }) {
   const t = createT(language);
@@ -64,7 +71,7 @@ export function ServerBanner({
       : pickBanner(banners, {
           place,
           language,
-          offersBackup: offersCloudBackup(local),
+          offersBackup: offersCloudBackup(local) && hasAccounts,
           canBuy: !local.hasPro && !local.pending && local.buyable,
           offersVault: offersVault && !!onVault,
           dismissed,

@@ -16,7 +16,7 @@ import {
   type InstallHint,
 } from '@/billing/state';
 import { isSyncRequestMessage, syncBilling } from '@/billing/sync';
-import { applyUninstallUrl, markInstalled, UNINSTALL_FEEDBACK_URL } from '@/billing/onboarding';
+import { applyUninstallUrl, markInstalled, registerOnboardScreen, UNINSTALL_FEEDBACK_URL } from '@/billing/onboarding';
 import type { LegacySource } from '@/billing/types';
 import { isSyncEnabled } from '@/utils/sync-preference';
 
@@ -157,6 +157,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 void applyOpenMode();
 registerOpenMode();
 registerSiteOpen();
+// The popup's port while "add your first account" is up: its closing is how
+// the time on that screen ends (billing/onboarding.ts watchOnboardScreen).
+registerOnboardScreen();
 
 // Both entry points grant `activeTab` for this one invocation, which is what
 // makes reading the tab's address and injecting into it possible without any

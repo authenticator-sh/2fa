@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { Copy, Check, Trash2, GripVertical, Pencil, Share2 } from 'lucide-react';
+import { Copy, Check, Trash2, GripVertical, Pencil, Pin, Share2 } from 'lucide-react';
 import type { Account } from '@/types';
 import { colorForKey } from '@/utils/qr-parser';
 import { accountLabel } from '@/utils/account-label';
@@ -99,6 +99,15 @@ interface AccountCardProps {
   isSuggested?: boolean;
   /** Off while the list is already filtered to one group — the chip says it. */
   showGroup?: boolean;
+  /**
+   * Right-click on the row. `copy` is the row's own copy, so the menu's "Copy
+   * code" is the same click on the code — quick fill, usage, "Copied" and all.
+   */
+  onMenu?: (account: Account, x: number, y: number, copy: () => void) => void;
+  /** The list is choosing accounts: a click ticks the row instead of copying. */
+  selecting?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }
 
 /**
@@ -135,6 +144,10 @@ export const AccountCard = memo(function AccountCard({
   currentDomain,
   isSuggested,
   showGroup,
+  onMenu,
+  selecting = false,
+  selected = false,
+  onToggleSelect,
 }: AccountCardProps) {
   const t = createT(language);
   const totp = useTOTP(account);
@@ -233,10 +246,75 @@ export const AccountCard = memo(function AccountCard({
   const badgeClass = (compact: boolean) =>
     `${compact ? 'min-w-0 max-w-[70px]' : 'flex-shrink-0 max-w-[110px]'} truncate text-[10px] font-medium leading-none text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-dark-700 border border-gray-200 dark:border-dark-600 px-1.5 py-[3px] rounded-full`;
 
+  // The same instant tooltip as the name: the native `title` it had took a
+  // second to appear and never did in the desktop app's web view, so a badge
+  // cut to "G…" could not be read at all.
   const groupBadgeFor = (compact: boolean) =>
-    showGroup && groupName ? <span className={badgeClass(compact)} title={groupName}>{groupName}</span> : null;
+    showGroup && groupName ? <TruncatedName label={groupName} className={badgeClass(compact)} /> : null;
 
   const groupBadge = groupBadgeFor(false);
+
+  const pinMark = account.pinned ? (
+    <span className="flex-shrink-0 text-gray-400 dark:text-gray-500" title={t('menu.pinned')}>
+      <Pin size={12} aria-hidden className="rotate-45" />
+      <span className="sr-only">{t('menu.pinned')}</span>
+    </span>
+  ) : null;
+
+  // While choosing, the whole row is one button that ticks it — nothing under
+  // it copies, opens or deletes. The mark takes the timer's place: which code
+  // is current does not matter while picking.
+  const selectOverlay = selecting ? (
+    <button
+      type="button"
+      data-row-action
+      role="checkbox"
+      aria-checked={selected}
+      aria-label={fullName}
+      onClick={() => onToggleSelect?.(account.id)}
+      className={`absolute inset-0 z-10 rounded-none text-start transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500 ${
+        selected ? 'bg-accent-500/10 dark:bg-accent-400/10' : 'hover:bg-gray-500/5'
+      }`}
+    />
+  ) : null;
+
+  const selectMark = (size: number) => (
+    <span
+      aria-hidden
+      style={{ width: size, height: size }}
+      className="grid place-items-center"
+    >
+      <span
+        className={`grid h-[22px] w-[22px] place-items-center rounded-full border-2 transition-colors ${
+          selected ? 'border-accent-600 bg-accent-600 text-white' : 'border-gray-300 dark:border-dark-500'
+        }`}
+      >
+        {selected && <Check size={14} strokeWidth={3} className="anim-check" />}
+      </span>
+    </span>
+  );
+
+  const ring = (size?: number) =>
+    selecting ? selectMark(size ?? 40) : totp ? <ProgressRing remaining={totp.remaining} period={totp.period} size={size} /> : null;
+
+  const rowProps = {
+    'data-account-id': account.id,
+    onContextMenu: (event: React.MouseEvent) => {
+      if (!onMenu || selecting) return;
+      event.preventDefault();
+      onMenu(account, event.clientX, event.clientY, () => void handleCopy());
+    },
+    // The menu key and Shift+F10 open it under the focused control. Not left
+    // to the browser's own contextmenu event, which a keyboard does not always
+    // raise — and where it does, the handler above takes the same state again.
+    onKeyDown: (event: React.KeyboardEvent) => {
+      if (!onMenu || selecting) return;
+      if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+      event.preventDefault();
+      const rect = (event.target as HTMLElement).getBoundingClientRect();
+      onMenu(account, rect.left + 8, rect.bottom, () => void handleCopy());
+    },
+  };
 
   const steam = isSteamAccount(account);
   // Steam's five characters are shown the way Steam shows them, unbroken:
@@ -275,7 +353,10 @@ export const AccountCard = memo(function AccountCard({
     onDragEnd: () => onDragEnd?.(),
   };
 
-  const baseClass = `relative group bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700 transition-all duration-200 after:content-[''] after:absolute after:bottom-0 after:h-px after:bg-gray-200 dark:after:bg-dark-600 last:after:hidden ${
+  // Without `group` while choosing, so hovering a row does not bring up its
+  // share, edit and delete buttons from under the tick overlay — visible but
+  // dead, they looked like the way to act on the selection.
+  const baseClass = `relative ${selecting ? '' : 'group'} bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700 transition-all duration-200 after:content-[''] after:absolute after:bottom-0 after:h-px after:bg-gray-200 dark:after:bg-dark-600 last:after:hidden ${
     isDragOver ? 'border-t-2 border-accent-500' : ''
   }`;
 
@@ -292,6 +373,7 @@ export const AccountCard = memo(function AccountCard({
     return (
       <div
         {...dragProps}
+        {...rowProps}
         data-testid="account-card"
         className={`${baseClass} py-3 ${viewMode === 'compact' ? 'px-3 after:inset-x-3' : 'px-4 after:inset-x-4'}`}
       >
@@ -322,7 +404,9 @@ export const AccountCard = memo(function AccountCard({
               <Trash2 size={13} />
             </button>
           </div>
+          {selecting && selectMark(26)}
         </div>
+        {selectOverlay}
       </div>
     );
   }
@@ -330,7 +414,7 @@ export const AccountCard = memo(function AccountCard({
   // Hidden mode — just name, click whole row to copy
   if (viewMode === 'hidden') {
     return (
-      <div {...dragProps} data-testid="account-card" className={`${baseClass} px-4 py-2.5 after:inset-x-4 overflow-hidden`}>
+      <div {...dragProps} {...rowProps} data-testid="account-card" className={`${baseClass} px-4 py-2.5 after:inset-x-4 overflow-hidden`}>
         <div className="flex items-center gap-2">
           {draggable && (
             <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 dark:text-gray-400 flex-shrink-0">
@@ -340,6 +424,7 @@ export const AccountCard = memo(function AccountCard({
 
           <button
             onClick={handleCopy}
+            data-row-action
             className="flex-1 min-w-0 flex items-center gap-2 text-start group/copy"
           >
             {showAvatar && <Avatar account={account} size={18} />}
@@ -347,6 +432,7 @@ export const AccountCard = memo(function AccountCard({
               label={fullName}
               className="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100"
             />
+            {pinMark}
             {suggestedBadge}
             {groupBadgeFor(true)}
             <span className={`flex-shrink-0 transition-opacity ${copied ? 'opacity-100' : 'opacity-0 group-hover/copy:opacity-100'}`}>
@@ -392,9 +478,10 @@ export const AccountCard = memo(function AccountCard({
           {/* Same 26px ring as the compact row: at the default 40 the mode that
               hides the codes ended up the tallest of the three. */}
           <div className="flex-shrink-0">
-            <ProgressRing remaining={totp.remaining} period={totp.period} size={26} />
+            {ring(26)}
           </div>
         </div>
+        {selectOverlay}
       </div>
     );
   }
@@ -419,10 +506,11 @@ export const AccountCard = memo(function AccountCard({
       // The drag goes with the handle. A row that still reorders with no
       // affordance, and jumps 2px mid-drag when isDragOver lands, is worse than
       // a row that does not reorder; that stays a normal-view job.
-      <div data-testid="account-card" className={`${baseClass} py-1.5 px-3 after:inset-x-3 overflow-hidden`}>
+      <div {...rowProps} data-testid="account-card" className={`${baseClass} py-1.5 px-3 after:inset-x-3 overflow-hidden`}>
         <div className="flex items-center gap-1.5">
           <button
             onClick={handleCopy}
+            data-row-action
             className="flex-1 min-w-0 flex items-center gap-1.5 text-start group/copy"
           >
             {showAvatar && <Avatar account={account} size={18} />}
@@ -433,6 +521,7 @@ export const AccountCard = memo(function AccountCard({
               label={fullName}
               className="min-w-0 truncate text-sm text-gray-700 dark:text-gray-300"
             />
+            {pinMark}
             {suggestedBadge}
             {groupBadgeFor(true)}
             <span
@@ -485,9 +574,10 @@ export const AccountCard = memo(function AccountCard({
           </div>
 
           <div className="flex-shrink-0">
-            <ProgressRing remaining={totp.remaining} period={totp.period} size={26} />
+            {ring(26)}
           </div>
         </div>
+        {selectOverlay}
       </div>
     );
   }
@@ -497,7 +587,7 @@ export const AccountCard = memo(function AccountCard({
     // data-testid on the row and the code: what the Playwright suite (e2e/)
     // reads. The row has no role of its own to find it by, and the digits are
     // one text node among the name and the badges.
-    <div {...dragProps} data-testid="account-card" className={`${baseClass} p-3 px-4 after:inset-x-4`}>
+    <div {...dragProps} {...rowProps} data-testid="account-card" className={`${baseClass} p-3 px-4 after:inset-x-4`}>
       <div className="flex items-start justify-between mb-1.5">
         <div className="flex items-center gap-1.5 flex-1 min-w-0">
           {showAvatar && <Avatar account={account} size={20} />}
@@ -505,7 +595,8 @@ export const AccountCard = memo(function AccountCard({
             label={fullName}
             className="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-gray-100"
           />
-          {suggestedBadge}
+          {pinMark}
+            {suggestedBadge}
           {groupBadge}
           {draggable && (
             <div className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 dark:text-gray-400 flex-shrink-0">
@@ -543,6 +634,7 @@ export const AccountCard = memo(function AccountCard({
       <div className="flex items-center justify-between">
         <button
           onClick={handleCopy}
+            data-row-action
           className="flex-1 flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-dark-700 rounded-lg p-1.5 -m-1.5 transition-colors group/copy relative"
         >
           {/* dir="ltr" is load-bearing, not tidiness. The code is drawn in
@@ -585,9 +677,10 @@ export const AccountCard = memo(function AccountCard({
         </button>
 
         <div className="ms-2">
-          <ProgressRing remaining={totp.remaining} period={totp.period} />
+          {ring()}
         </div>
       </div>
+      {selectOverlay}
     </div>
   );
 });

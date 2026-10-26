@@ -486,7 +486,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
         <input
           ref={importInputRef}
           type="file"
-          accept="application/json,text/plain,image/*,.maFile"
+          accept="application/json,text/plain,image/*,.maFile,.2fas"
           onChange={handleImport}
           className="hidden"
           tabIndex={-1}
@@ -506,7 +506,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
 
       {showExportChoice && (
         <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 anim-backdrop"
           onClick={closeExportChoice}
         >
           {/* max-h-full + overflow-y-auto, and a way out that is not the button:
@@ -519,7 +519,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
             aria-modal="true"
             aria-labelledby={titleId}
             onClick={event => event.stopPropagation()}
-            className="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 max-w-sm w-full max-h-full overflow-y-auto shadow-xl p-5"
+            className="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 max-w-sm w-full max-h-full overflow-y-auto shadow-xl p-5 anim-pop"
           >
             <h2 id={titleId} className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-3">
               {t('export.chooseTitle')}

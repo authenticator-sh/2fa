@@ -20,6 +20,8 @@ export interface Toast {
   action?: ToastAction;
   /** How long it stays up, not counting time spent paused. */
   durationMs: number;
+  /** How many times this same message was shown while it was up — "×4". */
+  count?: number;
 }
 
 export interface ConfirmRequest {
@@ -56,6 +58,8 @@ export interface PromptRequest {
   title: string;
   body?: string;
   placeholder?: string;
+  /** What the field starts with, selected — the current name, for a rename. */
+  defaultValue?: string;
   password?: boolean;
   /**
    * Render a textarea instead of an input.
@@ -128,13 +132,44 @@ function startTimer(id: number, timer: ToastTimer): void {
   timer.handle = setTimeout(() => dismissToast(id), timer.remaining);
 }
 
+/**
+ * The most toasts on screen at once. Adding six accounts in a row stacked six
+ * "Account added" pills over half the list — the very rows they were about.
+ */
+export const MAX_TOASTS = 3;
+
 export function toast(
   kind: ToastKind,
   message: string,
   options: { action?: ToastAction; durationMs?: number } = {}
 ): number {
-  const id = nextId++;
   const durationMs = options.durationMs ?? toastDuration(kind, message, Boolean(options.action));
+
+  // The same news again while it is still up is one toast counting, not a
+  // second one under it. Not for toasts with a button: each Undo undoes its
+  // own thing.
+  const same = options.action
+    ? undefined
+    : state.toasts.find(existing => !existing.action && existing.kind === kind && existing.message === message);
+  if (same) {
+    state = {
+      ...state,
+      toasts: state.toasts.map(existing =>
+        existing === same ? { ...existing, count: (existing.count ?? 1) + 1, durationMs } : existing
+      ),
+    };
+    emit();
+    const timer = timers.get(same.id);
+    if (timer) {
+      if (timer.handle) clearTimeout(timer.handle);
+      timer.handle = null;
+      timer.remaining = durationMs;
+      if (!paused) startTimer(same.id, timer);
+    }
+    return same.id;
+  }
+
+  const id = nextId++;
   state = {
     ...state,
     toasts: [...state.toasts, { id, kind, message, durationMs, ...(options.action ? { action: options.action } : {}) }],
@@ -143,6 +178,15 @@ export function toast(
   const timer: ToastTimer = { handle: null, remaining: durationMs, startedAt: 0 };
   timers.set(id, timer);
   if (!paused) startTimer(id, timer);
+
+  // Over the cap, the oldest goes — but not one with a button while a plain one
+  // can go instead: an Undo that vanishes because two more confirmations came
+  // in is an undo taken away.
+  while (state.toasts.length > MAX_TOASTS) {
+    const oldest = state.toasts.find(existing => !existing.action && existing.id !== id) ?? state.toasts[0];
+    if (oldest.id === id) break;
+    dismissToast(oldest.id);
+  }
   return id;
 }
 

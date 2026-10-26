@@ -49,11 +49,11 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 anim-backdrop">
       {/* The changelog can run long, so it scrolls while the rating block and
           the dismiss button stay pinned — the rating is the whole reason this
           modal earns its interruption, and it must never be scrolled past. */}
-      <div className="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 max-w-sm w-full max-h-[92vh] shadow-xl flex flex-col overflow-hidden">
+      <div className="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 max-w-sm w-full max-h-[92vh] shadow-xl flex flex-col overflow-hidden anim-pop">
         <div className="px-5 pt-5 pb-2 flex-shrink-0">
           <div className="flex items-center gap-2">
             <Sparkles className="text-accent-500" size={20} />

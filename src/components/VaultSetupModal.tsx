@@ -121,8 +121,8 @@ export function VaultSetupModal({ language, onClose, onEnabled }: VaultSetupModa
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 max-w-sm w-full shadow-xl max-h-full overflow-y-auto">
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 anim-backdrop">
+      <div className="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 max-w-sm w-full shadow-xl max-h-full overflow-y-auto anim-pop">
         <div className="p-5">
           {step === 'password' && (
             <>

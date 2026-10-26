@@ -37,6 +37,34 @@ type TranslationKeys = {
   'groups.optional': string;
   'groups.clear': string;
   'groups.hint': string;
+  'groups.rename': string;
+  'groups.renameButton': string;
+  'groups.delete': string;
+  'groups.deleteBody': string;
+  'groups.renamed': string;
+  'groups.deleted': string;
+  'groups.new': string;
+  'groups.newEllipsis': string;
+  'groups.chooseAccounts': string;
+  'groups.create': string;
+  'menu.copy': string;
+  'menu.pin': string;
+  'menu.unpin': string;
+  'menu.pinned': string;
+  'menu.moveToGroup': string;
+  'menu.select': string;
+  'select.count': string;
+  'select.pickFor': string;
+  'select.all': string;
+  'select.none': string;
+  'select.moveHere': string;
+  'select.delete': string;
+  'select.deleteTitle': string;
+  'select.deleteBody': string;
+  'select.deleteConfirm': string;
+  'select.deleted': string;
+  'accounts.moved': string;
+  'accounts.movedOut': string;
 
   // Accounts
   'accounts.noAccountsFound': string;
@@ -73,16 +101,14 @@ type TranslationKeys = {
   'onboarding.new.sub': string;
   'onboarding.new.steps': string;
   'onboarding.new.more': string;
-  'onboarding.other.label': string;
-  'onboarding.other.sub': string;
-  'onboarding.other.steps': string;
-  'onboarding.other.more': string;
   'onboarding.manual.label': string;
   'onboarding.manual.sub': string;
-  'onboarding.key.label': string;
-  'onboarding.key.sub': string;
-  'onboarding.key.steps': string;
-  'onboarding.key.more': string;
+  // One row for another app and a backup file (2026-10-27): the two were
+  // 1 % each of first picks and took two of five rows.
+  'onboarding.move.label': string;
+  'onboarding.move.sub': string;
+  'onboarding.move.steps': string;
+  'onboarding.move.more': string;
   'onboarding.page.scan': string;
   'onboarding.new.noQr': string;
   'onboarding.asked.label': string;
@@ -129,6 +155,10 @@ type TranslationKeys = {
   'addAccount.errorSecretShort': string;
   'addAccount.errorSecretChars': string;
   'addAccount.errorNoQrScreen': string;
+  'addAccount.missWhere': string;
+  'addAccount.missPhone': string;
+  'addAccount.moving': string;
+  'addAccount.importFile': string;
   'addAccount.errorScreenHint': string;
   'addAccount.errorNoAccess': string;
   'addAccount.errorDropImage': string;
@@ -218,8 +248,6 @@ type TranslationKeys = {
   'update.feature.cxfExport': string;
   'update.learnMore': string;
 
-  'promo.text': string;
-  'promo.cta': string;
 
   // Right-click fill
   'quickFill.menu': string;
@@ -477,6 +505,11 @@ type VaultTranslationKeys = {
   'update.feature.shareCodes': string;
   'update.feature.openIn': string;
   'update.feature.restoreBackups': string;
+  'update.feature.accountMenu': string;
+  'update.feature.groupTools': string;
+  'update.feature.pinAccounts': string;
+  'update.feature.importApps': string;
+  'update.feature.keyboard': string;
   'edit.secretHint': string;
   'edit.secretDuplicate': string;
   'accounts.notFound': string;
@@ -572,6 +605,8 @@ type BillingTranslationKeys = {
   'paywall.benefitUnlimited': string;
   'paywall.benefitPrivate': string;
   'paywall.benefitBackup': string;
+  'paywall.backupAuto': string;
+  'paywall.backupRestore': string;
   'paywall.planMonth': string;
   'paywall.planYear': string;
   'paywall.planLife': string;

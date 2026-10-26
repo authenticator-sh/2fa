@@ -24,6 +24,15 @@ export interface Account {
    */
   group?: string;
   /**
+   * Where the account's group stands among the chips, lowest first. A group's
+   * place is the lowest rank among its accounts; groups no account ranks come
+   * after the ranked ones, alphabetically. Kept on the accounts rather than in
+   * a list of group names — see reorderGroups for why.
+   */
+  groupRank?: number;
+  /** Kept at the top of the list, whatever the sort. */
+  pinned?: boolean;
+  /**
    * Which code the secret produces. Absent means RFC 6238 TOTP, which is every
    * record written before Steam Guard support and still nearly all of them.
    *

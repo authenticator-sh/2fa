@@ -30,3 +30,30 @@ export async function captureCurrentTab(): Promise<string> {
     });
   });
 }
+
+/** Our own site: none of its pages shows a QR code to set an account up with. */
+export function isOwnSite(hostname: string): boolean {
+  return /(^|\.)authenticator\.sh$/.test(hostname);
+}
+
+/**
+ * Whether "Scan the QR code on this page" is worth offering for the tab at
+ * this address, as the popup reads it.
+ *
+ * No address means the popup was not opened by a click on its icon — the
+ * welcome page opens it by itself — so there is no activeTab grant and the
+ * capture would be refused. A chrome:// page or the new tab page has no QR
+ * code on it, and neither has authenticator.sh, which is exactly where every
+ * new install first opens the extension: the welcome page. Offering the scan
+ * there sent people to "No QR code on this page" as their first result.
+ */
+export function pageWorthScanning(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const { protocol, hostname } = new URL(url);
+    if (protocol !== 'http:' && protocol !== 'https:') return false;
+    return !isOwnSite(hostname);
+  } catch {
+    return false;
+  }
+}

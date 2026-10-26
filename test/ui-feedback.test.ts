@@ -60,6 +60,26 @@ export async function run(): Promise<void> {
     check('a toast after one dismissed mid-hover still goes by itself', !feedback.getState().toasts.some(t => t.id === quick));
   }
 
+  scenario('The same news again counts up instead of stacking');
+  {
+    for (const t of feedback.getState().toasts) feedback.dismissToast(t.id);
+    const first = feedback.toast('success', 'Account added');
+    const again = feedback.toast('success', 'Account added');
+    const state = feedback.getState();
+    check('one toast, not two', state.toasts.length === 1 && first === again);
+    check('it says how many', state.toasts[0].count === 2);
+    const undo = { label: 'Undo', run: () => {} };
+    feedback.toast('success', 'Deleted', { action: undo });
+    feedback.toast('success', 'Deleted', { action: undo });
+    check('toasts with a button are never merged — each undoes its own thing', feedback.getState().toasts.filter(t => t.message === 'Deleted').length === 2);
+    feedback.toast('info', 'One more');
+    feedback.toast('info', 'And another');
+    const capped = feedback.getState().toasts;
+    check(`never more than ${feedback.MAX_TOASTS} at once`, capped.length === feedback.MAX_TOASTS, String(capped.length));
+    check('the ones with Undo outlive the plain ones', capped.filter(t => t.action).length === 2);
+    for (const t of capped) feedback.dismissToast(t.id);
+  }
+
   scenario('A dialog replaced by another is answered, not left hanging');
   {
     const first = feedback.confirmDialog({ title: 'Delete?', confirmLabel: 'Delete', cancelLabel: 'Cancel' });
@@ -135,6 +155,42 @@ export async function run(): Promise<void> {
     check('a known one is kept', list.readSortOrder('name') === 'name');
     const patch = settingsFromChanges({ sortOrder: { newValue: 'service' } }, 'local');
     check('a change in another window is followed', patch.sortOrder === 'service');
+  }
+
+  scenario('Pinned accounts come first, whatever the sort');
+  {
+    const rows = [
+      { name: 'b', issuer: 'B' },
+      { name: 'a', issuer: 'A', pinned: true },
+      { name: 'c', issuer: 'C' },
+      { name: 'z', issuer: 'Z', pinned: true },
+    ];
+    const order = list.pinnedFirst(list.sortAccounts(rows, 'name', 'en')).map(r => r.name).join('');
+    check('pinned on top, each part sorted', order === 'azbc', order);
+  }
+
+  scenario('Groups stand in the order they were dragged into');
+  {
+    const groups = list.groupsInOrder(
+      [
+        { group: 'Work', groupRank: 1 },
+        { group: 'Crypto', groupRank: 0 },
+        { group: 'Banks' },
+        { group: 'Alpha' },
+        { group: 'Work' },
+      ],
+      'en'
+    );
+    check('ranked first, by rank; then the rest alphabetically', groups.map(g => g.name).join() === 'Crypto,Work,Alpha,Banks', groups.map(g => g.name).join());
+    check('counts include accounts without a rank', groups.find(g => g.name === 'Work')?.count === 2);
+    check('a chip goes in front of the one named', list.movedBefore(['A', 'B', 'C'], 'A', 'C').join('') === 'BAC');
+    check('and to the end with no target', list.movedBefore(['A', 'B', 'C'], 'A', null).join('') === 'BCA');
+  }
+
+  scenario('An undone delete of several goes back in the old order');
+  {
+    check('the old order, with an account added meanwhile first', list.orderAfterUndo(['new', 'b', 'a', 'c'], ['a', 'b', 'c'])?.join('') === 'newabc');
+    check('nothing to write when it is already right', list.orderAfterUndo(['a', 'b', 'c'], ['a', 'b', 'c']) === null);
   }
 
   scenario('An undone delete goes back where it was');

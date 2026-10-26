@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Cloud, Infinity as InfinityIcon, KeyRound, Loader2, Lock, Mail, MailCheck, X } from 'lucide-react';
+import { Cloud, Infinity as InfinityIcon, KeyRound, Laptop, Loader2, Lock, Mail, MailCheck, RefreshCw, X } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 import { useEscapeLayer, useReturnFocus } from '@/hooks/useLayer';
 import { createT, type Language, type TranslationKey } from '@/utils/i18n';
@@ -78,6 +78,17 @@ const BENEFITS = [
   { key: 'paywall.benefitUnlimited', Icon: InfinityIcon },
   { key: 'paywall.benefitPrivate', Icon: Lock },
   { key: 'paywall.benefitBackup', Icon: Cloud },
+] as const;
+
+// Opened from the backup, the three say how the copy works instead. Four in
+// five closed that paywall within six seconds (October 2026, 1,080 people),
+// before the prices could have been read: what they had clicked "Turn on" for
+// was never explained past one paragraph, and the row under it listed Pro's
+// other things — room for more accounts nobody had asked about.
+const BACKUP_POINTS = [
+  { key: 'paywall.backupAuto', Icon: RefreshCw },
+  { key: 'paywall.backupRestore', Icon: Laptop },
+  { key: 'paywall.benefitPrivate', Icon: Lock },
 ] as const;
 
 type Failure = { at: 'checkout' | 'key' | 'restore'; text: string };
@@ -373,7 +384,7 @@ export default function Paywall({ language, request }: PaywallProps) {
   // borders, and blue only where something is chosen or done — the selected
   // plan, the button that pays, the marks. No other colour but red for errors.
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-white dark:bg-neutral-950" role="dialog" aria-modal="true" aria-labelledby="paywall-title">
+    <div className="fixed inset-0 z-[60] flex flex-col bg-white dark:bg-neutral-950 anim-sheet" role="dialog" aria-modal="true" aria-labelledby="paywall-title">
       <button
         ref={closeRef}
         type="button"
@@ -427,7 +438,7 @@ export default function Paywall({ language, request }: PaywallProps) {
               the language. Only long ones: left to itself the browser also
               split "чис-ло" to even out a line. */}
           <ul className="mb-4 mt-1 grid grid-cols-3 gap-x-3">
-            {BENEFITS.map(({ key: k, Icon }) => (
+            {(fromBackup ? BACKUP_POINTS : BENEFITS).map(({ key: k, Icon }) => (
               <li key={k} className="flex min-w-0 flex-col items-center gap-1.5 text-center text-xs leading-snug text-neutral-600 dark:text-neutral-400">
                 <Icon size={16} strokeWidth={1.75} className="flex-shrink-0 text-accent-600 dark:text-accent-300" aria-hidden />
                 <span className="max-w-full hyphens-auto text-balance [hyphenate-limit-chars:13_5_5] [overflow-wrap:anywhere]">{t(k)}</span>

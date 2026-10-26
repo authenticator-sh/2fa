@@ -28,6 +28,8 @@ export const EVENT_NAMES = [
   'first_open',
   'onboard_view',
   'onboard_pick',
+  // How the first look at that screen ended, and after how many seconds.
+  'onboard_leave',
   'add_step',
   'add_fail',
   'add_cancel',
@@ -42,6 +44,13 @@ export const EVENT_NAMES = [
   'banner_close',
   // The bell opened: how many notifications it held, how many unread.
   'bell_open',
+  // Sharing codes by link (ShareModal): the window opened, a link made — for
+  // how many minutes, with a password or not, whose label — or refused, and
+  // the link copied. Never the account, the label's text or the link.
+  'share_open',
+  'share_create',
+  'share_fail',
+  'share_copy',
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

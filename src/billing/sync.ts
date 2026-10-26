@@ -3,7 +3,8 @@
 // What goes out is the closed list in buildSyncRequest and nothing more: an
 // install id minted on this machine, the extension version, the interface and
 // browser language, whether this install predates the paywall, how many
-// accounts it holds (a number — never which ones), five settings, how many
+// accounts it holds and in how many groups (numbers — never which ones or
+// what the groups are called), seven settings, how many
 // times it was opened on each day since the last check-in (./opens), and the
 // queued events from ./events. What comes back is a signed policy and, if
 // this install holds one, a signed license.
@@ -67,13 +68,23 @@ export interface SyncRequest {
   legacy: boolean;
   legacy_src: InstallRecord['legacySrc'];
   accounts: number | null;
+  /** How many distinct groups those accounts are in, null with them. A server from before it refuses the field: deploy it first. */
+  groups: number | null;
   vault: boolean | null;
   sync: boolean | null;
   open_mode: string | null;
+  /** How the account list is drawn: 'normal', 'compact' or 'hidden'. A server from before it refuses the field: deploy it first. */
+  view_mode: string;
   /** Which of the two styles is on ('classic' or 'apple'). A server from before it refuses the field: deploy it first. */
   style: string;
   /** Dark rather than light. Sent with style, so the admin sees all four combinations. */
   dark: boolean;
+  /**
+   * The operating system, as chrome.runtime.getPlatformInfo() names it ('win',
+   * 'mac', 'linux', 'cros'…), so a notification can be aimed at one. Left out
+   * where there is no answer. A server from before it refuses the field: deploy it first.
+   */
+  os?: string;
   pid: string | null;
   lid: string | null;
   /** Whether this install holds a license key at all — what a server from before key_hint reads. */
@@ -149,25 +160,37 @@ function shownLanguage(stored: unknown): string {
   return typeof stored === 'string' && SUPPORTED_LANGUAGES.has(stored) ? stored : detectLanguage();
 }
 
+/** chrome.runtime.getPlatformInfo().os; null where it cannot be had. */
+async function platformOs(): Promise<string | null> {
+  const { os } = await chrome.runtime.getPlatformInfo();
+  return typeof os === 'string' && /^[a-z]{1,12}$/.test(os) ? os : null;
+}
+
+/** The list view as the popup draws it: what was picked, or 'normal' when nothing (or something unknown) was. */
+function listViewMode(stored: unknown): string {
+  return stored === 'compact' || stored === 'hidden' ? stored : 'normal';
+}
+
 function languageTag(value: unknown, max: number): string | null {
   return typeof value === 'string' && /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8}){0,2}$/.test(value) ? value.slice(0, max) : null;
 }
 
 /** The request body. Every field is listed here; nothing is added elsewhere. */
 export async function buildSyncRequest(install: InstallRecord): Promise<SyncRequest> {
-  const [accounts, vault, syncOn, openMode, stored, policy, entitlement, events, key, opens] = await Promise.all([
+  const [counts, vault, syncOn, openMode, stored, policy, entitlement, events, key, opens, os] = await Promise.all([
     // Locked vault: the count is unknown, and the server keeps the last one.
     // From local storage only: a full read would merge sync and start its download window (countLocalAccounts).
-    safe(() => countLocalAccounts(), null as number | null),
+    safe(() => countLocalAccounts(), null as { accounts: number; groups: number } | null),
     safe(() => isVaultEnabled(), null as boolean | null),
     safe(() => isSyncEnabled(), null as boolean | null),
     safe(() => getOpenMode(), null as string | null),
-    safe(() => chrome.storage.local.get(['language', 'darkMode', UI_STYLE_KEY]), {} as Record<string, unknown>),
+    safe(() => chrome.storage.local.get(['language', 'darkMode', UI_STYLE_KEY, 'viewMode']), {} as Record<string, unknown>),
     safe(() => readPolicy(install.id), null),
     safe(() => readEntitlement(install.id), null),
     safe(() => peekEvents(50), [] as QueuedEvent[]),
     safe(() => readLocalLicenseKey(), null as string | null),
     safe(() => peekOpens(), [] as OpenDay[]),
+    safe(() => platformOs(), null as string | null),
   ]);
   return {
     iid: install.id,
@@ -179,11 +202,14 @@ export async function buildSyncRequest(install: InstallRecord): Promise<SyncRequ
     installed_at: install.installedAt,
     legacy: install.legacy,
     legacy_src: install.legacySrc,
-    accounts,
+    accounts: counts?.accounts ?? null,
+    groups: counts?.groups ?? null,
     vault,
     sync: syncOn,
     open_mode: openMode,
+    view_mode: listViewMode(stored.viewMode),
     style: readUiStyle(stored[UI_STYLE_KEY]),
+    ...(os ? { os } : {}),
     dark: stored.darkMode === true,
     pid: policy?.pid ?? null,
     lid: entitlement?.lid ?? null,

@@ -1,5 +1,6 @@
 import { useCallback, useState, useMemo, useRef, useEffect } from 'react';
-import { Plus, Settings, AlertTriangle, HelpCircle, Lightbulb, Moon, Sun, Sparkles, ArrowLeft } from 'lucide-react';
+import { Plus, Settings, AlertTriangle, HelpCircle, Lightbulb, Moon, Sun, Sparkles, ArrowLeft, Copy, Pin, PinOff, FolderInput, CheckSquare, Share2, Pencil, Trash2, X, ChevronDown } from 'lucide-react';
+import { ContextMenu, SEPARATOR, type MenuEntry } from '@/components/ContextMenu';
 import { useAccounts } from '@/hooks/useAccounts';
 import { useVault } from '@/hooks/useVault';
 import { useFinishQuickFill } from '@/hooks/useFinishQuickFill';
@@ -13,7 +14,6 @@ import { EditAccountModal } from '@/components/EditAccountModal';
 import { ShareModal } from '@/components/ShareModal';
 import { BackupReminder } from '@/components/BackupReminder';
 import { UpdateModal } from '@/components/UpdateModal';
-import { PromoBanner } from '@/components/PromoBanner';
 import { ReviewPrompt } from '@/components/ReviewPrompt';
 import { Logo } from '@/components/Logo';
 import { SettingToggle } from '@/components/SettingToggle';
@@ -45,14 +45,17 @@ import { settingsFromChanges } from '@/utils/settings-watch';
 import { appearanceClass, cachedAppearance, readUiStyle, rememberAppearance, UI_STYLE_KEY, type UiStyle } from '@/utils/appearance';
 import {
   chooseListView,
+  groupsInOrder,
   matchesSearch,
+  orderAfterUndo,
+  pinnedFirst,
   readSortOrder,
   restoredOrder,
   sortAccounts,
   SORT_ORDER_KEY,
   type SortOrder,
 } from '@/utils/list-view';
-import { addMultipleAccounts, getAccounts } from '@/utils/storage';
+import { addMultipleAccounts, getAccounts, type GroupPlacement } from '@/utils/storage';
 import { listBackupSummaries, type BackupSummary } from '@/utils/auto-backup';
 import { shouldShowBackupReminder, markBackupDone } from '@/utils/backup-reminder';
 import { shouldShowVaultPrompt, markVaultPromptShown } from '@/utils/vault-prompt';
@@ -69,10 +72,9 @@ import { subscribePaywall } from '@/billing/bridge';
 import { dismissHeldAdd, finishHeldAdd, heldAddToMention } from '@/billing/held-add';
 import { BILLING_KEYS, recentlySawPaywall } from '@/billing/state';
 import { countOpen } from '@/billing/opens';
-import { reasonOfKey, reportAddCancel, reportAddFail, reportAddStep, reportFirstOpen, reportOnboardView } from '@/billing/onboarding';
+import { reasonOfKey, reportAddCancel, reportAddFail, reportAddStep, reportFirstOpen, reportOnboardView, watchOnboardScreen } from '@/billing/onboarding';
 import { openedBySite } from '@/utils/site-opened';
 import { hasPendingCheckout, syncBilling } from '@/billing/sync';
-import { shouldShowPromoBanner, recordFirstOpen } from '@/utils/promo-banner';
 import { recordOpen, shouldShowReviewPrompt, snoozeReviewPrompt } from '@/utils/review-prompt';
 import { clearUpdateBadge } from '@/utils/update-badge';
 import { readActiveGroup, rememberActiveGroup, forgetActiveGroup } from '@/utils/active-group';
@@ -80,7 +82,9 @@ import { FEATURE_REQUEST_URL, helpUrl } from '@/utils/links';
 import { parseQRCode, generateRandomColor, qrFailureKey } from '@/utils/qr-parser';
 import { saveErrorMessage } from '@/utils/save-error';
 import { decodeQrFromImage } from '@/utils/qr-decode';
-import { cleanSecret, loadTimeOffset } from '@/utils/totp';
+import { cleanSecret, isSteamAccount, loadTimeOffset, tryGenerateTOTP } from '@/utils/totp';
+import { useEscapeLayer } from '@/hooks/useLayer';
+import { isOwnSite, pageWorthScanning } from '@/utils/screen-capture';
 import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
 import { isQuickFillEnabled, setQuickFillEnabled } from '@/utils/quick-fill';
 import { isSyncEnabled, setSyncEnabled, hasSyncOverflowed } from '@/utils/storage';
@@ -150,7 +154,22 @@ const LAUNCH_SITE = (() => {
 
 function App() {
   const vault = useVault();
-  const { accounts, loading, error, heldCount, addAccount, deleteAccount, updateAccount, reorderAccounts, reload } =
+  const {
+    accounts,
+    loading,
+    error,
+    heldCount,
+    addAccount,
+    deleteAccount,
+    deleteAccounts,
+    updateAccount,
+    renameGroup,
+    moveToGroup,
+    restoreGroupPlacements,
+    reorderGroups,
+    reorderAccounts,
+    reload,
+  } =
     // Unknown vault state counts as locked. `enabled` starts as null while
     // storage is read, and `null === true` is false — so the account list used
     // to start loading in parallel with the vault check and could win the race,
@@ -211,13 +230,36 @@ function App() {
   const [popupSize, setPopupSize] = useState<PopupSize>(cachedPopupSize);
   const [openMode, setOpenModeState] = useState<OpenMode>('popup');
   const [currentDomain, setCurrentDomain] = useState<string | null>(null);
+  /**
+   * What the popup's tab says about "Scan the QR code on this page": worth
+   * offering, not, or the page is popup.html itself — opened as a tab, by the
+   * e2e suite or a bookmark — which says nothing. Pending until asked.
+   */
+  const [pageScan, setPageScan] = useState<'pending' | 'yes' | 'no' | 'self'>('pending');
   const [suggestedAccountId, setSuggestedAccountId] = useState<string | null>(null);
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
-  const [showPromoBanner, setShowPromoBanner] = useState(false);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [openCount, setOpenCount] = useState<number | null>(null);
   const [showReviewPrompt, setShowReviewPrompt] = useState(false);
   const draggedIdRef = useRef<string | null>(null);
+  /** A row is being dragged — the group chips then take it as a drop. */
+  const [draggingAccount, setDraggingAccount] = useState(false);
+  /**
+   * Choosing accounts to move together. `target` is the group they go to when
+   * the choosing began from "+" — a group that has no accounts yet, so it
+   * cannot exist until some are picked. Null while not choosing.
+   */
+  const [selection, setSelection] = useState<{ ids: Set<string>; target: string | null } | null>(null);
+  /** An account's right-click menu, and which of its two pages is showing. */
+  const [cardMenu, setCardMenu] = useState<{
+    account: Account;
+    x: number;
+    y: number;
+    copy: () => void;
+    page: 'main' | 'groups';
+  } | null>(null);
+  /** The selection bar's "Move to group" list, opened above its button. */
+  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number } | null>(null);
   /** The last account reported gone, so the save path and the effect below do not both say it. */
   const goneAccountRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -568,17 +610,9 @@ function App() {
 
   // Groups are derived from the accounts rather than stored alongside them:
   // nothing to migrate, nothing to keep in sync, and a group disappears by
-  // itself once its last account is gone.
-  const groups = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const account of accounts) {
-      const name = account.group?.trim();
-      if (name) counts.set(name, (counts.get(name) ?? 0) + 1);
-    }
-    return [...counts.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, count]) => ({ name, count }));
-  }, [accounts]);
+  // itself once its last account is gone. Their order rides on the accounts
+  // too — see reorderGroups.
+  const groups = useMemo(() => groupsInOrder(accounts, language), [accounts, language]);
 
   const ungroupedCount = useMemo(
     () => accounts.filter(account => !account.group?.trim()).length,
@@ -596,7 +630,7 @@ function App() {
       list = list.filter(acc => matchesSearch(acc, searchQuery));
     }
 
-    return sortAccounts(list, sortOrder, language);
+    return pinnedFirst(sortAccounts(list, sortOrder, language));
   }, [accounts, searchQuery, activeGroup, sortOrder, language]);
 
   // A filter is a claim about the whole list, so the pinned suggestion — which
@@ -627,6 +661,31 @@ function App() {
     void openedBySite().then(site => reportOnboardView(site));
   }, [listView, showSettings]);
 
+  // The question itself on screen — not a branch of it, Settings or the add
+  // dialog over it — watched for how long, and how it ends (billing/onboarding.ts).
+  // A reload of the list is not leaving it: the popup reloads once as it opens,
+  // a few dozen milliseconds in, and every first look ended there as "away".
+  const chooserWasOnScreen = useRef(false);
+  const chooserOnScreen =
+    listView === 'loading'
+      ? chooserWasOnScreen.current
+      : listView === 'empty' && !showSettings && !openGuidePath && !showAddModal;
+  chooserWasOnScreen.current = chooserOnScreen;
+  const chooserLeftFor = useRef<'settings' | 'add' | 'away'>('away');
+  chooserLeftFor.current = showSettings ? 'settings' : showAddModal ? 'add' : 'away';
+  useEffect(() => {
+    if (!chooserOnScreen) return;
+    let stop: ReturnType<typeof watchOnboardScreen> | null = null;
+    let gone = false;
+    void openedBySite().then(site => {
+      if (!gone) stop = watchOnboardScreen(site);
+    });
+    return () => {
+      gone = true;
+      stop?.(chooserLeftFor.current);
+    };
+  }, [chooserOnScreen]);
+
   /** Back out of a branch of the guide, from its own button or the header's arrow. */
   const leaveGuidePath = () => {
     if (openGuidePath) void reportAddCancel('guide', openGuidePath.id);
@@ -647,7 +706,8 @@ function App() {
 
   // Pinning a duplicate on top only pays off when the list is long enough to
   // scroll; with few accounts the badge highlight in the list is enough.
-  const suggestedAccount = !isFiltered && suggestedAccountId && accounts.length >= 5
+  // Not while choosing: the same row twice, ticked in one place and not the other.
+  const suggestedAccount = !isFiltered && !selection && suggestedAccountId && accounts.length >= 5
     ? accounts.find(acc => acc.id === suggestedAccountId) || null
     : null;
 
@@ -870,11 +930,300 @@ function App() {
     toast('success', t('accounts.updated'));
   };
 
+  // From the chip's right-click menu. A group is only a name the accounts
+  // share, so both of these are one edit to every account that carries it.
+  const handleRenameGroup = async (name: string) => {
+    const typed = await promptDialog({
+      title: t('groups.rename'),
+      defaultValue: name,
+      placeholder: t('groups.placeholder'),
+      confirmLabel: t('groups.renameButton'),
+      cancelLabel: t('common.cancel'),
+    });
+    const to = typed?.trim();
+    if (!to || to === name) return;
+    try {
+      await renameGroup(name, to);
+    } catch (error) {
+      console.error('Could not rename the group:', error);
+      toast('error', t('accounts.updateFailed'));
+      return;
+    }
+    // The filter follows the group. Left on the old name it would point at a
+    // group that no longer exists and be reset to "All" — the renamed group
+    // gone from view at the moment the user expects to see it.
+    if (activeGroup === name) handleGroupChange(to);
+    toast('success', t('groups.renamed'));
+  };
+
+  const handleDeleteGroup = async (name: string) => {
+    // The body says outright that the accounts stay. "Delete" next to a group
+    // of 2FA accounts reads as deleting them, and nobody should have to find
+    // out by trying.
+    const confirmed = await confirmDialog({
+      title: t('groups.delete'),
+      body: t('groups.deleteBody', name),
+      confirmLabel: t('groups.delete'),
+      cancelLabel: t('common.cancel'),
+      danger: true,
+    });
+    if (!confirmed) return;
+    let before: GroupPlacement[];
+    try {
+      before = await renameGroup(name, undefined);
+    } catch (error) {
+      console.error('Could not delete the group:', error);
+      toast('error', t('accounts.updateFailed'));
+      return;
+    }
+    if (activeGroup === name) handleGroupChange(null);
+    toast('success', t('groups.deleted'), {
+      action: { label: t('common.undo'), run: () => void undoGroupEdit(before) },
+    });
+  };
+
+  /** Put accounts back where a group edit found them. */
+  const undoGroupEdit = async (before: GroupPlacement[]) => {
+    try {
+      await restoreGroupPlacements(before);
+    } catch (error) {
+      console.error('Could not undo the group change:', error);
+      toast('error', t('accounts.updateFailed'));
+    }
+  };
+
+  /**
+   * Move accounts into a group, or out of every group, with an Undo: thirty
+   * accounts sent to the wrong group should not cost thirty edits to put back.
+   * False when the write failed, so a selection is kept to try again.
+   */
+  const moveAccounts = async (ids: string[], group: string | undefined): Promise<boolean> => {
+    let before: GroupPlacement[];
+    try {
+      before = await moveToGroup(ids, group);
+    } catch (error) {
+      console.error('Could not move the accounts:', error);
+      toast('error', t('accounts.updateFailed'));
+      return false;
+    }
+    if (before.length > 0) {
+      toast('success', group ? t('accounts.moved', group) : t('accounts.movedOut'), {
+        action: { label: t('common.undo'), run: () => void undoGroupEdit(before) },
+      });
+    }
+    return true;
+  };
+
+  const askNewGroupName = async (confirmLabel: string): Promise<string | null> => {
+    const typed = await promptDialog({
+      title: t('groups.new'),
+      placeholder: t('groups.placeholder'),
+      confirmLabel,
+      cancelLabel: t('common.cancel'),
+    });
+    return typed?.trim() || null;
+  };
+
+  const moveToNewGroup = async (ids: string[]) => {
+    const name = await askNewGroupName(t('groups.create'));
+    if (name) await moveAccounts(ids, name);
+  };
+
+  // The "+" on the strip. A group is a name accounts share, so it cannot exist
+  // empty: creating one is naming it and then choosing what goes in. On the
+  // whole list, whatever was filtered — the accounts for a new group are
+  // rarely all in one old one.
+  const handleCreateGroup = async () => {
+    const name = await askNewGroupName(t('groups.chooseAccounts'));
+    if (!name) return;
+    handleGroupChange(null);
+    setSelection({ ids: new Set(), target: name });
+  };
+
+  const handleToggleSelect = useStableCallback((id: string) => {
+    setSelection(current => {
+      if (!current) return current;
+      const ids = new Set(current.ids);
+      if (ids.has(id)) ids.delete(id);
+      else ids.add(id);
+      return { ...current, ids };
+    });
+  });
+
+  const finishSelection = async (group: string | undefined) => {
+    if (!selection || selection.ids.size === 0) return;
+    setSelectionMenu(null);
+    if (await moveAccounts([...selection.ids], group)) setSelection(null);
+  };
+
+  useEscapeLayer(() => setSelection(null), selection !== null);
+
+  /**
+   * Put back what a delete of several accounts removed, where it was — the
+   * same add an undone single delete goes through, never counted against the
+   * limit, then the order the list had.
+   */
+  const undoDeleteMany = async (restored: Account[], previousIds: string[]) => {
+    try {
+      await addMultipleAccounts(restored, { kind: 'undo' });
+      const order = orderAfterUndo((await getAccounts()).map(a => a.id), previousIds);
+      if (order) await reorderAccounts(order).catch(error => console.warn('Could not restore the order:', error));
+      toast('success', t('accounts.restored'));
+    } catch (error) {
+      console.error('Could not undo the delete:', error);
+      undoToastRef.current = toast('error', t('accounts.undoFailed'), {
+        action: { label: t('recovery.retry'), run: () => void undoDeleteMany(restored, previousIds) },
+      });
+    }
+  };
+
+  /**
+   * The selection bar's Delete. The dialog names the accounts and the button
+   * carries the count: "Select all", then Delete, is a whole list of 2FA
+   * accounts one confirmation away, and the number is what makes that visible.
+   * Undo puts all of them back, as a single delete's does.
+   */
+  const handleDeleteSelected = async () => {
+    if (!selection || selection.ids.size === 0) return;
+    const chosen = accounts.filter(account => selection.ids.has(account.id));
+    if (chosen.length === 0) return;
+    const previousIds = accounts.map(account => account.id);
+    const names = chosen.slice(0, 5).map(account => accountLabel(account)).join(', ');
+    const confirmed = await confirmDialog({
+      title: t('select.deleteTitle'),
+      body: t('select.deleteBody', chosen.length > 5 ? `${names} +${chosen.length - 5}` : names),
+      warning: t('delete.warning'),
+      note: t('delete.cannotUndo'),
+      confirmLabel: t('select.deleteConfirm', chosen.length),
+      cancelLabel: t('common.cancel'),
+      danger: true,
+    });
+    if (!confirmed) return;
+    let removed: number;
+    try {
+      removed = await deleteAccounts(chosen.map(account => account.id));
+    } catch (error) {
+      console.error('Could not delete the accounts:', error);
+      toast('error', t('accounts.deleteFailed'));
+      return;
+    }
+    setSelection(null);
+    if (removed === 0) return;
+    if (undoToastRef.current !== null) dismissToast(undoToastRef.current);
+    undoToastRef.current = toast('success', t('select.deleted', removed), {
+      action: {
+        label: t('common.undo'),
+        run: () => {
+          undoToastRef.current = null;
+          void undoDeleteMany(chosen, previousIds);
+        },
+      },
+    });
+  };
+
+  const handleCardMenu = useStableCallback((account: Account, x: number, y: number, copy: () => void) => {
+    setCardMenu({ account, x, y, copy, page: 'main' });
+  });
+
+  const togglePin = async (account: Account) => {
+    try {
+      await updateAccount(account.id, { pinned: account.pinned ? undefined : true });
+    } catch (error) {
+      console.error('Could not pin the account:', error);
+      toast('error', t('accounts.updateFailed'));
+    }
+  };
+
+  /**
+   * Every group to pick from, then "No group" and a new one. `current` ticks
+   * the account's own group ('' for none); undefined — a selection of many —
+   * ticks nothing.
+   */
+  const groupPickerItems = (
+    current: string | undefined,
+    onPick: (group: string | undefined) => void,
+    onNew: () => void
+  ): MenuEntry[] => [
+    ...groups.map(group => ({
+      label: group.name,
+      checked: current === undefined ? undefined : current === group.name,
+      onSelect: () => onPick(group.name),
+    })),
+    {
+      label: t('groups.ungrouped'),
+      checked: current === undefined ? undefined : current === '',
+      onSelect: () => onPick(undefined),
+    },
+    SEPARATOR,
+    { label: t('groups.newEllipsis'), icon: Plus, onSelect: onNew },
+  ];
+
+  const cardMenuItems = (menu: NonNullable<typeof cardMenu>): MenuEntry[] => {
+    const { account } = menu;
+    const close = () => setCardMenu(null);
+    if (menu.page === 'groups') {
+      return groupPickerItems(
+        account.group?.trim() ?? '',
+        group => {
+          close();
+          void moveAccounts([account.id], group);
+        },
+        () => {
+          close();
+          void moveToNewGroup([account.id]);
+        }
+      );
+    }
+    // A record whose secret makes no code has nothing to copy or share; the
+    // rest of the menu is what its row offers too.
+    const valid = tryGenerateTOTP(account) !== null;
+    const entries: MenuEntry[] = [];
+    if (valid) entries.push({ label: t('menu.copy'), icon: Copy, onSelect: () => { close(); menu.copy(); } });
+    entries.push(
+      {
+        label: account.pinned ? t('menu.unpin') : t('menu.pin'),
+        icon: account.pinned ? PinOff : Pin,
+        onSelect: () => {
+          close();
+          void togglePin(account);
+        },
+      },
+      // Stays open on its second page: the groups.
+      { label: t('menu.moveToGroup'), icon: FolderInput, onSelect: () => setCardMenu({ ...menu, page: 'groups' }) },
+      {
+        label: t('menu.select'),
+        icon: CheckSquare,
+        onSelect: () => {
+          close();
+          setSelection({ ids: new Set([account.id]), target: null });
+        },
+      },
+      SEPARATOR
+    );
+    if (valid && !isSteamAccount(account)) {
+      entries.push({ label: t('share.title'), icon: Share2, onSelect: () => { close(); setSharingAccount(account); } });
+    }
+    entries.push(
+      { label: t('edit.title'), icon: Pencil, onSelect: () => { close(); setEditingAccount(account); } },
+      {
+        label: t('accounts.deleteAccount'),
+        icon: Trash2,
+        danger: true,
+        onSelect: () => {
+          close();
+          void handleDeleteAccount(account.id);
+        },
+      }
+    );
+    return entries;
+  };
+
   // Stable for the life of the page, so the memoised rows are not all redrawn
   // on every render of the popup. They took inline arrows before — a new
   // function per row per render — which made AccountCard's memo a no-op.
   const handleDragStart = useCallback((_e: React.DragEvent, id: string) => {
     draggedIdRef.current = id;
+    setDraggingAccount(true);
   }, []);
 
   const handleDragOver = useCallback((_e: React.DragEvent, id: string) => {
@@ -891,6 +1240,7 @@ function App() {
   const handleDragEnd = useCallback(() => {
     draggedIdRef.current = null;
     setDragOverId(null);
+    setDraggingAccount(false);
   }, []);
 
   const handleDrop = useStableCallback(async (_e: React.DragEvent, targetId: string) => {
@@ -1114,17 +1464,18 @@ function App() {
   const overlayOpen = Boolean(
     showAddModal || editingAccount || sharingAccount || showVaultSetup || whatsNewVersion || dialogOpen || paywallOpen
   );
+  /** A right-click menu or the selection bar's list is open — it has the keys. */
+  const menuOpen = cardMenu !== null || selectionMenu !== null;
 
   useEffect(() => subscribeFeedback(state => setDialogOpen(state.dialog !== null)), []);
   useEffect(
     () =>
       subscribePaywall(request => {
         setPaywallOpen(request !== null);
-        // No rating or cross-promotion ask right after the money ask — also
-        // when one was already on screen before the paywall opened.
+        // No rating ask right after the money ask — also when one was already
+        // on screen before the paywall opened.
         if (request) {
           setShowReviewPrompt(false);
-          setShowPromoBanner(false);
         }
       }),
     []
@@ -1140,6 +1491,9 @@ function App() {
     if (vault.enabled === true && vault.locked) {
       setEditingAccount(null);
       setSharingAccount(null);
+      setSelection(null);
+      setCardMenu(null);
+      setSelectionMenu(null);
       if (undoToastRef.current !== null) {
         dismissToast(undoToastRef.current);
         undoToastRef.current = null;
@@ -1175,12 +1529,37 @@ function App() {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       const isInputFocused = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+      const listUp = !overlayOpen && !showSettings && !menuOpen;
+
+      // Down from the search box into the list, and up and down its rows; Enter
+      // on a row copies it, as a click does, and Enter in the search box copies
+      // the first match — type three letters, press Enter, paste.
+      if (listUp && (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter')) {
+        const search = searchInputRef.current;
+        const rows = [...document.querySelectorAll<HTMLElement>('[data-ui="account-list"] [data-row-action]')];
+        const fromSearch = target === search;
+        const at = rows.indexOf(target);
+        if (rows.length > 0 && (fromSearch || at !== -1)) {
+          if (event.key === 'Enter') {
+            if (fromSearch && search?.value.trim()) {
+              event.preventDefault();
+              rows[0].click();
+            }
+            return;
+          }
+          event.preventDefault();
+          if (event.key === 'ArrowDown') rows[fromSearch ? 0 : Math.min(at + 1, rows.length - 1)].focus();
+          else if (at <= 0) search?.focus();
+          else rows[at - 1].focus();
+          return;
+        }
+      }
 
       // Every full-screen view has to be listed: the search box is mounted
       // behind them, and typing the first letter of a share label used to move
       // focus there — the characters landed in a filter the user could not see
       // and found applied to their list once the view closed.
-      if (!isInputFocused && !overlayOpen && !showSettings && searchInputRef.current) {
+      if (!isInputFocused && listUp && searchInputRef.current) {
         if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
           searchInputRef.current.focus();
         }
@@ -1189,7 +1568,7 @@ function App() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [overlayOpen, showSettings]);
+  }, [overlayOpen, showSettings, menuOpen]);
 
   useEffect(() => {
     chrome.storage.local.get('reviewDismissed', (result) => setReviewDismissed(!!result.reviewDismissed));
@@ -1334,13 +1713,6 @@ function App() {
     };
   }, []);
 
-  // Cross-promo banner — only for users active for at least a week
-  useEffect(() => {
-    recordFirstOpen().then(() =>
-      Promise.all([shouldShowPromoBanner(), recentlySawPaywall()]).then(([due, paywalled]) => setShowPromoBanner(due && !paywalled))
-    );
-  }, []);
-
   // Opens the settings panel rather than exporting straight away: since 1.10.0
   // the user has to choose between a password-protected and a plain file, and
   // silently writing the plain one would undo the vault for anyone who enabled it.
@@ -1404,6 +1776,11 @@ function App() {
       // used to be handed to the floating window in its URL as one.
       const site = siteOfUrl(tabs[0]?.url);
       if (site) setCurrentDomain(site);
+      // A real popup is in no tab; popup.html opened as one is, and the tab
+      // it would read is itself.
+      chrome.tabs.getCurrent((self) => {
+        setPageScan(self ? 'self' : pageWorthScanning(tabs[0]?.url) ? 'yes' : 'no');
+      });
     });
   }, []);
 
@@ -1691,7 +2068,7 @@ function App() {
               the section it belongs to, not onto the end. */}
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
             {/* Above everything, when the server's banner stands here (ServerBanner). */}
-            <ServerBanner language={language} place="settings" offersVault={offersVaultBanner} onVault={() => setShowVaultSetup(true)} />
+            <ServerBanner language={language} place="settings" offersVault={offersVaultBanner} hasAccounts={accounts.length > 0} onVault={() => setShowVaultSetup(true)} />
 
             {/* First, and only when there is something to say (see ProSettings). */}
             <ProSettings language={language} />
@@ -1950,6 +2327,25 @@ function App() {
           totalCount={accounts.length}
           active={activeGroup}
           onChange={handleGroupChange}
+          onRename={handleRenameGroup}
+          onDelete={handleDeleteGroup}
+          onCreate={() => void handleCreateGroup()}
+          onReorder={names =>
+            void reorderGroups(names).catch(error => {
+              console.error('Could not save the group order:', error);
+              toast('error', t('accounts.reorderFailed'));
+            })
+          }
+          // A row dropped on a chip joins that group — or leaves every group,
+          // on "No group".
+          onDropAccount={
+            draggingAccount
+              ? group => {
+                  const id = draggedIdRef.current;
+                  if (id) void moveAccounts([id], group || undefined);
+                }
+              : null
+          }
           language={language}
         />
       )}
@@ -2037,7 +2433,15 @@ function App() {
                 onOpenPath={setOpenGuidePath}
                 onBack={leaveGuidePath}
                 onScanScreen={() => openAddAccount('qr', true)}
-                canScanPage={!openedBySiteState}
+                // The popup decides from its own tab (pageWorthScanning). The
+                // window and the side panel cannot read one, and neither can a
+                // popup.html open as a tab; they go by the welcome page's mark,
+                // and by the site the window was handed.
+                canScanPage={
+                  HOST === 'popup' && pageScan !== 'self'
+                    ? pageScan === 'yes'
+                    : !openedBySiteState && !(currentDomain && isOwnSite(currentDomain))
+                }
                 onEnterKey={() => openAddAccount('manual')}
                 onImport={handleImportClick}
                 onPasteLinks={() => void handlePasteLinks()}
@@ -2056,7 +2460,7 @@ function App() {
                 filtered view, where it would push the result down, and not
                 under the What's New modal, which is an ask of its own. */}
             {!isFiltered && whatsNewVersion === null && (
-              <ServerBanner language={language} place="accounts" offersVault={offersVaultBanner} onVault={() => setShowVaultSetup(true)} />
+              <ServerBanner language={language} place="accounts" offersVault={offersVaultBanner} hasAccounts={accounts.length > 0} onVault={() => setShowVaultSetup(true)} />
             )}
             {suggestedAccount && (
               <>
@@ -2087,6 +2491,7 @@ function App() {
                     // place the group did not show, so the row above and the row
                     // below disagreed about it.
                     showGroup={activeGroup === null}
+                    onMenu={handleCardMenu}
                   />
                 </div>
                 <div className="h-2 bg-gray-100 dark:bg-dark-900 border-y border-gray-200 dark:border-dark-700" />
@@ -2107,7 +2512,7 @@ function App() {
                 // cannot see. Off while filtered, as it already is while searching,
                 // and off while the list is sorted — a drop there would move a
                 // row the sort puts straight back.
-                draggable={canReorder}
+                draggable={canReorder && !selection}
                 onDragStart={handleDragStart}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
@@ -2120,23 +2525,23 @@ function App() {
                 // suggestion is being shown.
                 isSuggested={!isFiltered && suggestedAccountId === account.id}
                 showGroup={activeGroup === null}
+                onMenu={handleCardMenu}
+                selecting={selection !== null}
+                selected={selection?.ids.has(account.id) ?? false}
+                onToggleSelect={handleToggleSelect}
               />
             ))}
-            {/* At most one card under the list. The review ask wins while it is
-                due: it retires permanently once taken, whereas the promo has
-                every later open to itself — and stacking two asks below
-                someone's codes reads as an ad break.
+            {/* At most one card under the list: the review ask, while it is due.
+                It retires permanently once taken — an ask that stayed below
+                someone's codes would read as an ad break.
 
                 Nothing while the "What's New" modal is up: it carries the same
                 pitch, so the card behind it is the identical ask twice on one
                 screen — and on the 1.11.0 rollout that modal opens for everyone
                 at once. */}
-            {!isFiltered && whatsNewVersion === null &&
-              (showReviewPrompt ? (
-                <ReviewPrompt language={language} onRate={handleRate} onSnooze={handleSnoozeReview} />
-              ) : showPromoBanner ? (
-                <PromoBanner language={language} onDismiss={() => setShowPromoBanner(false)} />
-              ) : null)}
+            {!isFiltered && whatsNewVersion === null && showReviewPrompt && (
+              <ReviewPrompt language={language} onRate={handleRate} onSnooze={handleSnoozeReview} />
+            )}
           </div>
         )}
       </div>
@@ -2149,8 +2554,119 @@ function App() {
         <SupportFooter language={language} onLanguageChange={handleLanguageChange} />
       )}
 
+      {/* Choosing accounts: the bar takes the "+" button's place, since adding
+          an account in the middle of a selection is not what anyone is doing. */}
+      {selection && !showSettings && (() => {
+        const shown = filteredAccounts.map(account => account.id);
+        const allShown = shown.length > 0 && shown.every(id => selection.ids.has(id));
+        const count = selection.ids.size;
+        return (
+          <div
+            data-ui="selection-bar"
+            className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-2 border-t border-gray-200 bg-white px-3 py-2.5 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] dark:border-dark-700 dark:bg-dark-900 anim-rise"
+          >
+            <button
+              onClick={() => setSelection(null)}
+              aria-label={t('common.cancel')}
+              title={t('common.cancel')}
+              className="flex-shrink-0 rounded-full p-1.5 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-dark-700"
+            >
+              <X size={18} aria-hidden />
+            </button>
+            <span role="status" className="min-w-0 flex-1 truncate text-sm text-gray-700 dark:text-gray-200">
+              {selection.target && count === 0 ? t('select.pickFor', selection.target) : t('select.count', count)}
+            </span>
+            <button
+              onClick={() =>
+                setSelection(current => {
+                  if (!current) return current;
+                  const ids = new Set(current.ids);
+                  for (const id of shown) {
+                    if (allShown) ids.delete(id);
+                    else ids.add(id);
+                  }
+                  return { ...current, ids };
+                })
+              }
+              className="flex-shrink-0 px-1 text-xs font-medium text-accent-600 hover:underline dark:text-accent-400"
+            >
+              {allShown ? t('select.none') : t('select.all')}
+            </button>
+            {/* Not while filling a new group: that selection is for moving. */}
+            {!selection.target && (
+              <button
+                disabled={count === 0}
+                onClick={() => void handleDeleteSelected()}
+                aria-label={t('select.delete')}
+                title={t('select.delete')}
+                className="flex-shrink-0 rounded-lg p-1.5 text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 dark:text-red-400 dark:hover:bg-red-900/20"
+              >
+                <Trash2 size={18} aria-hidden />
+              </button>
+            )}
+            <button
+              disabled={count === 0}
+              onClick={event => {
+                if (selection.target) {
+                  void finishSelection(selection.target);
+                  return;
+                }
+                const rect = event.currentTarget.getBoundingClientRect();
+                setSelectionMenu({ x: rect.left, y: rect.top });
+              }}
+              aria-haspopup={selection.target ? undefined : 'menu'}
+              className="flex max-w-[45%] flex-shrink-0 items-center gap-1 rounded-lg bg-accent-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-700 disabled:opacity-50"
+            >
+              <span className="truncate">
+                {selection.target ? t('select.moveHere', selection.target) : t('menu.moveToGroup')}
+              </span>
+              {!selection.target && <ChevronDown size={14} aria-hidden className="flex-shrink-0" />}
+            </button>
+          </div>
+        );
+      })()}
+
+      {selectionMenu && selection && (
+        <ContextMenu
+          x={selectionMenu.x}
+          y={selectionMenu.y}
+          above
+          items={groupPickerItems(
+            undefined,
+            group => void finishSelection(group),
+            () => {
+              setSelectionMenu(null);
+              const ids = [...selection.ids];
+              void askNewGroupName(t('groups.create')).then(async name => {
+                if (name && (await moveAccounts(ids, name))) setSelection(null);
+              });
+            }
+          )}
+          onClose={() => setSelectionMenu(null)}
+        />
+      )}
+
+      {cardMenu && (
+        <ContextMenu
+          // Keyed by page so the groups page measures and focuses afresh.
+          key={cardMenu.page}
+          x={cardMenu.x}
+          y={cardMenu.y}
+          items={cardMenuItems(cardMenu)}
+          onClose={returnFocus => {
+            const id = cardMenu.account.id;
+            setCardMenu(null);
+            if (returnFocus) {
+              document
+                .querySelector<HTMLElement>(`[data-account-id="${CSS.escape(id)}"] [data-row-action]`)
+                ?.focus();
+            }
+          }}
+        />
+      )}
+
       {/* Add Button (Floating Action Button) */}
-      {!showSettings && accounts.length > 0 && (
+      {!showSettings && accounts.length > 0 && !selection && (
         <button
           onClick={() => openAddAccount()}
           className="fixed bottom-4 end-4 w-14 h-14 bg-accent-600 hover:bg-accent-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center"
@@ -2172,6 +2688,16 @@ function App() {
           defaultGroup={activeGroup ?? ''}
           initialTab={addTab}
           scanScreen={addScan}
+          // Closed first: the file picker and the paste box report into the
+          // list, and the result belongs on screen, not behind this dialog.
+          onImport={() => {
+            setShowAddModal(false);
+            handleImportClick();
+          }}
+          onPasteLinks={() => {
+            setShowAddModal(false);
+            void handlePasteLinks();
+          }}
         />
       )}
 
@@ -2225,7 +2751,7 @@ function App() {
       <input
         ref={importInputRef}
         type="file"
-        accept="application/json,text/plain,image/*,.maFile"
+        accept="application/json,text/plain,image/*,.maFile,.2fas"
         onChange={handleImportFile}
         className="hidden"
       />

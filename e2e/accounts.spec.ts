@@ -100,7 +100,7 @@ test('Undo puts a deleted account back where it was', async ({ context, extensio
 test('a list of otpauth:// links goes in straight from the first-run guide', async ({ context, extensionId }) => {
   const page = await openPage(context, extensionId, 'popup.html');
 
-  await page.getByRole('button', { name: 'I have a backup file or otpauth:// links' }).click();
+  await page.getByRole('button', { name: 'In another app or a backup file' }).click();
   // The branch ends in the paste box itself, not in a pointer to Settings.
   await page.getByRole('button', { name: 'Paste links', exact: true }).click();
 
@@ -135,7 +135,7 @@ test('the first-run guide scans the page at once, and a miss stays in the add di
 test('"turning on 2FA" ends in the scan, with the key form beside it', async ({ context, extensionId }) => {
   const page = await openPage(context, extensionId, 'popup.html');
 
-  await page.getByRole('button', { name: "I'm turning on 2-factor authentication right now" }).click();
+  await page.getByRole('button', { name: "I'm turning on 2FA for a site" }).click();
   await expect(page.getByRole('button', { name: 'Scan QR from screen', exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'No QR code? Type the key instead' }).click();
@@ -180,4 +180,230 @@ test('"I have a secret key" opens the form where a key is typed', async ({ conte
 
   await expect(cards(page)).toHaveCount(1);
   expect((await storedAccounts(page))[0]).toMatchObject({ name: 'key@example.com', secret: SECRET });
+});
+
+test("a group's chip renames or deletes the group from its right-click menu, and the accounts stay", async ({
+  context,
+  extensionId,
+}) => {
+  const page = await openPage(context, extensionId, 'popup.html');
+  await addAccountByHand(page, 'work1@example.com', otherSecret(1));
+  await addAccountByHand(page, 'work2@example.com', otherSecret(2));
+  await addAccountByHand(page, 'home@example.com', otherSecret(3));
+  // Grouped in storage rather than through the form: what is under test is the
+  // menu, and the popup follows a direct write as it follows any other.
+  await page.evaluate(async () => {
+    const { authenticator_accounts: stored } = await chrome.storage.local.get('authenticator_accounts');
+    for (const account of stored) if (String(account.name).startsWith('work')) account.group = 'Work';
+    await chrome.storage.local.set({ authenticator_accounts: stored });
+  });
+
+  const strip = page.locator('[data-ui="toolbar"]');
+  const chip = (name: string) => strip.getByRole('button', { name: new RegExp(`^${name}\\s*\\d+$`) });
+  await expect(chip('Work')).toBeVisible();
+
+  // "All" and "No group" are not groups: nothing to rename, nothing to delete.
+  await chip('All').click({ button: 'right' });
+  await expect(page.getByRole('menu')).toHaveCount(0);
+
+  await chip('Work').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Rename group' }).click();
+  const prompt = page.getByRole('dialog', { name: 'Rename group' });
+  await expect(prompt.getByRole('textbox')).toHaveValue('Work');
+  await prompt.getByRole('textbox').fill('Job');
+  await prompt.getByRole('button', { name: 'Rename', exact: true }).click();
+  await expect(chip('Job')).toHaveText(/2$/);
+  await expect(chip('Work')).toHaveCount(0);
+
+  await chip('Job').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Delete group' }).click();
+  const confirm = page.getByRole('alertdialog', { name: 'Delete group' });
+  await expect(confirm).toContainText('The accounts and their codes stay');
+  await confirm.getByRole('button', { name: 'Delete group' }).click();
+
+  // The last group gone, the strip goes with it, and every account is still here.
+  await expect(strip).toHaveCount(0);
+  await expect(cards(page)).toHaveCount(3);
+  const stored = await storedAccounts(page);
+  expect(stored).toHaveLength(3);
+  expect(stored.every((account) => !('group' in account))).toBe(true);
+});
+
+test('a strip with more groups than fit scrolls with the mouse wheel and with its arrows', async ({
+  context,
+  extensionId,
+}) => {
+  const page = await openPage(context, extensionId, 'popup.html');
+  await page.setViewportSize({ width: 360, height: 600 });
+  for (let index = 1; index <= 6; index++) await addAccountByHand(page, `user${index}@example.com`, otherSecret(index));
+  await page.evaluate(async () => {
+    const { authenticator_accounts: stored } = await chrome.storage.local.get('authenticator_accounts');
+    stored.forEach((account: { group?: string }, index: number) => (account.group = `Group number ${index + 1}`));
+    await chrome.storage.local.set({ authenticator_accounts: stored });
+  });
+
+  const scroller = page.locator('[data-ui="toolbar"] > div').first();
+  const position = () => scroller.evaluate((element) => element.scrollLeft);
+  await expect(page.locator('[data-ui="toolbar"]').getByRole('button', { name: /^Group number 6/ })).toBeAttached();
+  expect(await position()).toBe(0);
+
+  // A plain vertical wheel over the strip moves it sideways.
+  await scroller.hover();
+  await page.mouse.wheel(0, 200);
+  await expect.poll(position).toBeGreaterThan(0);
+
+  // Back to the start by the arrow, which then goes, its work done.
+  const back = page.locator('[data-ui="toolbar"] > button').first();
+  for (let i = 0; i < 5 && (await position()) > 0; i++) {
+    await back.click();
+    await page.waitForTimeout(400);
+  }
+  expect(await position()).toBe(0);
+  await expect(page.locator('[data-ui="toolbar"] > button')).toHaveCount(1);
+});
+
+/** Put the named accounts into groups straight in storage — the popup follows the write. */
+async function groupInStorage(page: import('@playwright/test').Page, groups: Record<string, string>) {
+  await page.evaluate(async (byName) => {
+    const { authenticator_accounts: stored } = await chrome.storage.local.get('authenticator_accounts');
+    for (const account of stored) if (byName[account.name]) account.group = byName[account.name];
+    await chrome.storage.local.set({ authenticator_accounts: stored });
+  }, groups);
+}
+
+const chipIn = (page: import('@playwright/test').Page, name: string) =>
+  page.locator('[data-ui="toolbar"]').getByRole('button', { name: new RegExp(`^${name}\\s*\\d+$`) });
+
+test("an account's right-click menu moves it into a new group, and Undo takes it back", async ({ context, extensionId }) => {
+  const page = await openPage(context, extensionId, 'popup.html');
+  await addAccountByHand(page, 'one@example.com', otherSecret(1));
+  await addAccountByHand(page, 'two@example.com', otherSecret(2));
+
+  await cards(page).filter({ hasText: 'one@example.com' }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move to group' }).click();
+  await page.getByRole('menuitem', { name: 'New group…' }).click();
+  const prompt = page.getByRole('dialog', { name: 'New group' });
+  await prompt.getByRole('textbox').fill('Work');
+  await prompt.getByRole('button', { name: 'Create' }).click();
+
+  await expect(chipIn(page, 'Work')).toHaveText(/1$/);
+  expect((await storedAccounts(page)).find((a) => a.name === 'one@example.com')?.group).toBe('Work');
+
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(chipIn(page, 'Work')).toHaveCount(0);
+  expect((await storedAccounts(page)).every((a) => !('group' in a))).toBe(true);
+});
+
+test('"+" on the strip names a group and then picks its accounts', async ({ context, extensionId }) => {
+  const page = await openPage(context, extensionId, 'popup.html');
+  for (const [i, name] of ['a@example.com', 'b@example.com', 'c@example.com'].entries()) {
+    await addAccountByHand(page, name, otherSecret(i + 1));
+  }
+  await groupInStorage(page, { 'a@example.com': 'Old' });
+  await chipIn(page, 'Old').click();
+
+  await page.getByRole('button', { name: 'New group' }).click();
+  const prompt = page.getByRole('dialog', { name: 'New group' });
+  await prompt.getByRole('textbox').fill('Banks');
+  await prompt.getByRole('button', { name: 'Choose accounts' }).click();
+
+  // The whole list, not the filter that was on.
+  await expect(cards(page)).toHaveCount(3);
+  const bar = page.locator('[data-ui="selection-bar"]');
+  await expect(bar).toContainText('Choose accounts for “Banks”');
+  await page.getByRole('checkbox', { name: 'b@example.com' }).click();
+  await page.getByRole('checkbox', { name: 'c@example.com' }).click();
+  await expect(bar).toContainText('Selected: 2');
+  await bar.getByRole('button', { name: 'Move to “Banks”' }).click();
+
+  await expect(bar).toHaveCount(0);
+  await expect(chipIn(page, 'Banks')).toHaveText(/2$/);
+  const stored = await storedAccounts(page);
+  expect(stored.filter((a) => a.group === 'Banks').map((a) => a.name).sort()).toEqual(['b@example.com', 'c@example.com']);
+});
+
+test('a pinned account stays on top, and the order of the group chips is the one dragged', async ({ context, extensionId }) => {
+  const page = await openPage(context, extensionId, 'popup.html');
+  for (const [i, name] of ['first@example.com', 'second@example.com', 'third@example.com'].entries()) {
+    await addAccountByHand(page, name, otherSecret(i + 1));
+  }
+  const before = await cardNames(page);
+  const last = before[before.length - 1];
+  await cards(page).filter({ hasText: last }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Pin to top' }).click();
+  await expect.poll(async () => (await cardNames(page))[0]).toBe(last);
+  await page.reload();
+  await expect(cards(page)).toHaveCount(3);
+  expect((await cardNames(page))[0]).toBe(last);
+
+  await groupInStorage(page, { 'first@example.com': 'Alpha', 'second@example.com': 'Beta', 'third@example.com': 'Gamma' });
+  await expect(chipIn(page, 'Gamma')).toBeVisible();
+  await chipIn(page, 'Gamma').dragTo(chipIn(page, 'Alpha'));
+  const order = () =>
+    page.locator('[data-ui="toolbar"] [draggable="true"]').evaluateAll((chips) => chips.map((c) => c.textContent?.replace(/\d+$/, '').trim()));
+  await expect.poll(order).toEqual(['Gamma', 'Alpha', 'Beta']);
+  await page.reload();
+  await expect.poll(order).toEqual(['Gamma', 'Alpha', 'Beta']);
+});
+
+test('the keyboard walks the list from the search box, and Enter there copies the first match', async ({ context, extensionId }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const page = await openPage(context, extensionId, 'popup.html');
+  await addAccountByHand(page, 'alpha@example.com', otherSecret(1));
+  await addAccountByHand(page, 'beta@example.com', otherSecret(2));
+
+  const search = page.getByRole('textbox', { name: /search/i });
+  await search.fill('beta');
+  await search.press('Enter');
+  await expect(cards(page).filter({ hasText: 'beta@example.com' })).toContainText('Copied');
+
+  await search.fill('');
+  await search.press('ArrowDown');
+  const focusedRow = () => page.evaluate(() => document.activeElement?.closest('[data-account-id]')?.getAttribute('data-account-id'));
+  const ids = await cards(page).evaluateAll((rows) => rows.map((r) => r.getAttribute('data-account-id')));
+  expect(await focusedRow()).toBe(ids[0]);
+  await page.keyboard.press('ArrowDown');
+  expect(await focusedRow()).toBe(ids[1]);
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  await expect(search).toBeFocused();
+});
+
+test("an account's menu opens from the keyboard, under the row in focus", async ({ context, extensionId }) => {
+  const page = await openPage(context, extensionId, 'popup.html');
+  await addAccountByHand(page, 'keys@example.com', otherSecret(1));
+  const search = page.getByRole('textbox', { name: /search/i });
+  await search.focus();
+  await search.press('ArrowDown');
+  await page.keyboard.press('Shift+F10');
+  await expect(page.getByRole('menu')).toBeVisible();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitem', { name: 'Pin to top' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+});
+
+test('several selected accounts are deleted after a confirmation that counts them, and Undo brings all back in place', async ({ context, extensionId }) => {
+  const page = await openPage(context, extensionId, 'popup.html');
+  for (const [i, name] of ['one@example.com', 'two@example.com', 'three@example.com'].entries()) {
+    await addAccountByHand(page, name, otherSecret(i + 1));
+  }
+  const order = await cardNames(page);
+
+  await cards(page).filter({ hasText: 'one@example.com' }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Select' }).click();
+  await page.getByRole('checkbox', { name: 'three@example.com' }).click();
+  await page.locator('[data-ui="selection-bar"]').getByRole('button', { name: 'Delete selected' }).click();
+
+  const confirm = page.getByRole('alertdialog', { name: 'Delete the selected accounts?' });
+  await expect(confirm).toContainText('one@example.com');
+  await expect(confirm).toContainText('three@example.com');
+  await confirm.getByRole('button', { name: 'Delete (2)' }).click();
+
+  await expect(cards(page)).toHaveCount(1);
+  expect((await storedAccounts(page)).map((a) => a.name)).toEqual(['two@example.com']);
+
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(cards(page)).toHaveCount(3);
+  await expect.poll(() => cardNames(page)).toEqual(order);
 });

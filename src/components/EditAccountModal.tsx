@@ -97,7 +97,7 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-gray-50 dark:bg-dark-800"
+      className="fixed inset-0 z-50 flex flex-col bg-gray-50 dark:bg-dark-800 anim-sheet"
       role="dialog"
       aria-modal="true"
       aria-label={t('edit.title')}

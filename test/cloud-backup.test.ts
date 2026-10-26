@@ -215,6 +215,25 @@ export async function run(): Promise<void> {
       check('and the server heard nothing', server.bodies.length === 0);
     }
 
+    scenario('The file-backup reminder stands down only while a copy really covers the accounts');
+    {
+      const { install } = await setUp();
+      await storage.addMultipleAccounts([account(1), account(2), account(3)], USER_ADD);
+      check('never turned on: not covered', !(await cloud.cloudBackupCovers()));
+      await cloud.enableCloudBackup(await cloud.pendingBackupCode());
+      await cloud.dropPendingBackupCode();
+      check('a copy on the server: covered', await cloud.cloudBackupCovers());
+      const sent = (await chrome.storage.local.get('cloudBackupState')).cloudBackupState;
+      await chrome.storage.local.set({ cloudBackupState: { ...sent, failedAt: sent.at + 1 } });
+      check('an upload failed since: not covered', !(await cloud.cloudBackupCovers()));
+      await chrome.storage.local.set({ cloudBackupState: sent });
+      await chrome.storage.local.remove('billingEntitlement');
+      check('Pro ended: not covered', !(await cloud.cloudBackupCovers()));
+      await grantPro(install.id);
+      await cloud.disableCloudBackup();
+      check('turned off: not covered', !(await cloud.cloudBackupCovers()));
+    }
+
     scenario('Turning it on claims the license and sends a copy the server cannot read');
     {
       const { server } = await setUp();

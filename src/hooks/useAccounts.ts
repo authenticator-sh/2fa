@@ -8,7 +8,12 @@ import {
   decodeAccounts,
   addAccount as addAccountToStorage,
   deleteAccount as deleteAccountFromStorage,
+  deleteAccounts as deleteAccountsFromStorage,
   updateAccount as updateAccountInStorage,
+  renameGroup as renameGroupInStorage,
+  moveToGroup as moveToGroupInStorage,
+  restoreGroupPlacements as restoreGroupPlacementsInStorage,
+  reorderGroups as reorderGroupsInStorage,
   reorderAccounts as reorderAccountsInStorage,
   lockedAwayCount,
 } from '@/utils/storage';
@@ -218,6 +223,22 @@ export function useAccounts(vaultLocked: boolean) {
     return found;
   };
 
+  // The group edits: a write, then the list read back, the same as the
+  // single-account edits above.
+  const thenReload =
+    <A extends unknown[], R>(write: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      const result = await write(...args);
+      await loader.load({ quiet: true });
+      return result;
+    };
+  const renameGroup = thenReload(renameGroupInStorage);
+  const moveToGroup = thenReload(moveToGroupInStorage);
+  const restoreGroupPlacements = thenReload(restoreGroupPlacementsInStorage);
+  const reorderGroups = thenReload(reorderGroupsInStorage);
+  /** How many were deleted. */
+  const deleteAccounts = thenReload(deleteAccountsFromStorage);
+
   const reorderAccounts = async (accountIds: string[]) => {
     await reorderAccountsInStorage(accountIds);
     await loader.load({ quiet: true });
@@ -232,7 +253,12 @@ export function useAccounts(vaultLocked: boolean) {
     heldCount,
     addAccount,
     deleteAccount,
+    deleteAccounts,
     updateAccount,
+    renameGroup,
+    moveToGroup,
+    restoreGroupPlacements,
+    reorderGroups,
     reorderAccounts,
     reload,
   };

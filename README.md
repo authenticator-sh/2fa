@@ -42,6 +42,13 @@ A privacy-focused TOTP authenticator for Chrome. Your secrets, account names and
 - **Open where you need it** — the toolbar icon can open the popup, a floating
   window, or Chrome's side panel; the last two stay put while you switch tabs,
   which a popup cannot do because it closes as soon as it loses focus
+- **Groups and pins** — sort accounts into groups and filter the list by them;
+  create, rename, reorder and delete groups, move many accounts at once, and
+  pin the ones you use most to the top. Group names, their order and pins live
+  inside the account records, so password protection encrypts them too
+- **Right-click an account** to copy, pin, move, share, edit or delete it; from
+  the keyboard, Enter in the search box copies the first match and the arrow
+  keys walk the list
 - **Password-protected backup files** on export
 - Automatic local backups in IndexedDB with rotation (7 latest)
 - Export and import for cross-device migration, including
@@ -401,7 +408,7 @@ The extension never sends your secrets, account names, issuers, codes or the sit
 
 | URL                                         | When                          | Purpose                        |
 |---------------------------------------------|-------------------------------|--------------------------------|
-| `https://www.authenticator.sh/welcome?iid=<install id>` | First install | Opens welcome page in a new tab. The site passes the install id to our server only for a browser that came from one of our ads, to tell which campaign led to installs that went on to use the extension; it never goes to Meta. The page may ask the extension to open its popup — the one message the extension accepts from any web page (`externally_connectable`, authenticator.sh only, `src/background/site-open.ts`); the reply says only whether it opened |
+| `https://www.authenticator.sh/welcome?iid=<install id>` | First install | Opens welcome page in a new tab. The site passes the install id to our server only for a browser that came from one of our ads, to tell which campaign led to installs that went on to use the extension; it never goes to Meta. The page may ask the extension to open its popup — the one message the extension accepts from any web page (`externally_connectable`, authenticator.sh only, `src/background/site-open.ts`); the reply says only whether it opened, and whether its icon is pinned to the toolbar (so the page does not explain the puzzle menu to someone who does not need it) |
 | `https://www.authenticator.sh/uninstall?i=<install id>&s=<stage>` | After uninstall (Chrome API) | Opens feedback page, which reports the removal to our server by that id, with how far a new install got towards a first account (`opened`, `pick:ga`, `fail:camera:camera_denied`…), and links an optional answer to it |
 | `https://api.authenticator.sh/v1/sync`      | Once a day (browser start or popup open, after it has rendered); in a new install's first three days also within minutes of a step towards a first account | Check-in — see [What is sent to our server](#what-is-sent-to-our-server) |
 | `https://api.authenticator.sh/v1/checkout`, `/v1/license/*`, `/v1/portal` | User starts a purchase, enters a key, restores a purchase or manages a subscription | Pro |
@@ -522,7 +529,8 @@ list):
 | `ver`, `ui_lang`, `browser_lang` | Extension version, interface language, browser language |
 | `installed_at`, `legacy`, `legacy_src` | When this installation appeared, and whether it predates billing |
 | `accounts` | **How many** accounts you have — a number, never which ones |
-| `vault`, `sync`, `open_mode`, `style`, `dark` | Whether password protection and sync are on, how the extension opens, and which of its two styles it is drawn in, light or dark |
+| `groups` | **How many** groups those accounts are in — a number, never their names (from 1.15.2) |
+| `vault`, `sync`, `open_mode`, `view_mode`, `style`, `dark`, `os` | Whether password protection and sync are on, how the extension opens, how the account list is shown (`normal`, `compact`, `hidden`), which of its two styles it is drawn in, light or dark, and the operating system as Chrome names it (`win`, `mac`, `linux`, `cros`…) |
 | `pid`, `lid` | Which policy and license this installation currently holds |
 | `has_key`, `key_hint` | Whether this installation holds a license key, and the last four characters of it. The installation Pro was bought on is sent its key in the response (`key`) until those four characters match it — so a key bought later replaces an older one; one where a key was typed in already has it and is never sent one |
 | `opens` | How many times the extension was opened on each day since the last check-in (at most the last 14 days) — a count per day, nothing about what was looked at |

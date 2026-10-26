@@ -324,6 +324,23 @@ export async function cloudBackupEntitlement(): Promise<Entitlement | null> {
   return entitlement && entitlement.features.includes('cloud_backup') ? entitlement : null;
 }
 
+/**
+ * Cloud backup is on and the copy on the server is what this device last
+ * held: Pro still includes it, a copy reached the server under a code, and no
+ * attempt has failed since. Turning it off or a refused code clears the upload
+ * state, so either reads as not covered.
+ */
+export async function cloudBackupCovers(): Promise<boolean> {
+  try {
+    if (!(await cloudBackupEntitlement())) return false;
+    const state = await readUploadState();
+    if (state.at === null || state.kid === null) return false;
+    return state.failedAt === null || state.failedAt < state.at;
+  } catch {
+    return false;
+  }
+}
+
 // ─── What a copy holds ─────────────────────────────────────────────────────
 
 /** Same accounts, same string: fields in a fixed order, accounts by id. */

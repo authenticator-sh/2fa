@@ -40,6 +40,11 @@ function ToastRow({ toast }: { toast: Toast }) {
       >
         <tone.icon size={15} aria-hidden className={`flex-shrink-0 ${tone.iconClass}`} />
         <span className="text-xs font-medium leading-snug text-white">{toast.message}</span>
+        {toast.count && toast.count > 1 && (
+          <span className="flex-shrink-0 rounded-full bg-white/15 px-1.5 text-[10px] font-semibold leading-4 text-white">
+            ×{toast.count}
+          </span>
+        )}
       </button>
       {toast.action && (
         <button
@@ -64,7 +69,7 @@ const FOCUSABLE =
   'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
 
 function Dialog({ request }: { request: DialogRequest }) {
-  const [value, setValue] = useState('');
+  const [value, setValue] = useState(request.kind === 'prompt' ? request.defaultValue ?? '' : '');
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -82,6 +87,8 @@ function Dialog({ request }: { request: DialogRequest }) {
   // protection off — and an Enter pressed out of habit must land on "no".
   useEffect(() => {
     (request.kind === 'prompt' ? inputRef.current : cancelRef.current)?.focus();
+    // Selected, so typing replaces a prefilled name and an arrow key keeps it.
+    if (request.kind === 'prompt' && request.defaultValue) inputRef.current?.select();
   }, [request.kind]);
 
   // The topmost layer, so Escape answers this and leaves the screen under it
@@ -115,7 +122,7 @@ function Dialog({ request }: { request: DialogRequest }) {
     .join(' ');
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 anim-backdrop">
       {/* alertdialog for a confirmation: it interrupts to ask about something
           consequential, and a screen reader reads its whole text on opening
           rather than just the focused button. */}
@@ -126,7 +133,7 @@ function Dialog({ request }: { request: DialogRequest }) {
         aria-labelledby={titleId}
         aria-describedby={describedBy || undefined}
         onKeyDown={trapTab}
-        className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-5 shadow-xl dark:border-dark-600 dark:bg-dark-800"
+        className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-5 shadow-xl dark:border-dark-600 dark:bg-dark-800 anim-pop"
       >
         <h2 id={titleId} className="text-base font-semibold text-gray-900 dark:text-gray-100">{request.title}</h2>
         {request.body && (
@@ -280,7 +287,7 @@ export function FeedbackHost() {
           ))}
         </div>
       </div>
-      {/* Keyed by request id so a new prompt starts with an empty input. */}
+      {/* Keyed by request id so a new prompt starts from its own defaultValue. */}
       {dialog && <Dialog key={dialog.id} request={dialog} />}
     </>
   );

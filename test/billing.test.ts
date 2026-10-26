@@ -443,10 +443,28 @@ export async function run(): Promise<void> {
     const keys = Object.keys(body).sort().join(',');
     check(
       'exactly the documented fields',
-      keys === 'accounts,browser_lang,dark,events,has_key,iid,installed_at,key_hint,legacy,legacy_src,lid,open_mode,opens,pid,style,sync,ui_lang,vault,ver',
+      keys === 'accounts,browser_lang,dark,events,groups,has_key,iid,installed_at,key_hint,legacy,legacy_src,lid,open_mode,opens,os,pid,style,sync,ui_lang,vault,ver,view_mode',
       keys,
     );
+    check('the operating system, as Chrome names it', body.os === 'mac', String(body.os));
+    {
+      const realInfo = chrome.runtime.getPlatformInfo;
+      (chrome.runtime as any).getPlatformInfo = undefined;
+      check('left out where it cannot be had', !('os' in (await sync.buildSyncRequest(install))));
+      (chrome.runtime as any).getPlatformInfo = realInfo;
+    }
     check('the count, not the accounts', body.accounts === 2);
+    check('the normal list view when nothing was picked', body.view_mode === 'normal', String(body.view_mode));
+    await chrome.storage.local.set({ viewMode: 'compact' });
+    check('or the view picked', (await sync.buildSyncRequest(install)).view_mode === 'compact');
+    await chrome.storage.local.set({ viewMode: 'tiles' });
+    check('an unknown stored view is sent as normal', (await sync.buildSyncRequest(install)).view_mode === 'normal');
+    await chrome.storage.local.remove('viewMode');
+    check('no groups yet', body.groups === 0, String(body.groups));
+    await storage.addMultipleAccounts([{ ...account(3), group: 'Work' }, { ...account(4), group: ' Work ' }, { ...account(5), group: 'Crypto' }], USER_ADD);
+    const grouped = await sync.buildSyncRequest(install);
+    check('how many groups, as the filter counts them', grouped.groups === 2 && grouped.accounts === 5, `${grouped.groups} ${grouped.accounts}`);
+    check('never their names', !/Work|Crypto/.test(JSON.stringify(grouped)));
     check('the language on screen, even when none was picked', body.ui_lang === 'en', String(body.ui_lang));
     await chrome.storage.local.set({ language: 'de' });
     check('or the one picked', (await sync.buildSyncRequest(install)).ui_lang === 'de');

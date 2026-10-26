@@ -39,7 +39,7 @@ test('the service worker starts without errors', async ({ context, extensionId, 
   // Give the worker something to do beyond starting: the popup talks to it
   // and to the storage it watches.
   const popup = await openPage(context, extensionId, 'popup.html');
-  await expect(popup.getByRole('button', { name: "I'm turning on 2-factor authentication right now" })).toBeVisible();
+  await expect(popup.getByRole('button', { name: "I'm turning on 2FA for a site" })).toBeVisible();
   // Startup work is asynchronous (settings reads, the context menu, the
   // badge); let it finish before reading the record.
   await expect
@@ -56,4 +56,25 @@ test('the service worker starts without errors', async ({ context, extensionId, 
   expect(describe(info.manifestErrors), 'manifest errors').toEqual([]);
   expect(describe(info.runtimeErrors), 'service worker errors').toEqual([]);
   expect(consoleErrors, 'console errors from the worker').toEqual([]);
+});
+
+// The time on "add your first account" ends when the popup closes, and only the
+// worker can see that: the popup's port to it drops. Under Node the port is a
+// fake; here it is Chrome's, closing a real page.
+test('closing the popup on the first-run screen reports how long it was up', async ({ context, extensionId, serviceWorker }) => {
+  const queued = () =>
+    serviceWorker.evaluate(async () => {
+      const found = (await chrome.storage.local.get('billingEvents')).billingEvents as { n: string; p?: Record<string, unknown> }[] | undefined;
+      return (found ?? []).filter((e) => e.n === 'onboard_leave').map((e) => e.p);
+    });
+
+  const popup = await openPage(context, extensionId, 'popup.html');
+  await expect(popup.getByRole('button', { name: "I'm turning on 2FA for a site" })).toBeVisible();
+  await popup.waitForTimeout(2_200);
+  await popup.close();
+
+  await expect.poll(queued, { timeout: 5_000 }).toHaveLength(1);
+  const [leave] = await queued();
+  expect(leave?.end).toBe('close');
+  expect(leave?.secs).toBeGreaterThanOrEqual(2);
 });

@@ -288,7 +288,7 @@ test('at the limit, Add opens the paywall; a license key turns Pro on and the ty
   // What left the machine: the count, never the accounts.
   const lastSync = state.syncs[state.syncs.length - 1]!;
   expect(Object.keys(lastSync).sort()).toEqual(
-    ['accounts', 'browser_lang', 'dark', 'events', 'has_key', 'iid', 'installed_at', 'key_hint', 'legacy', 'legacy_src', 'lid', 'open_mode', 'opens', 'pid', 'style', 'sync', 'ui_lang', 'vault', 'ver'].sort()
+    ['accounts', 'browser_lang', 'dark', 'events', 'groups', 'has_key', 'iid', 'installed_at', 'key_hint', 'legacy', 'legacy_src', 'lid', 'open_mode', 'opens', 'os', 'pid', 'style', 'sync', 'ui_lang', 'vault', 'ver', 'view_mode'].sort()
   );
 
   await addAccountByHand(page, 'first@example.com', otherSecret(1));
@@ -595,6 +595,8 @@ test('the cloud backup banner over Settings counts its views, opens the backup p
   await mockBilling(context, state);
 
   const page = await openPage(context, extensionId, 'popup.html');
+  // Offered only to someone with accounts to back up (ServerBanner's hasAccounts).
+  await addAccountByHand(page, 'first@example.com', otherSecret(1));
   await syncNow(page);
   await page.getByRole('button', { name: 'Settings' }).click();
   const banner = page.getByRole('region', { name: 'Cloud backup' });

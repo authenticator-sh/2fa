@@ -192,6 +192,29 @@ export async function run(): Promise<void> {
     items: [{ name: 'Site', login: { username: 'u', totp: `otpauth://totp/Site:u?secret=${SECRET}&algorithm=MD5` } }],
   });
   check('Bitwarden: an MD5 link is refused', bitwarden.rejected === 'only-unsupported', JSON.stringify(bitwarden));
+
+  // Proton Authenticator's plain export, shaped as its exporter writes it
+  // (proton-pass-common, entry/exporter.rs): the account rides in `content.uri`.
+  const steamKey = Buffer.from('0123456789abcdefghij').toString('base64').replace(/=+$/, '');
+  const proton = plan({
+    version: 1,
+    entries: [
+      { id: 'a', content: { uri: `otpauth://totp/alice%40example.com?secret=${SECRET}&issuer=GitHub&algorithm=SHA256&digits=8&period=60`, entry_type: 'Totp', name: 'alice@example.com' }, note: null },
+      { id: 'b', content: { uri: `otpauth://totp/?secret=${SECRET}AA&issuer=Dropbox`, entry_type: 'Totp', name: 'Dropbox' }, note: 'x' },
+      { id: 'c', content: { uri: `steam://${steamKey}`, entry_type: 'Steam', name: 'gamer' }, note: null },
+    ],
+  });
+  check('Proton Authenticator: all three entries import', proton.n === 3, JSON.stringify(proton));
+  check('Proton Authenticator: a link keeps its account, issuer and parameters',
+    proton.usable?.some((a: any) => a.name === 'alice@example.com' && a.issuer === 'GitHub' && a.algorithm === 'SHA256' && a.digits === 8 && a.period === 60),
+    JSON.stringify(proton.usable));
+  check('Proton Authenticator: an account with no name is called what Proton showed, not "Account"',
+    proton.usable?.some((a: any) => a.name === 'Dropbox' && a.issuer === 'Dropbox'), JSON.stringify(proton.usable?.map((a: any) => a.name)));
+  check('Proton Authenticator: its unpadded Base64 Steam key becomes ours',
+    proton.usable?.some((a: any) => a.type === 'steam' && a.secret === formats.base64ToBase32(steamKey)), JSON.stringify(proton.usable?.map((a: any) => [a.type, a.secret])));
+  const protonSealed = plan({ version: 1, salt: 'c2FsdHNhbHRzYWx0c2FsdA==', content: 'AAAA' });
+  check('Proton Authenticator: a password-protected export asks for one without, not "unknown format"',
+    protonSealed.rejected === 'encrypted', JSON.stringify(protonSealed));
   const missing = plan([{ secret: SECRET, issuer: 'I', label: 'x', type: 'TOTP' }]);
   check('a file that leaves the parameters out still imports with the defaults',
     missing.n === 1 && missing.usable[0].digits === 6 && missing.usable[0].period === 30 && missing.usable[0].algorithm === 'SHA1', JSON.stringify(missing));

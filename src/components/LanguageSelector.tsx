@@ -65,7 +65,7 @@ export function LanguageSelector({ language, onLanguageChange, className }: Lang
       {/* Upwards, from the bottom edge of the window — and never taller than
           the window has room for above the footer at its smallest size. */}
       {isOpen && (
-        <div id={listId} className="absolute end-0 bottom-full mb-1 bg-white dark:bg-dark-800 rounded-lg shadow-lg border border-gray-200 dark:border-dark-600 py-1 z-50 min-w-[140px] max-h-[min(300px,70vh)] overflow-y-auto">
+        <div id={listId} className="absolute end-0 bottom-full mb-1 bg-white dark:bg-dark-800 rounded-lg shadow-lg border border-gray-200 dark:border-dark-600 py-1 z-50 min-w-[140px] max-h-[min(300px,70vh)] overflow-y-auto anim-menu-up">
           {languages.map((lang) => (
             <button
               key={lang.code}

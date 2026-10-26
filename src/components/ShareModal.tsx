@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, Copy, Check, AlertTriangle } from 'lucide-react';
 import { ModalHeader } from './ModalHeader';
 import type { Account } from '@/types';
@@ -16,6 +16,7 @@ import {
 import { totpParams } from '@/utils/totp';
 import { drawQR, type QRDrawing } from '@/utils/qr-encode';
 import { MIN_PASSWORD_LENGTH } from '@/utils/crypto';
+import { track } from '@/billing/events';
 
 interface ShareModalProps {
   account: Account;
@@ -74,6 +75,18 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
   const [qr, setQr] = useState<QRDrawing | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Once per opening: StrictMode runs the effect twice in development.
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current) return;
+    opened.current = true;
+    void track('share_open');
+  }, []);
+
+  /** Whose words name the link — as a kind, never the words themselves. */
+  const labelKind = () =>
+    !label.trim() ? 'none' : label === clampLabel(accountLabel(account)) ? 'default' : 'custom';
+
   const durationLabel = (seconds: number) =>
     seconds >= MAX_SHARE_SECONDS ? t('share.hour') : t('share.minutes', Math.round(seconds / 60));
 
@@ -81,6 +94,7 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
     event.preventDefault();
     if (sharePasswordTooShort(password)) {
       setError(t('vault.setup.tooShort'));
+      void track('share_fail', { reason: 'short_password' });
       return;
     }
     setCreating(true);
@@ -101,6 +115,13 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
       }
       setLink(built);
       setQr(drawing);
+      void track('share_create', {
+        minutes: Math.round(durationSec / 60),
+        password: !!password,
+        label: labelKind(),
+        digits: totpParams(account).digits,
+        qr: !!drawing,
+      });
     } catch (err) {
       // Two failures have a cause of their own. A period too short to fit an
       // hour of codes in a link says so, with the numbers — "cannot be
@@ -108,6 +129,7 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
       // is the other, and the card already refuses to offer sharing for
       // those, so its message covers anything else that gets past that.
       console.error('Could not build a share link', err);
+      void track('share_fail', { reason: err instanceof ShareError ? err.reason : 'other' });
       setError(
         err instanceof ShareError && err.reason === 'period'
           ? t('share.periodTooShort', totpParams(account).period, MIN_SHARE_PERIOD)
@@ -128,6 +150,7 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+    void track('share_copy', { password: !!password });
   };
 
   const validUntil = link
@@ -139,7 +162,7 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-gray-50 dark:bg-dark-800"
+      className="fixed inset-0 z-50 flex flex-col bg-gray-50 dark:bg-dark-800 anim-sheet"
       role="dialog"
       aria-modal="true"
       aria-label={t('share.title')}

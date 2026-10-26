@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeftRight, Camera, ChevronDown, ChevronRight, HelpCircle, FileDown, ImagePlus, KeyRound, Link2, Monitor, QrCode, Smartphone } from 'lucide-react';
+import { ArrowLeftRight, Camera, ChevronDown, ChevronRight, HelpCircle, ImagePlus, KeyRound, Link2, Monitor, QrCode, Smartphone } from 'lucide-react';
 import { createT, type Language, type TranslationKey } from '@/utils/i18n';
 import { reportAddStep, reportOnboardPick } from '@/billing/onboarding';
 
@@ -15,19 +15,20 @@ import { reportAddStep, reportOnboardPick } from '@/billing/onboarding';
  * Pick a starting point, get only the steps for it.
  */
 
-type PathId = 'ga' | 'new' | 'other' | 'manual' | 'key' | 'asked';
+type PathId = 'ga' | 'new' | 'manual' | 'move' | 'asked';
 
 /**
- * The tile behind a row's icon. One colour per row, so the five read as five
+ * The tile behind a row's icon. One colour per row, so the rows read as
  * different answers rather than as a list to be read top to bottom; spelled out
  * in full because Tailwind only ships the classes it finds written down.
  */
+// A soft two-stop tint and a hairline of the same hue, rather than a flat
+// fill: the tile reads as a surface of its own on the white card.
 const TONES = {
-  blue: 'bg-blue-100 text-accent-600 dark:bg-blue-900/30 dark:text-accent-400',
-  green: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
-  teal: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400',
-  violet: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400',
-  amber: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  blue: 'bg-gradient-to-br from-blue-100 to-blue-50 text-accent-600 ring-1 ring-inset ring-blue-200/70 dark:from-blue-900/40 dark:to-blue-900/10 dark:text-accent-400 dark:ring-blue-800/50',
+  green: 'bg-gradient-to-br from-green-100 to-green-50 text-green-700 ring-1 ring-inset ring-green-200/70 dark:from-green-900/40 dark:to-green-900/10 dark:text-green-400 dark:ring-green-800/50',
+  teal: 'bg-gradient-to-br from-teal-100 to-teal-50 text-teal-700 ring-1 ring-inset ring-teal-200/70 dark:from-teal-900/40 dark:to-teal-900/10 dark:text-teal-400 dark:ring-teal-800/50',
+  violet: 'bg-gradient-to-br from-violet-100 to-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200/70 dark:from-violet-900/40 dark:to-violet-900/10 dark:text-violet-400 dark:ring-violet-800/50',
 };
 
 /** A row of the chooser. */
@@ -102,11 +103,12 @@ const PATHS: Array<GuideRow | GuidePath> = [
   // to find your secret key". This used to be the third step of the backup
   // branch, and uninstall answers said manual entry could not be found.
   { id: 'manual', icon: KeyRound, tone: 'violet', label: 'onboarding.manual.label', sub: 'onboarding.manual.sub', action: 'manual' },
-  { id: 'key', icon: FileDown, tone: 'amber', label: 'onboarding.key.label', sub: 'onboarding.key.sub', steps: 'onboarding.key.steps', more: 'onboarding.key.more', primary: 4, action: 'import', paste: true },
-  // 'import', not 'add': since 1.13.0 this branch leads with "paste the list
-  // your old app exported", and its steps say a .txt of those links goes
-  // through the button below. The button has to be the one that opens a file.
-  { id: 'other', icon: ArrowLeftRight, tone: 'teal', label: 'onboarding.other.label', sub: 'onboarding.other.sub', steps: 'onboarding.other.steps', more: 'onboarding.other.more', primary: 2, action: 'import' },
+  // Another app and a backup file, one row since 2026-10-27. Apart they were a
+  // file 1.3 % and another app 1.0 % of first picks (20–27 Oct), two of five
+  // rows to read past for everyone else — and both ended in the same file
+  // button and the same paste box anyway. An app that cannot export is the
+  // fold: one service at a time.
+  { id: 'move', icon: ArrowLeftRight, tone: 'teal', label: 'onboarding.move.label', sub: 'onboarding.move.sub', steps: 'onboarding.move.steps', more: 'onboarding.move.more', primary: 3, action: 'import', paste: true },
 ];
 
 /**
@@ -196,8 +198,14 @@ export function EmptyStateGuide({
       // still do, the link included, at rows of py-1.5 and the tighter gaps
       // here (measured 2026-10-17; in six languages the link meets the footer
       // with nothing to spare). The 320px popup scrolls, as it partly did.
-      <div className="flex flex-col items-center px-5 pt-3 pb-2">
-        <h2 className="text-base font-medium text-gray-900 dark:text-gray-100">
+      // Four rows since 2026-10-27, so there is a row's height to spare now.
+      //
+      // my-auto: centred in the height the popup has, where it used to sit
+      // against the top with a third of the window empty under it. When it
+      // does not fit — the 320px popup, a long language — the margins are
+      // zero and the pane scrolls as before.
+      <div className="my-auto flex flex-col items-center px-4 pt-3 pb-3">
+        <h2 className="text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100">
           {t('onboarding.title')}
         </h2>
 
@@ -212,19 +220,19 @@ export function EmptyStateGuide({
               void reportOnboardPick('page');
               onScanScreen();
             }}
-            className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-xl bg-accent-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-700"
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-accent-600 px-3 py-2.5 text-sm font-medium text-white shadow-sm shadow-accent-600/30 transition-all hover:bg-accent-700 hover:shadow-md active:scale-[0.99]"
           >
             <Monitor size={16} className="shrink-0" />
             {t('onboarding.page.scan')}
           </button>
         )}
 
-        <p className="mt-3 mb-2 text-xs text-gray-500 dark:text-gray-400">
+        <p className="mt-3 mb-2.5 text-[13px] text-gray-500 dark:text-gray-400">
           {t('onboarding.question')}
         </p>
 
-        <div className="w-full space-y-1.5">
-          {PATHS.map(path => (
+        <div className="w-full space-y-2">
+          {PATHS.map((path, index) => (
             <button
               key={path.id}
               ref={node => {
@@ -235,13 +243,18 @@ export function EmptyStateGuide({
                 if (hasSteps(path)) onOpenPath(path);
                 else run(path.action);
               }}
-              // All five alike until one is hovered. The first used to be
+              // All alike until one is hovered. The first used to be
               // tinted from the start, which singled out Google Authenticator
               // before the reader had answered the question above the rows.
-              className="flex w-full items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-start transition-colors hover:border-accent-500 hover:bg-blue-50/50 dark:border-dark-600 dark:bg-dark-800 dark:hover:border-accent-500 dark:hover:bg-dark-700"
+              //
+              // Cards on a shadow and a hairline rather than a border, lifted
+              // a pixel on hover and pressed in on click; in one after another
+              // as the screen opens (anim-sheet, none for reduced motion).
+              style={{ animationDelay: `${index * 35}ms` }}
+              className="anim-sheet group/row flex w-full items-center gap-2.5 rounded-2xl bg-white px-3 py-2 text-start shadow-sm ring-1 ring-gray-900/[0.06] transition-all duration-150 hover:-translate-y-px hover:shadow-md hover:ring-accent-500/40 active:translate-y-0 active:scale-[0.99] dark:bg-dark-800 dark:ring-white/10 dark:hover:ring-accent-400/40"
             >
-              <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${TONES[path.tone]}`}>
-                <path.icon size={18} />
+              <span className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl ${TONES[path.tone]}`}>
+                <path.icon size={19} />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -256,7 +269,9 @@ export function EmptyStateGuide({
                   </span>
                 )}
               </span>
-              <ChevronRight size={16} className="flex-shrink-0 text-gray-500 dark:text-gray-400 rtl:rotate-180" />
+              <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500 transition-all group-hover/row:bg-accent-50 group-hover/row:text-accent-600 group-hover/row:translate-x-0.5 rtl:group-hover/row:-translate-x-0.5 dark:bg-dark-700 dark:text-gray-400 dark:group-hover/row:bg-dark-600 dark:group-hover/row:text-accent-400">
+                <ChevronRight size={14} className="rtl:rotate-180" />
+              </span>
             </button>
           ))}
         </div>
@@ -269,7 +284,7 @@ export function EmptyStateGuide({
             void reportOnboardPick('asked');
             onOpenPath(ASKED);
           }}
-          className="mt-2.5 flex items-center gap-1.5 text-start text-xs font-medium text-accent-600 transition-colors hover:text-accent-700 dark:text-accent-400 dark:hover:text-accent-300"
+          className="mt-3 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-start text-xs font-medium text-accent-600 transition-colors hover:bg-accent-50 hover:text-accent-700 dark:text-accent-400 dark:hover:bg-dark-700 dark:hover:text-accent-300"
         >
           <HelpCircle size={14} className="shrink-0" />
           {t('onboarding.asked.label')}

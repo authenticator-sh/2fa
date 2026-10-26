@@ -50,6 +50,7 @@ function installWorkerMocks(): void {
     onInstalled: event('runtime.onInstalled'),
     onStartup: event('runtime.onStartup'),
     onMessage: event('runtime.onMessage'),
+    onConnect: event('runtime.onConnect'),
     setUninstallURL() {},
     getURL: (path: string) => `chrome-extension://test/${path}`,
     sendMessage: async () => undefined,

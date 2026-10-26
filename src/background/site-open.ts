@@ -8,7 +8,8 @@
 //
 // Two messages, from our own site only (manifest externally_connectable, and
 // the origin checked again here): "ping", so the page shows the button only
-// where there is an extension to answer it, and "open" — sent once by the page
+// where there is an extension to answer it — and whether its icon is on the
+// toolbar, so the page does not explain a puzzle menu nobody needs — and "open" — sent once by the page
 // as it loads (`auto`; Chrome needs no click for openPopup, checked 2026-10-17)
 // and again from the button, for whoever clicked the popup away. Nothing else
 // a web page sends is listened to, and nothing about the accounts is sent back.
@@ -23,6 +24,23 @@ const SITE_ORIGINS: ReadonlySet<string> = new Set(['https://www.authenticator.sh
 
 export interface SiteOpenReply {
   ok: boolean;
+  /**
+   * The answer to "ping": whether the icon is on the toolbar already — pinned
+   * by the person, or by Chrome, which since 153 pins new extensions for some
+   * users. The welcome page drops "find it behind the puzzle piece, then pin
+   * it" when it is. Absent where Chrome cannot say.
+   */
+  pinned?: boolean;
+}
+
+/** chrome.action.getUserSettings — Chrome 91+, no permission; undefined where it is missing. */
+async function isPinned(): Promise<boolean | undefined> {
+  try {
+    const settings = await chrome.action.getUserSettings();
+    return typeof settings?.isOnToolbar === 'boolean' ? settings.isOnToolbar : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Opens whatever the icon would: the popup for nearly everyone, else the window or the panel. */
@@ -69,8 +87,12 @@ export function registerSiteOpen(): void {
     if (!sender.origin || !SITE_ORIGINS.has(sender.origin)) return false;
     const type = message && typeof message === 'object' ? (message as { type?: unknown }).type : undefined;
     if (type === 'ping') {
-      sendResponse({ ok: true } satisfies SiteOpenReply);
-      return false;
+      // Asked again by the page while it is open, so pinning it from the
+      // puzzle menu shows up there without a reload.
+      void isPinned().then((pinned) =>
+        sendResponse((pinned === undefined ? { ok: true } : { ok: true, pinned }) satisfies SiteOpenReply)
+      );
+      return true;
     }
     if (type !== 'open') return false;
     const auto = (message as { auto?: unknown }).auto === true;

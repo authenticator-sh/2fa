@@ -20,7 +20,12 @@ type UpdateHighlightKey =
   | 'update.feature.accountInitials'
   | 'update.feature.shareCodes'
   | 'update.feature.openIn'
-  | 'update.feature.restoreBackups';
+  | 'update.feature.restoreBackups'
+  | 'update.feature.accountMenu'
+  | 'update.feature.groupTools'
+  | 'update.feature.pinAccounts'
+  | 'update.feature.importApps'
+  | 'update.feature.keyboard';
 
 // Maps an extension version to the changelog bullets shown in the "What's New"
 // modal right after that version is installed. Versions with no entry here
@@ -71,4 +76,17 @@ export const WHATS_NEW: Record<string, UpdateHighlightKey[]> = {
   // 1.15.0 has no entry either: its one change for everyone, the second
   // style, is in Settings for whoever looks, and cloud backup is Pro, which is
   // not announced inside the extension.
+  //
+  // 1.15.2 is a patch number with a modal, because it changes how the list is
+  // handled every day. The right-click menu first: it is where most of the rest
+  // is found. Then groups, which until now could only be set one account at a
+  // time from Edit; then pinning; then the import that brings people over.
+  // The keyboard last — it helps the people who look for it.
+  '1.15.2': [
+    'update.feature.accountMenu',
+    'update.feature.groupTools',
+    'update.feature.pinAccounts',
+    'update.feature.importApps',
+    'update.feature.keyboard',
+  ],
 };

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useId } from 'react';
-import { Upload, Monitor, Loader2, Camera, ChevronDown } from 'lucide-react';
+import { Upload, Monitor, Loader2, Camera, ChevronDown, KeyRound, Smartphone } from 'lucide-react';
 import type { Account } from '@/types';
 import { validateSecret, cleanSecret, secretProblem } from '@/utils/totp';
 import { parseQRCode, parseOTPAuthURL, generateRandomColor, qrFailureKey, UnsupportedOTPTypeError } from '@/utils/qr-parser';
@@ -42,13 +42,21 @@ interface AddAccountModalProps {
    * leaves the dialog open on the QR tab with its error and every other way in.
    */
   scanScreen?: boolean;
+  /**
+   * The import and the paste box from Settings. Someone with accounts already
+   * here who decides to bring the rest over from Proton, 2FAS or Aegis presses
+   * "+" and found only a QR code and a form: the whole-file ways in were a
+   * screen away, in Settings, where nobody went looking for them.
+   */
+  onImport?: () => void;
+  onPasteLinks?: () => void;
 }
 
 /** Every text field on this form. */
 const FIELD =
   'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-all placeholder-gray-400 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-100 dark:placeholder-gray-500';
 
-export function AddAccountModal({ onClose, onAdd, language, groups = [], defaultGroup = '', initialTab = 'qr', scanScreen = false }: AddAccountModalProps) {
+export function AddAccountModal({ onClose, onAdd, language, groups = [], defaultGroup = '', initialTab = 'qr', scanScreen = false, onImport, onPasteLinks }: AddAccountModalProps) {
   const t = createT(language);
   const ids = useId();
   const [tab, setTab] = useState<'manual' | 'qr'>(initialTab);
@@ -83,6 +91,16 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
   /** A save in flight — the form stays open and the button stays busy. */
   const [saving, setSaving] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
+  /**
+   * The screen scan found no code, or could not read the page. Most who get
+   * here pressed "Scan QR on this page" on the first-run screen over a page
+   * with no code on it (1.15.1, 22–26 Oct 2026: 1,182 of 1,602), and only one
+   * in five went on to add an account: the error said to open the right page,
+   * and the ways in that do not need one sat above it, unnoticed. The two
+   * commonest answers — the code is on a phone, or there is a key instead of
+   * a code — are offered right under the error.
+   */
+  const [missed, setMissed] = useState(false);
 
   // Reported for the admin's view of where adds go wrong (billing/onboarding.ts):
   // the tab shown, each way of reading a code, each refusal, and leaving.
@@ -295,11 +313,18 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
     if (newTab !== tab) void reportAddStep(newTab, 'open');
     setTab(newTab);
     setError('');
+    setMissed(false);
+  };
+
+  const openCameraPage = (step: string) => {
+    void reportAddStep('qr', step);
+    chrome.tabs.create({ url: chrome.runtime.getURL('scan.html') });
   };
 
   const processQRFile = async (file: File, source: 'file' | 'screen' = 'file') => {
     try {
       setError('');
+      setMissed(false);
       const result = await decodeQrFromImage(file);
 
       if (!result) {
@@ -307,6 +332,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
         // empty ones were taken with no code on it: that is a different
         // instruction from "try a clearer picture".
         fail('qr', source === 'screen' ? 'addAccount.errorNoQrScreen' : 'addAccount.errorNoQr');
+        if (source === 'screen') setMissed(true);
         return;
       }
 
@@ -471,6 +497,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
         // Either beats the raw system error, which reads as "it just broke".
         const noAccess = /activeTab|all_urls|permission/i.test(err instanceof Error ? err.message : String(err));
         fail('qr', noAccess ? 'addAccount.errorNoAccess' : 'addAccount.errorScreenHint');
+        setMissed(true);
       } finally {
         setScanning(false);
       }
@@ -497,7 +524,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-gray-50 dark:bg-dark-800"
+      className="fixed inset-0 z-50 flex flex-col bg-gray-50 dark:bg-dark-800 anim-sheet"
       role="dialog"
       aria-modal="true"
       aria-label={t('addAccount.title')}
@@ -778,10 +805,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
               </div>
 
               <button
-                onClick={() => {
-                  void reportAddStep('qr', 'camera_page');
-                  chrome.tabs.create({ url: chrome.runtime.getURL('scan.html') });
-                }}
+                onClick={() => openCameraPage('camera_page')}
                 className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 hover:bg-gray-50 dark:hover:bg-dark-600 text-gray-700 dark:text-gray-200 font-medium text-sm transition-all"
               >
                 <Camera size={16} />
@@ -808,13 +832,67 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                 </p>
               </div>
 
-              {/* Error Display */}
+              {/* Error Display. One block with what to do instead, so the
+                  scroll that brings the error into view brings that too. */}
               {error && (
-                <div ref={errorRef} role="alert" className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
-                  <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
+                <div ref={errorRef} className="space-y-2">
+                  <div role="alert" className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+                    <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
+                  </div>
+                  {missed && (
+                    <>
+                      <p className="pt-1 text-xs font-medium text-gray-600 dark:text-gray-300">{t('addAccount.missWhere')}</p>
+                      <button
+                        onClick={() => openCameraPage('miss_camera')}
+                        className="w-full flex items-center gap-2 py-2 px-3 rounded-lg border border-accent-600 bg-white dark:border-accent-400 dark:bg-dark-700 hover:bg-blue-50 dark:hover:bg-dark-600 text-accent-600 dark:text-accent-400 font-medium text-sm text-start transition-colors"
+                      >
+                        <Smartphone size={16} className="shrink-0" />
+                        {t('addAccount.missPhone')}
+                      </button>
+                      <button
+                        onClick={() => {
+                          void reportAddStep('qr', 'miss_key');
+                          handleTabChange('manual');
+                        }}
+                        className="w-full flex items-center gap-2 py-2 px-3 rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 hover:bg-gray-50 dark:hover:bg-dark-600 text-gray-700 dark:text-gray-200 font-medium text-sm text-start transition-colors"
+                      >
+                        <KeyRound size={16} className="shrink-0" />
+                        {t('onboarding.new.noQr')}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
+          )}
+
+          {/* Under both tabs, and quiet: a whole app moved over is a different
+              thing from the one account these tabs add, done once. */}
+          {onImport && onPasteLinks && (
+            <p className="mt-5 text-center text-xs text-gray-500 dark:text-gray-400">
+              {t('addAccount.moving')}{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  void reportAddStep(tab, 'to_import');
+                  onImport();
+                }}
+                className="font-medium text-accent-600 hover:underline dark:text-accent-400"
+              >
+                {t('addAccount.importFile')}
+              </button>
+              <span aria-hidden> · </span>
+              <button
+                type="button"
+                onClick={() => {
+                  void reportAddStep(tab, 'to_paste');
+                  onPasteLinks();
+                }}
+                className="font-medium text-accent-600 hover:underline dark:text-accent-400"
+              >
+                {t('import.paste')}
+              </button>
+            </p>
           )}
         </div>
       </div>

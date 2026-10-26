@@ -284,6 +284,11 @@ export function normalizeEntry(entry: unknown, index: number): NormalizedEntry {
         : '';
   const group = groupSource.slice(0, MAX_GROUP_LENGTH);
   if (group.trim()) account.group = group;
+  // Ours, so that an export read back keeps the list arranged as it was.
+  if (account.group && typeof raw.groupRank === 'number' && Number.isInteger(raw.groupRank) && raw.groupRank >= 0) {
+    account.groupRank = raw.groupRank;
+  }
+  if (raw.pinned === true) account.pinned = true;
 
   return { account };
 }
@@ -404,6 +409,40 @@ function readTwoFas(file: Record<string, unknown>): ImportFile {
       period: otp.period,
       group: typeof raw.groupId === 'string' ? groups.get(raw.groupId) : undefined,
     };
+  });
+  return { entries, unreadable: 0, unsupported: 0, recognised: true };
+}
+
+/**
+ * Proton Authenticator: `{version: 1, entries: [{id, content: {uri,
+ * entry_type, name}, note}]}` — Settings → Export → "Plain text" on iOS,
+ * "Export data without password" on Android and desktop (read from Proton's
+ * own exporter, proton-pass-common entry/exporter.rs, 2026-10-26). With a
+ * password the file is `{version, salt, content}`: Argon2id and AES-GCM over
+ * the same JSON, refused as the other apps' sealed files are.
+ */
+function isProtonAuthenticator(file: Record<string, unknown>): boolean {
+  if (typeof file.version !== 'number') return false;
+  if (typeof file.salt === 'string' && typeof file.content === 'string' && !('entries' in file)) return true;
+  return Array.isArray(file.entries) && file.entries.some(entry => record(record(entry)?.content)?.uri !== undefined);
+}
+
+function readProtonAuthenticator(file: Record<string, unknown>): ImportFile {
+  if (!Array.isArray(file.entries)) throw new ImportRejectedError('encrypted', 'Proton Authenticator');
+  const entries = file.entries.map(item => {
+    const content = record(record(item)?.content);
+    if (!content) return item;
+    const name = text(content.name);
+    const uri = text(content.uri);
+    // Steam is `steam://<secret>`, the secret in Base32 or unpadded Base64.
+    if (content.entry_type === 'Steam' || /^steam:\/\//i.test(uri)) {
+      return { type: 'steam', secret: steamSecretToBase32(uri.replace(/^steam:\/\//i, '')), name: name || 'Steam', issuer: 'Steam' };
+    }
+    // An account with no name is written `otpauth://totp/?secret=…`, and the
+    // link parser would call it "Account"; Proton's `name` (the issuer, then)
+    // is what its own list showed.
+    const unlabelled = /^otpauth:\/\/totp\/?\?/i.test(uri);
+    return { uri: unlabelled && name ? uri.replace(/^(otpauth:\/\/totp)\/?\?/i, `$1/${encodeURIComponent(name)}?`) : uri, name };
   });
   return { entries, unreadable: 0, unsupported: 0, recognised: true };
 }
@@ -631,6 +670,7 @@ export function readImportFile(parsed: unknown): ImportFile {
   if (Array.isArray(file.services) || 'servicesEncrypted' in file) return readTwoFas(file);
   if (Array.isArray(file.tokens)) return readFreeOtp(file);
   if (typeof file.shared_secret === 'string' && 'account_name' in file) return readSteamMaFile(file);
+  if (isProtonAuthenticator(file)) return readProtonAuthenticator(file);
   // Before Bitwarden, which also keys on a boolean `encrypted`.
   if (isSteamManifest(file)) {
     throw new ImportRejectedError(file.encrypted ? 'steam-encrypted' : 'unknown-format');

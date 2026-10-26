@@ -322,3 +322,73 @@
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Entrances, short enough to read as the thing arriving rather than as a wait:
+   120–180 ms, only on the way in — nothing has to stay mounted to animate out.
+   Filled `backwards`, not `both`: a filled last frame stays on the element as
+   an identity matrix even when it says `transform: none`, and any transform
+   left on an element makes it the containing block for position: fixed —
+   TruncatedName's tooltip inside it would be clipped by it. Backwards holds
+   the first frame until the animation starts, and leaves nothing after it. Off entirely for
+   anyone who has asked the system for less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  /* The dim layer behind a dialog. */
+  .anim-backdrop {
+    animation: backdropIn 160ms ease-out backwards;
+  }
+  /* A dialog in the middle of the popup. */
+  .anim-pop {
+    animation: popIn 170ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  }
+  /* A view that covers the popup: Add, Edit, Share, Pro. */
+  .anim-sheet {
+    animation: sheetIn 160ms ease-out backwards;
+  }
+  /* A menu or a popover, from the corner it opens out of. */
+  .anim-menu {
+    transform-origin: top;
+    animation: menuIn 120ms ease-out backwards;
+  }
+  .anim-menu-up {
+    transform-origin: bottom;
+    animation: menuIn 120ms ease-out backwards;
+  }
+  /* The selection bar, coming up from the bottom edge. */
+  .anim-rise {
+    animation: riseIn 180ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  }
+  /* A tick going on. */
+  .anim-check {
+    animation: checkIn 160ms cubic-bezier(0.2, 0.8, 0.2, 1.4) backwards;
+  }
+}
+
+@keyframes backdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes sheetIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes menuIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes riseIn {
+  from { transform: translateY(100%); }
+  to { transform: none; }
+}
+
+@keyframes checkIn {
+  from { transform: scale(0.4); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}

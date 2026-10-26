@@ -1,3 +1,4 @@
+import { cloudBackupCovers } from '@/billing/cloud-backup';
 import { checkBackupHealth } from './auto-backup';
 import { ageOf, deadlinePending } from './clock';
 
@@ -47,6 +48,11 @@ export async function snoozeReminder(): Promise<void> {
 
 export async function shouldShowBackupReminder(accountCount: number): Promise<boolean> {
   if (accountCount < 3) return false;
+
+  // A file export asks for what the cloud copy already does: keeps the
+  // accounts somewhere other than this browser. Back as soon as the copy stops
+  // covering them — Pro ended, backup turned off, uploads failing.
+  if (await cloudBackupCovers()) return false;
 
   const state = await getState();
 

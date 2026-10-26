@@ -26,10 +26,19 @@ import { BILLING_KEYS, readInstall } from './state';
 import { syncBilling, syncFromWorker } from './sync';
 
 /**
- * The ways on the empty screen (components/EmptyStateGuide.tsx): its five rows,
+ * The ways on the empty screen (components/EmptyStateGuide.tsx): its four rows,
  * the scan of the page above them, and the "a site asks for a code" link below.
+ * 'move' took the place of 'key' (a backup file) and 'other' (another app) on
+ * 2026-10-27; older versions still send those two.
  */
-export type OnboardOption = 'ga' | 'new' | 'other' | 'manual' | 'key' | 'page' | 'asked';
+export type OnboardOption = 'ga' | 'new' | 'manual' | 'move' | 'page' | 'asked';
+
+/**
+ * How the first look at the empty screen ended: a way picked on it, Settings
+ * opened from it, the add dialog opened from the header, the screen gone some
+ * other way (an account restored), or the popup closed with it still up.
+ */
+export type OnboardEnd = 'pick' | 'settings' | 'add' | 'away' | 'close';
 
 /**
  * Where an add happens: the empty screen's steps, the scan page's camera, the
@@ -62,6 +71,12 @@ interface State {
   firstOpen?: boolean;
   /** Opened by the welcome page (background/site-open.ts), reported apart from firstOpen. */
   firstShown?: boolean;
+  /** The empty screen was reported, by the person's own open and by the welcome page's. */
+  onboardShown?: boolean;
+  onboardSiteShown?: boolean;
+  /** How the first look at it ended was reported, for each of the two (watchOnboardScreen). */
+  onboardLeft?: boolean;
+  onboardSiteLeft?: boolean;
   firstCode?: boolean;
   added?: boolean;
   stage?: string;
@@ -225,14 +240,139 @@ export async function reportFirstOpen(site = false): Promise<void> {
   );
 }
 
-/** The "add your first account" screen shown; `site` as for reportFirstOpen. */
-export function reportOnboardView(site = false): Promise<void> {
-  return report('onboard_view', site ? { site: true } : undefined, site ? null : 'onboard');
+/**
+ * The "add your first account" screen shown; `site` as for reportFirstOpen.
+ * Reported the first time only: the screen is what an empty extension opens
+ * to, so an install that never adds an account would send it every open, and
+ * the admin only asks whether it was seen. The stage still follows every view
+ * — back on this screen after a failure is where the person is now.
+ */
+export async function reportOnboardView(site = false): Promise<void> {
+  const flag = site ? 'onboardSiteShown' : 'onboardShown';
+  if (await update(state => (state[flag] ? null : { [flag]: true }))) {
+    return report('onboard_view', site ? { site: true } : undefined, site ? null : 'onboard');
+  }
+  if (!site) await setStage('onboard');
 }
 
 /** A way picked on it. */
 export function reportOnboardPick(option: OnboardOption): Promise<void> {
+  leaveOnboardScreen?.('pick', option);
   return report('onboard_pick', { option }, `pick:${option}`);
+}
+
+// How long the first look at the empty screen lasted, and how it ended.
+//
+// Most who see the screen pick nothing (1.15.1, 20–27 Oct: 57 % of those who
+// opened the extension themselves), and nothing said whether they closed it in
+// two seconds or read it for a minute: whether the screen asks too much or
+// offers the wrong things. A popup cannot report its own closing — it is gone
+// before anything it sends would leave — so it holds a port to the service
+// worker while the screen is up, and the worker sees the port drop when the
+// popup closes. Reported once per install, like onboard_view, and apart for a
+// popup the welcome page opened.
+
+/** The port's name (background/service-worker.ts listens for it). */
+export const ONBOARD_SCREEN_PORT = 'onboard-screen';
+/** The popup says it is still there this often: a port alone does not keep the worker up. */
+const SCREEN_KEEPALIVE_MS = 20_000;
+/** A screen left open longer than this is a popup forgotten in a window, not reading. */
+const SCREEN_SECS_CAP = 3_600;
+
+interface ScreenMessage {
+  shownAt: number;
+  site: boolean;
+  end?: Exclude<OnboardEnd, 'close'>;
+  option?: OnboardOption;
+}
+
+/** Ends the watch now running in this page, if any; reportOnboardPick calls it. */
+let leaveOnboardScreen: ((end: Exclude<OnboardEnd, 'close'>, option?: OnboardOption) => void) | null = null;
+
+/**
+ * The empty screen is up in this page. The answer ends the watch, with how the
+ * screen went away; a pick ends it by itself, and a popup closing is the end
+ * the worker sees when nothing ended it before. Does nothing where there is no
+ * worker to hold a port to (the desktop app), or once the install has reported.
+ */
+export function watchOnboardScreen(site = false): (end: Exclude<OnboardEnd, 'close' | 'pick'>) => void {
+  const shownAt = Date.now();
+  let port: chrome.runtime.Port | null = null;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let done = false;
+  const finish = (end: Exclude<OnboardEnd, 'close'>, option?: OnboardOption) => {
+    if (done) return;
+    done = true;
+    if (leaveOnboardScreen === finish) leaveOnboardScreen = null;
+    clearInterval(timer);
+    try {
+      port?.postMessage({ shownAt, site, end, ...(option ? { option } : {}) } satisfies ScreenMessage);
+      port?.disconnect();
+    } catch {}
+    port = null;
+  };
+  leaveOnboardScreen = finish;
+  void read().then(state => {
+    if (done || state[site ? 'onboardSiteLeft' : 'onboardLeft'] || !followed(state)) return;
+    if (typeof chrome.runtime?.connect !== 'function') return;
+    try {
+      const opened = chrome.runtime.connect({ name: ONBOARD_SCREEN_PORT });
+      port = opened;
+      const hello = () => opened.postMessage({ shownAt, site } satisfies ScreenMessage);
+      hello();
+      timer = setInterval(hello, SCREEN_KEEPALIVE_MS);
+      opened.onDisconnect.addListener(() => {
+        clearInterval(timer);
+        if (port === opened) port = null;
+      });
+    } catch {}
+  });
+  return end => finish(end);
+}
+
+const SCREEN_ENDS: ReadonlySet<string> = new Set(['pick', 'settings', 'add', 'away']);
+
+function screenMessage(value: unknown): ScreenMessage | null {
+  if (!value || typeof value !== 'object') return null;
+  const m = value as Record<string, unknown>;
+  if (typeof m.shownAt !== 'number' || !Number.isFinite(m.shownAt) || typeof m.site !== 'boolean') return null;
+  if (m.end !== undefined && !(typeof m.end === 'string' && SCREEN_ENDS.has(m.end))) return null;
+  return {
+    shownAt: m.shownAt,
+    site: m.site,
+    ...(m.end ? { end: m.end as ScreenMessage['end'] } : {}),
+    ...(typeof m.option === 'string' ? { option: slug(m.option) as OnboardOption } : {}),
+  };
+}
+
+/** The worker's end of the port: the last thing the page said, reported when the port drops. */
+export function registerOnboardScreen(): void {
+  chrome.runtime.onConnect.addListener(port => {
+    if (port.name !== ONBOARD_SCREEN_PORT) return;
+    const sender = port.sender;
+    if (sender?.id !== chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL(''))) {
+      port.disconnect();
+      return;
+    }
+    let last: ScreenMessage | null = null;
+    port.onMessage.addListener(message => {
+      last = screenMessage(message) ?? last;
+    });
+    port.onDisconnect.addListener(() => {
+      if (last) void reportOnboardLeave(last);
+    });
+  });
+}
+
+/** One look at the empty screen, over. Exported for the tests. */
+export async function reportOnboardLeave(message: ScreenMessage, now = Date.now()): Promise<void> {
+  const flag = message.site ? 'onboardSiteLeft' : 'onboardLeft';
+  if (!(await update(state => (state[flag] || !followed(state) ? null : { [flag]: true })))) return;
+  const secs = Math.min(SCREEN_SECS_CAP, Math.max(0, Math.round((now - message.shownAt) / 1000)));
+  const props: EventProps = { secs, end: message.end ?? 'close' };
+  if (message.option) props.option = message.option;
+  if (message.site) props.site = true;
+  await report('onboard_leave', props, null, true);
 }
 
 /** A screen of an add flow shown, or a step of it taken. */

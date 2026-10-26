@@ -135,6 +135,70 @@ export function sortAccounts<T extends Pick<Account, 'name' | 'issuer'>>(
 }
 
 /**
+ * Pinned accounts first, each part in the order it came in.
+ *
+ * Applied after the sort, so a pin wins over every order — the reason to pin
+ * an account is that it should not move when the sort does.
+ */
+export function pinnedFirst<T extends Pick<Account, 'pinned'>>(accounts: readonly T[]): T[] {
+  const pinned = accounts.filter(account => account.pinned === true);
+  if (pinned.length === 0) return [...accounts];
+  return [...pinned, ...accounts.filter(account => account.pinned !== true)];
+}
+
+export interface GroupCount {
+  name: string;
+  count: number;
+}
+
+/**
+ * The groups for the chip strip, in the order the user arranged them.
+ *
+ * A group stands where its lowest-ranked account puts it (see
+ * Account.groupRank). Groups without a rank — every group before anyone
+ * dragged a chip, and a group just created — follow, alphabetically.
+ */
+export function groupsInOrder(
+  accounts: readonly Pick<Account, 'group' | 'groupRank'>[],
+  language: string
+): GroupCount[] {
+  const groups = new Map<string, { count: number; rank: number }>();
+  for (const account of accounts) {
+    const name = typeof account.group === 'string' ? account.group.trim() : '';
+    if (!name) continue;
+    const entry = groups.get(name) ?? { count: 0, rank: Infinity };
+    entry.count++;
+    if (typeof account.groupRank === 'number' && account.groupRank < entry.rank) entry.rank = account.groupRank;
+    groups.set(name, entry);
+  }
+  const collator = collatorFor(language);
+  return [...groups.entries()]
+    .sort(([a, x], [b, y]) => (x.rank === y.rank ? collator.compare(a, b) : x.rank - y.rank))
+    .map(([name, { count }]) => ({ name, count }));
+}
+
+/** `names` with `moved` taken out and put back in front of `before` — or last, for null. */
+export function movedBefore(names: readonly string[], moved: string, before: string | null): string[] {
+  const rest = names.filter(name => name !== moved);
+  const at = before === null ? rest.length : rest.indexOf(before);
+  if (at === -1) return [...names];
+  return [...rest.slice(0, at), moved, ...rest.slice(at)];
+}
+
+/**
+ * The order to write after an undone delete of several accounts puts them
+ * back: the order the list had before the delete, for every account still
+ * here, with anything added since — another window, a scan — first, where
+ * new accounts go. Null when the list is already in that order.
+ */
+export function orderAfterUndo(currentIds: readonly string[], previousIds: readonly string[]): string[] | null {
+  const current = new Set(currentIds);
+  const previous = new Set(previousIds);
+  const next = [...currentIds.filter(id => !previous.has(id)), ...previousIds.filter(id => current.has(id))];
+  return next.every((id, i) => id === currentIds[i]) ? null : next;
+}
+
+/**
  * The order to write after an undone delete puts an account back.
  *
  * Re-adding puts it at the top, so it would come back first in a list it was

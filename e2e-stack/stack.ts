@@ -106,7 +106,7 @@ export const cards = (page: Page) => page.getByTestId('account-card');
 
 async function openAdd(page: Page): Promise<Locator> {
   const fab = page.getByRole('button', { name: 'Add Account', exact: true });
-  const firstRun = page.getByRole('button', { name: "I'm turning on 2-factor authentication right now" });
+  const firstRun = page.getByRole('button', { name: "I'm turning on 2FA for a site" });
   // Right after a reload neither is drawn yet; deciding before one is would pick wrong.
   await expect(fab.or(firstRun).first()).toBeVisible();
   if (!(await fab.isVisible())) await firstRun.click();
