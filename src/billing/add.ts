@@ -60,10 +60,16 @@ const importsFree = (gate: GateSnapshot) => gate.policy?.import_free !== false;
  * on to Checkout it is kept (billing/held-add.ts) and added once Pro is on —
  * from the popup, which Checkout's tab closes, as from anywhere else.
  */
+interface AddOptions {
+  import?: boolean;
+  hold?: Account[];
+  beforePaywall?: () => Promise<void>;
+}
+
 export async function addWithLimit<T>(
   trigger: AddVia,
   run: (origin: AddOrigin) => Promise<T>,
-  options: { import?: boolean; hold?: Account[] } = {}
+  options: AddOptions = {}
 ): Promise<T | null> {
   const result = await addWithinLimit(trigger, run, options);
   // Every way in passes here, so this is where an account is counted as added.
@@ -74,7 +80,7 @@ export async function addWithLimit<T>(
 async function addWithinLimit<T>(
   trigger: AddVia,
   run: (origin: AddOrigin) => Promise<T>,
-  options: { import?: boolean; hold?: Account[] }
+  options: AddOptions
 ): Promise<T | null> {
   const gate = await loadGate();
   if ((options.import ?? IMPORTS.has(trigger)) && importsFree(gate)) return run({ kind: 'import' });
@@ -92,6 +98,8 @@ async function addWithinLimit<T>(
     });
     const allowPartial = error.wouldAdd > 1 && error.remaining > 0 && (await importPartialAllowed());
     const hold = options.hold;
+    // Added with no window on screen (the Mac app's menu): the paywall needs one.
+    await options.beforePaywall?.();
     const result = await openPaywall({
       trigger,
       limit: { count: error.count, wouldAdd: error.wouldAdd, remaining: error.remaining, limit: error.limit },

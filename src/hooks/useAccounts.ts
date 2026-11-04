@@ -18,7 +18,7 @@ import {
   lockedAwayCount,
 } from '@/utils/storage';
 import { autoBackup, getLatestBackup } from '@/utils/auto-backup';
-import { cloudBackupIfDue } from '@/billing/cloud-backup';
+import { cloudBackupIfDue, syncWithCloud } from '@/billing/cloud-backup';
 import { VaultLockedError } from '@/utils/vault';
 
 /**
@@ -54,6 +54,22 @@ export interface AccountsLoader {
    */
   clear(): void;
 }
+
+/**
+ * Cloud sync, then the cloud copy: what the other devices changed comes in
+ * first (a no-op unless cloud backup is on, and at most once a minute), then
+ * this device's list goes out if it differs from its last copy. In that order
+ * and one after the other — the upload waits for nobody, and run beside the
+ * read it found the lock taken and skipped, leaving the merged list unsent
+ * until the next change.
+ */
+async function syncThenBackUp(accounts: Account[], options: { force?: boolean } = {}): Promise<void> {
+  await syncWithCloud(options);
+  await cloudBackupIfDue(accounts);
+}
+
+/** While a window stays open — the Mac and iPhone apps, a side panel — the other devices are read this often. */
+const SYNC_WHILE_OPEN_MS = 5 * 60_000;
 
 /**
  * The account list's loading rules, apart from React so they can be tested.
@@ -99,11 +115,14 @@ export function createAccountsLoader(publish: (patch: Partial<AccountsState>) =>
         getStoredAccounts()
           .then(stored => autoBackup(stored))
           .catch(err => console.error('Auto backup failed:', err));
-        // The cloud copy, for Pro with it turned on; a no-op otherwise, and
-        // only sends when the list differs from the last copy. Every change
-        // reloads the list, so this is also "after a change".
-        void cloudBackupIfDue(data);
       }
+      // Cloud sync, then the cloud copy — for Pro with it turned on; a no-op
+      // otherwise. The copy only goes out when the list differs from the last
+      // one (and never empty), and every change reloads the list, so this is
+      // also "after a change". The other devices are read whatever this list
+      // holds: a browser whose every account was deleted still has to hear of
+      // the one added on the phone.
+      void syncThenBackUp(data);
     } catch (error) {
       if (!current()) return;
       if (error instanceof VaultLockedError) {
@@ -202,6 +221,29 @@ export function useAccounts(vaultLocked: boolean) {
     chrome.storage.onChanged.addListener(onChanged);
     return () => chrome.storage.onChanged.removeListener(onChanged);
   }, [vaultLocked, loader]);
+
+  // The other devices' changes, without reopening: on coming back to the
+  // window, and every few minutes while it is in front. The popup closes on
+  // every blur, but the Mac and iPhone apps and a side panel stay open for
+  // hours, and an account added on the phone has to show up on the laptop.
+  useEffect(() => {
+    if (vaultLocked || typeof document === 'undefined') return;
+    const visible = () => document.visibilityState !== 'hidden';
+    const pull = () => {
+      if (!visible()) return;
+      void getAccounts()
+        .then(list => syncThenBackUp(list))
+        .catch(() => {});
+    };
+    const timer = setInterval(pull, SYNC_WHILE_OPEN_MS);
+    document.addEventListener('visibilitychange', pull);
+    window.addEventListener('focus', pull);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', pull);
+      window.removeEventListener('focus', pull);
+    };
+  }, [vaultLocked]);
 
   // After the user's own change the list is already on screen and only one
   // row differs, so it is swapped in place like any other storage event.

@@ -92,6 +92,26 @@ export async function stampNow(): Promise<number> {
 }
 
 /**
+ * Move this profile's stamps past `stamp` — one another device issued, read
+ * from its cloud copy. Cloud sync orders edits and deletions by these stamps
+ * across devices, and a device whose clock runs behind would otherwise stamp
+ * its next deletion "before" the version it deletes, and lose to it. Like a
+ * Lamport clock: whatever this device does next is later than anything it has
+ * seen. A stamp further ahead than MAX_ANCHOR_LEAD_MS is a broken clock
+ * elsewhere and is not followed.
+ */
+export async function raiseClock(stamp: number): Promise<void> {
+  if (!Number.isFinite(stamp) || stamp - Date.now() > MAX_ANCHOR_LEAD_MS) return;
+  try {
+    const stored = (await chrome.storage.local.get(HIGH_WATER_KEY))[HIGH_WATER_KEY];
+    const anchor = typeof stored === 'number' && Number.isFinite(stored) ? stored : 0;
+    if (stamp > anchor) await chrome.storage.local.set({ [HIGH_WATER_KEY]: stamp }).catch(() => {});
+  } catch {
+    // Storage unavailable: stamps fall back to the real clock.
+  }
+}
+
+/**
  * A moment recorded twice: on the wall clock, and on the monotonic clock that
  * nothing outside this page can move.
  *

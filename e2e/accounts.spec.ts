@@ -128,8 +128,59 @@ test('the first-run guide scans the page at once, and a miss stays in the add di
   const dialog = page.getByRole('dialog', { name: 'Add Account' });
   // Opened as a tab here, with no click on the icon: no activeTab, and the
   // message says how to get it rather than blaming the page.
-  await expect(dialog.getByRole('alert')).toHaveText(/can read a page only when you open it from its icon/);
+  await expect(dialog.getByRole('alert')).toHaveText(/click the extension's icon there/);
   await expect(dialog.getByRole('button', { name: 'Choose Image' })).toBeVisible();
+
+  // Every answer to "where is your code?" goes somewhere.
+  await expect(dialog.getByText('Where is your QR code?')).toBeVisible();
+  await dialog.getByRole('button', { name: 'On a website on this computer' }).click();
+  await expect(dialog.getByText(/so the whole QR code is visible/)).toBeVisible();
+  await dialog.getByRole('button', { name: "I don't have one yet" }).click();
+  await expect(dialog.getByText(/when you turn on 2FA in its security settings/)).toBeVisible();
+  await dialog.getByRole('button', { name: 'I have a key — type it in' }).click();
+  await expect(dialog.getByRole('button', { name: 'Manual', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('a tab that cannot be scanned offers no scan, only where to go instead', async ({ context, extensionId }) => {
+  // What a real popup reads on the welcome page: in no tab, and no address.
+  await context.addInitScript(() => {
+    chrome.tabs.getCurrent = ((callback: (tab?: unknown) => void) => callback(undefined)) as typeof chrome.tabs.getCurrent;
+    chrome.tabs.query = ((_query: unknown, callback: (tabs: unknown[]) => void) => callback([])) as typeof chrome.tabs.query;
+  });
+  const page = await openPage(context, extensionId, 'popup.html');
+
+  await expect(page.getByRole('button', { name: 'Scan the QR code on this page' })).toHaveCount(0);
+
+  // The branch's own button, which still led to the refusal.
+  await page.getByRole('button', { name: "I'm turning on 2FA for a site" }).click();
+  await expect(page.getByRole('button', { name: 'Scan QR from screen', exact: true })).toHaveCount(0);
+  await expect(page.getByText(/open that page and click the extension's icon there/)).toBeVisible();
+
+  // And the add dialog's.
+  await page.getByRole('button', { name: 'No QR code? Type the key instead' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add Account' });
+  await dialog.getByRole('button', { name: 'QR Code', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Scan QR from screen', exact: true })).toHaveCount(0);
+  await expect(dialog.getByText(/open that page and click the extension's icon there/)).toBeVisible();
+});
+
+test('no camera asks where the code is, and "I have a key" reaches the form', async ({ context, extensionId }) => {
+  // No device: what a desktop PC without a webcam answers.
+  await context.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('none', 'NotFoundError'));
+  });
+  const page = await openPage(context, extensionId, 'scan.html');
+
+  await expect(page.getByRole('heading', { name: 'No camera found' })).toBeVisible();
+  await page.getByRole('button', { name: 'On a website on this computer' }).click();
+  await expect(page.getByText(/so the whole QR code is visible/)).toBeVisible();
+  await page.getByRole('button', { name: 'On my phone' }).click();
+  await expect(page.getByText(/Take a photo of it with another device/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Choose Image' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'I have a key — type it in' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add Account' });
+  await expect(dialog.getByRole('button', { name: 'Manual', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('"turning on 2FA" ends in the scan, with the key form beside it', async ({ context, extensionId }) => {

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useEscapeLayer, useReturnFocus } from '@/hooks/useLayer';
-import { Sparkles, Lightbulb, ArrowRight, X } from 'lucide-react';
+import { Sparkles, ArrowRight, X } from 'lucide-react';
 import { createT, type Language } from '@/utils/i18n';
 import { WHATS_NEW } from '@/utils/update-notes';
-import { FEATURE_REQUEST_URL, whatsNewUrl } from '@/utils/links';
+import { whatsNewUrl } from '@/utils/links';
 import { RatingStars } from './RatingStars';
 
 interface UpdateModalProps {
@@ -90,18 +90,6 @@ export function UpdateModal({ version, language, onClose, reviewDismissed, onRat
           >
             <ArrowRight size={13} className="rtl:rotate-180" />
             {t('update.learnMore')}
-          </button>
-
-          {/* Reading what just shipped is when someone is most likely to think
-              "and what about…". Kept inside the scroll area so it can never
-              push the rating block out of view. */}
-          <button
-            type="button"
-            onClick={() => openInTab(FEATURE_REQUEST_URL)}
-            className="mb-3 flex items-center gap-1.5 text-xs font-medium text-accent-600 dark:text-accent-400 hover:underline"
-          >
-            <Lightbulb size={13} />
-            {t('common.requestFeature')}
           </button>
         </div>
 

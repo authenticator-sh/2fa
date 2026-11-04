@@ -165,15 +165,17 @@ The store keeps these per permission, 1,000 characters each, and asks again
 whenever the permission set changes. They are here so the next release does not
 have to reconstruct them from the code.
 
-**contextMenus.** Quick fill. The extension adds a single right-click menu item,
-"Insert 2FA code", which puts the current TOTP code into the login form the user
-is looking at, instead of making them open the popup and copy it by hand.
-`chrome.contextMenus` is the only API that can create that item, and it is used
-for nothing else: one item, plus a submenu listing the user's own saved accounts
+**contextMenus.** Quick fill. The extension adds two right-click menu items:
+"Insert 2FA code" on text fields, which puts the current TOTP code into the
+login form the user is looking at, and "Copy 2FA code for this site" elsewhere
+on the page, which puts the same code on the clipboard — instead of making them
+open the popup and copy it by hand.
+`chrome.contextMenus` is the only API that can create those items, and it is used
+for nothing else: these two items, plus a submenu listing the user's own saved accounts
 when the site cannot be matched to exactly one of them. The menu is created by
 the service worker from data the user entered themselves; nothing about the page
 or their browsing is read to build it, and no item is added for advertising,
-promotion or any other purpose. The click on that item is also the user gesture
+promotion or any other purpose. The click on either item is also the user gesture
 that authorises everything the feature then does, which is why this is a menu
 item and not something that happens on its own.
 

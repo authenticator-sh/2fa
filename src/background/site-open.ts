@@ -11,10 +11,14 @@
 // where there is an extension to answer it — and whether its icon is on the
 // toolbar, so the page does not explain a puzzle menu nobody needs — and "open" — sent once by the page
 // as it loads (`auto`; Chrome needs no click for openPopup, checked 2026-10-17)
-// and again from the button, for whoever clicked the popup away. Nothing else
-// a web page sends is listened to, and nothing about the accounts is sent back.
+// and again from the button, for whoever clicked the popup away. A third,
+// "link_id", for /mac's "Connect the Mac app": a hash of the install id, never the
+// id. Nothing else a web page sends is listened to, and nothing about the accounts
+// is sent back.
 
 import { reportSiteOpen } from '@/billing/onboarding';
+import { readInstall } from '@/billing/state';
+import { linkIdOf } from '@/utils/backup-file';
 import { getOpenMode, type OpenMode } from '@/utils/open-mode';
 import { clearSiteOpened, markSiteOpened } from '@/utils/site-opened';
 import { openPopoutWindow } from '@/utils/popout';
@@ -92,6 +96,13 @@ export function registerSiteOpen(): void {
       void isPinned().then((pinned) =>
         sendResponse((pinned === undefined ? { ok: true } : { ok: true, pinned }) satisfies SiteOpenReply)
       );
+      return true;
+    }
+    // For the site's "Connect the Mac app" (/mac), which hands it to the app through its URL scheme.
+    if (type === 'link_id') {
+      void readInstall()
+        .then(async install => sendResponse({ ok: true, id: install ? await linkIdOf(install.id) : null }))
+        .catch(() => sendResponse({ ok: false }));
       return true;
     }
     if (type !== 'open') return false;

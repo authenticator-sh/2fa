@@ -4,6 +4,7 @@ import { SettingRow, settingsButton, settingsInput, settingsWell } from '@/compo
 import { CloudBackupSetupModal } from '@/components/CloudBackupSetupModal';
 import { describeAge, resultMessage, startOfLine } from '@/components/RestoreBackups';
 import { createT, type Language } from '@/utils/i18n';
+import { useCloudSyncStatus } from '@/components/CloudSyncIndicator';
 import { confirmDialog, toast } from '@/utils/ui-feedback';
 import { VaultLockedError } from '@/utils/vault';
 import { activateLicenseKey } from '@/billing/actions';
@@ -24,6 +25,7 @@ import {
   readUploadState,
   resetCloudBackup,
   restoreCloudBackup,
+  syncWithCloud,
   WrongBackupCodeError,
   type CloudBackupSummary,
   type CodeState,
@@ -167,6 +169,7 @@ function when(timestamp: number, t: ReturnType<typeof createT>, language: Langua
 export function CloudBackupSettings({ language, onRestored }: CloudBackupSettingsProps) {
   const t = createT(language);
   const [local, refreshLocal] = useCloudBackupLocal();
+  const syncStatus = useCloudSyncStatus();
   const [server, setServer] = useState<Server>({ status: 'idle' });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -463,7 +466,7 @@ export function CloudBackupSettings({ language, onRestored }: CloudBackupSetting
       <>
         <SettingRow
           label={t('cloud.title')}
-          hint={t('cloud.hintOff')}
+          hint={`${t('cloud.hintOff')} ${t('cloud.syncHint')}`}
           control={
             <button
               type="button"
@@ -505,7 +508,7 @@ export function CloudBackupSettings({ language, onRestored }: CloudBackupSetting
                 setTyped('');
                 if (merged) {
                   toast(merged.added > 0 ? 'success' : 'info', resultMessage(merged, t));
-                  if (merged.added > 0) onRestored();
+                  if (merged.added + merged.updated + merged.removed > 0) onRestored();
                 }
               });
             }}
@@ -580,7 +583,10 @@ export function CloudBackupSettings({ language, onRestored }: CloudBackupSetting
 
   // ─── On ─────────────────────────────────────────────────────────────────
   const code = local.code.code;
-  const failedLast = local.failedAt !== null && (local.lastUploadAt === null || local.failedAt > local.lastUploadAt);
+  // A failed read of the other devices counts as much as a failed upload: the
+  // header's cloud says so too (useCloudSyncStatus).
+  const failedLast =
+    (local.failedAt !== null && (local.lastUploadAt === null || local.failedAt > local.lastUploadAt)) || syncStatus.state === 'error';
   const status = !local.entitlement
     ? t('cloud.lapsed')
     : failedLast
@@ -616,7 +622,11 @@ export function CloudBackupSettings({ language, onRestored }: CloudBackupSetting
             disabled={busy !== null}
             onClick={() =>
               void run('now', async () => {
+                // Both ways: what the other devices changed comes in, then this
+                // device's list goes out, whether or not it changed.
+                const pulled = await syncWithCloud({ force: true });
                 await backupNow();
+                if (pulled === 'failed') throw new Error('cloud sync failed');
                 toast('success', t('cloud.backedUp'));
               })
             }
@@ -627,6 +637,7 @@ export function CloudBackupSettings({ language, onRestored }: CloudBackupSetting
         ) : undefined
       }
     >
+      {local.entitlement && <p className="mt-1 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">{t('cloud.syncHint')}</p>}
       {copies.length > 0 && copyList(copies)}
       <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <button type="button" onClick={() => setShowCode(open => !open)} aria-expanded={showCode} className={settingsButton.link}>

@@ -53,6 +53,17 @@ export async function run(): Promise<void> {
   check('and holds the code', single.value === CODE);
   single.remove();
 
+  scenario('"Copy code for this site" with the caret in a field');
+  // Right-clicking the page leaves focus wherever it was. A copy is a copy:
+  // the field the user typed their email into a minute ago is not the target.
+  const focusedBefore = input({ parent: doc.body, name: 'otp', maxLength: 6 });
+  focusedBefore.focus();
+  clipboard.text = '';
+  check('nothing is typed into it', (await runDetached({ ...ARGS, fill: false, mayGuess: false })) === 'copied' && focusedBefore.value === '');
+  check('the code is on the clipboard', clipboard.text === CODE);
+  clipboard.text = '';
+  focusedBefore.remove();
+
   scenario('Inserting into one box per digit');
 
   // A component that only implements onPaste — the common shape, and the one

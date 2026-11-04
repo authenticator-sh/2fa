@@ -22,6 +22,13 @@ import { workerT, type WorkerKey } from './strings';
 import { reportCodeUsed } from '@/billing/onboarding';
 
 export const MENU_ID = 'quick-fill';
+/**
+ * Right-click anywhere else on a page: the code for this site, on the
+ * clipboard. For the sign-in that happens somewhere the menu cannot reach — a
+ * desktop client, a phone, a field drawn on a canvas — and for anyone who just
+ * wants the code without opening the extension.
+ */
+export const COPY_MENU_ID = 'quick-copy';
 export const COMMAND_ID = 'quick-fill';
 
 type Translate = (key: WorkerKey, ...args: (string | number)[]) => string;
@@ -88,6 +95,16 @@ async function syncContextMenuNow(): Promise<void> {
       // entry are a display filter — they grant no access of their own.
       documentUrlPatterns: ['http://*/*', 'https://*/*'],
     });
+    // Everywhere but a field, where the item above already does better. One
+    // item and not a submenu of the site's accounts: the menu is built before
+    // we may know which tab it opens on, and knowing would take the "read your
+    // browsing history" permission.
+    chrome.contextMenus.create({
+      id: COPY_MENU_ID,
+      title: t('quickFill.copyMenu'),
+      contexts: ['page', 'frame', 'selection', 'link', 'image'],
+      documentUrlPatterns: ['http://*/*', 'https://*/*'],
+    });
   } catch (error) {
     console.error('Could not set up the quick-fill menu item', error);
   }
@@ -107,6 +124,8 @@ interface Invocation {
    * suggestion, so the two share one learned history instead of two.
    */
   pageUrl?: string;
+  /** 'copy' for the "Copy code for this site" item: never typed into a field. */
+  mode?: 'fill' | 'copy';
 }
 
 /**
@@ -186,11 +205,13 @@ export async function runQuickFill(invocation: Invocation, panel: Promise<boolea
     return;
   }
 
+  const copyOnly = invocation.mode === 'copy';
   const outcome = await inject(invocation, {
     code: totp.code,
     requireFocus: invocation.frameId === undefined,
-    mayGuess: true,
-    copiedText: t('quickFill.copied'),
+    mayGuess: !copyOnly,
+    fill: !copyOnly,
+    copiedText: t(copyOnly ? 'quickFill.copyDone' : 'quickFill.copied'),
     manualText: t('quickFill.manual', totp.code),
     noticeText: t('quickFill.openApp'),
   });
@@ -229,9 +250,14 @@ async function handOver(
   // so the answer — or the unlock — can put it there instead of on the
   // clipboard for the user to paste.
   const hostname = hostnameOf(invocation.pageUrl);
+  //
+  // Not for a copy: the pick is still an answer about the site, but its code
+  // belongs on the clipboard, where the popup puts it anyway, not in a field.
   if (hostname) {
     await notePickPrompt(hostname);
-    await noteFillRequest({ hostname, tabId: invocation.tabId, frameId: invocation.frameId, locked });
+    if (invocation.mode !== 'copy') {
+      await noteFillRequest({ hostname, tabId: invocation.tabId, frameId: invocation.frameId, locked });
+    }
   }
 
   // Already open, from inside the gesture — the only place Chrome allows it.

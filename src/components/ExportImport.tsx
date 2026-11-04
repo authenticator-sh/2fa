@@ -1,3 +1,4 @@
+import { readInstall } from '@/billing/state';
 import { useId, useRef, useState } from 'react';
 import { useEscapeLayer } from '@/hooks/useLayer';
 import { ClipboardPaste, Download, Link2, Lock, Share2, Unlock, Upload } from 'lucide-react';
@@ -32,6 +33,8 @@ import {
   backupFileName,
   buildEncryptedBackupFile,
   buildPlainBackupFile,
+  linkIdOf,
+  noteBackupSource,
   buildURIBackupFile,
   uriBackupFileName,
   downloadBackupFile,
@@ -39,6 +42,8 @@ import {
   readEncryptedBackupFile,
 } from '@/utils/backup-file';
 import { buildCxfFile, cxfExportable, cxfFileName, isCxfFile, readCxf } from '@/utils/cxf';
+import { isFreeOtpBackup, readFreeOtpBackup, readFreeOtpPreferences } from '@/utils/freeotp';
+import { openSealedBackup, sealedBackupApp } from '@/utils/sealed-backups';
 import type { Account } from '@/types';
 
 interface ExportImportProps {
@@ -53,6 +58,8 @@ interface ExportImportProps {
  *
  * Aegis, 2FAS, Bitwarden, FreeOTP+, andOTP, Raivo and Authy-dump JSON are read
  * by importAccounts, which tells them apart by shape (see import-formats.ts).
+ * FreeOTP's own backup is binary, so it is told apart by the file's bytes.
+ * Aegis and 2FAS files exported with a password are opened with it first.
  *
  * Returns null when the user cancelled at the password prompt, otherwise the
  * result — including how many entries were unreadable or unsupported, which
@@ -60,18 +67,30 @@ interface ExportImportProps {
  * ImportRejectedError for a file that cannot be imported at all; say it with
  * importErrorMessage.
  */
+/** For the file: which extension install wrote it. Not in the Mac app's own exports. */
+async function sourceLinkOfThisInstall(): Promise<string | undefined> {
+  if ('__TAURI_INTERNALS__' in globalThis) return undefined;
+  const install = await readInstall();
+  return install ? linkIdOf(install.id) : undefined;
+}
+
 export async function importBackupText(
   text: string,
-  promptForPassword: () => Promise<string | null> | string | null,
+  /** `app`: another app's backup, whose own password this is (FreeOTP, Aegis, 2FAS). */
+  promptForPassword: (app?: string) => Promise<string | null> | string | null,
   /** Only to recognise an encrypted Steam Desktop Authenticator .maFile. */
-  fileName?: string
+  fileName?: string,
+  /** The file itself, for the one format that is not text: FreeOTP's backup. */
+  file?: Blob
 ): Promise<(ImportReport & { leftOut: number }) | null> {
-  const read = await readBackupText(text, promptForPassword, fileName);
+  const read = await readBackupText(text, promptForPassword, fileName, file);
   if (!read) return null;
   // Read (and decrypted) once, written through the limit: choosing "add the
   // ones that fit" in the paywall runs the write again, not the password prompt.
   if (read.predatesBilling) await adoptLegacyFromBackup();
-  return addWithLimit('file', origin => importAccountList(read.entries, origin, read.from));
+  const imported = await addWithLimit('file', origin => importAccountList(read.entries, origin, read.from));
+  if (imported) noteBackupSource(text);
+  return imported;
 }
 
 /**
@@ -80,9 +99,22 @@ export async function importBackupText(
  */
 async function readBackupText(
   text: string,
-  promptForPassword: () => Promise<string | null> | string | null,
-  fileName?: string
+  promptForPassword: (app?: string) => Promise<string | null> | string | null,
+  fileName?: string,
+  file?: Blob
 ): Promise<{ entries: unknown[]; from: Partial<Omit<ImportFile, 'entries'>>; predatesBilling: boolean } | null> {
+  // From the bytes: as text, the stream's first bytes are already replacement
+  // characters, and the strings in it are Java's own spelling of UTF-8.
+  const bytes = file ? new Uint8Array(await file.arrayBuffer()) : null;
+  if (bytes && isFreeOtpBackup(bytes)) {
+    const password = await promptForPassword('FreeOTP');
+    if (!password) return null;
+    const read = await readFreeOtpBackup(bytes, password);
+    return { entries: read.entries, from: read, predatesBilling: false };
+  }
+  const preferences = readFreeOtpPreferences(text);
+  if (preferences) return { entries: preferences.entries, from: preferences, predatesBilling: false };
+
   // Checked first: it is not JSON, so every reader below would call it an
   // unknown format, and the way out is a step in SDA, not in this app.
   if (isEncryptedMaFile(text, fileName)) throw new ImportRejectedError('steam-encrypted');
@@ -99,14 +131,25 @@ async function readBackupText(
   }
 
   if (!isEncryptedBackupFile(text)) {
-    let file: ImportFile;
     let parsed: unknown;
     try {
       parsed = JSON.parse(text);
-      file = readImportFile(parsed);
-    } catch (error) {
+    } catch {
       // Not JSON at all is the likeliest shape of another app's sealed backup;
       // the same message importAccounts gives (utils/storage.ts).
+      throw new ImportRejectedError('unknown-format');
+    }
+    // Aegis and 2FAS with their own password: opened into the plain file.
+    const sealedBy = sealedBackupApp(parsed);
+    if (sealedBy) {
+      const password = await promptForPassword(sealedBy);
+      if (!password) return null;
+      parsed = await openSealedBackup(parsed, password);
+    }
+    let file: ImportFile;
+    try {
+      file = readImportFile(parsed);
+    } catch (error) {
       if (error instanceof ImportRejectedError) throw error;
       throw new ImportRejectedError('unknown-format');
     }
@@ -247,14 +290,15 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
         if (!proceed) return;
       }
 
+      const fileOptions = { legacy: await installPredatesBilling(), sourceLink: await sourceLinkOfThisInstall() };
       const contents =
         format === 'encrypted'
-          ? await buildEncryptedBackupFile(accounts, exportPassword, { legacy: await installPredatesBilling() })
+          ? await buildEncryptedBackupFile(accounts, exportPassword, fileOptions)
           : format === 'cxf'
             ? buildCxfFile(accounts)
             : uri
               ? uri.text
-              : buildPlainBackupFile(accounts, { legacy: await installPredatesBilling() });
+              : buildPlainBackupFile(accounts, fileOptions);
 
       downloadBackupFile(
         contents,
@@ -371,15 +415,16 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
       } else if (((text = await file.text()), looksLikeURIList(text))) {
         await runURIImport(text);
       } else {
-        const imported = await importBackupText(text, () =>
+        const imported = await importBackupText(text, app =>
           promptDialog({
             title: t('import.passwordTitle'),
-            body: t('import.passwordText'),
+            body: app ? t('import.passwordTextOtherApp', app) : t('import.passwordText'),
             password: true,
             confirmLabel: t('common.ok'),
             cancelLabel: t('common.cancel'),
           }),
-          file.name
+          file.name,
+          file
         );
         if (imported) {
           await getAccounts().then(list => markBackupDone(list.length)).catch(() => {});
@@ -486,7 +531,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
         <input
           ref={importInputRef}
           type="file"
-          accept="application/json,text/plain,image/*,.maFile,.2fas"
+          accept="application/json,text/plain,image/*,.maFile,.2fas,.xml"
           onChange={handleImport}
           className="hidden"
           tabIndex={-1}

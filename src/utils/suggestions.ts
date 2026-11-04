@@ -1,6 +1,7 @@
 import type { Account } from '@/types';
 import { isVaultEnabled } from './vault';
 import { publicSuffixLength } from './public-suffix';
+import { accountsForSite, boundElsewhere } from './account-sites';
 
 const STORAGE_KEY = 'accountUsageByDomain';
 const ENABLED_KEY = 'suggestionsEnabled';
@@ -159,8 +160,14 @@ export async function recordAccountUsage(
 }
 
 /**
- * Which account the popup should pin for this site, in order of what the
- * evidence is actually worth.
+ * Which accounts the popup should pin for this site, best first, and whether
+ * the user tied them to it themselves.
+ *
+ * 0. Accounts whose websites (set by hand in Edit) cover this page — all of
+ *    them, the most specific site only; see account-sites.ts. Among them, the
+ *    one used here before goes first.
+ *
+ * Failing that, one account, in order of what the evidence is worth:
  *
  * 1. An account used *on this site* — inserted into a field here, or picked
  *    when quick fill asked about this site.
@@ -177,8 +184,37 @@ export async function recordAccountUsage(
  * name on it — one incidental copy beating the only piece of evidence that
  * actually mentions the site. A copy still teaches us something where nothing
  * else does, which is why it stays in the list at all.
+ *
+ * An account tied to other websites takes no part in rungs 1–4: the user has
+ * said where it belongs. The sites count even with suggestions switched off —
+ * that switch is about what we learn and guess, and a site typed in by hand is
+ * neither.
  */
+export async function getSiteSuggestions(
+  hostname: string,
+  accounts: Account[]
+): Promise<{ ids: string[]; explicit: boolean }> {
+  if (!hostname || accounts.length === 0) return { ids: [], explicit: false };
+
+  const bound = accountsForSite(hostname, accounts);
+  if (bound.length > 0) {
+    const used = (await areSuggestionsEnabled()) ? await usageOn(getBaseDomain(hostname), bound) : null;
+    const first = used?.site ?? used?.copyRank[0];
+    const ids = bound.map(acc => acc.id);
+    return { ids: first ? [first, ...ids.filter(id => id !== first)] : ids, explicit: true };
+  }
+
+  const id = await guessedAccountId(hostname, accounts);
+  return { ids: id ? [id] : [], explicit: false };
+}
+
+/** The one account the popup should pin for this site, or null. */
 export async function getSuggestedAccountId(hostname: string, accounts: Account[]): Promise<string | null> {
+  return (await getSiteSuggestions(hostname, accounts)).ids[0] ?? null;
+}
+
+async function guessedAccountId(hostname: string, all: Account[]): Promise<string | null> {
+  const accounts = guessable(hostname, all);
   const domain = await matchableDomain(hostname, accounts);
   if (!domain) return null;
 
@@ -195,8 +231,13 @@ export async function getSuggestedAccountId(hostname: string, accounts: Account[
   return used.copyRank[0] || null;
 }
 
+/** The accounts a guess about this page may land on: not those tied to other sites. */
+function guessable(hostname: string, accounts: Account[]): Account[] {
+  return accounts.filter(acc => !boundElsewhere(acc, hostname));
+}
+
 /** How a fill candidate was arrived at, weakest last. */
-export type SuggestionSource = 'history' | 'text';
+export type SuggestionSource = 'site' | 'history' | 'text';
 
 export interface FillCandidate {
   accountId: string;
@@ -206,18 +247,31 @@ export interface FillCandidate {
 /**
  * Which account to insert into the page without asking.
  *
- * The first two rungs above and no more. A code copied while a page was open
- * is never on its own a reason to type that code into the page, and neither is
- * a name that fits more than one account: the popup can show its best guess
- * and let the user look at it, but a fill has no such moment, and plenty of
- * these forms submit themselves on the last digit, spending one of the few
- * attempts the service allows.
+ * An account the user tied to this site, when exactly one is; when several
+ * are, the one of them used here before. Otherwise the first two rungs above
+ * and no more. A code copied while a page was open is never on its own a
+ * reason to type that code into the page, and neither is a name that fits
+ * more than one account: the popup can show its best guess and let the user
+ * look at it, but a fill has no such moment, and plenty of these forms submit
+ * themselves on the last digit, spending one of the few attempts the service
+ * allows.
  *
  * Returning null is not a failure. It means "ask", and the caller opens the
  * popup — where whatever the user picks is recorded as evidence about the
  * site, so the same question is not asked twice.
  */
-export async function getFillCandidate(hostname: string, accounts: Account[]): Promise<FillCandidate | null> {
+export async function getFillCandidate(hostname: string, all: Account[]): Promise<FillCandidate | null> {
+  if (!hostname || all.length === 0) return null;
+
+  const bound = accountsForSite(hostname, all);
+  if (bound.length === 1) return { accountId: bound[0].id, source: 'site' };
+  if (bound.length > 1) {
+    if (!(await areSuggestionsEnabled())) return null;
+    const used = await usageOn(getBaseDomain(hostname), bound);
+    return used.site ? { accountId: used.site, source: 'site' } : null;
+  }
+
+  const accounts = guessable(hostname, all);
   const domain = await matchableDomain(hostname, accounts);
   if (!domain) return null;
 

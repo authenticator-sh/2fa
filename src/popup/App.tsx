@@ -1,5 +1,5 @@
 import { useCallback, useState, useMemo, useRef, useEffect } from 'react';
-import { Plus, Settings, AlertTriangle, HelpCircle, Lightbulb, Moon, Sun, Sparkles, ArrowLeft, Copy, Pin, PinOff, FolderInput, CheckSquare, Share2, Pencil, Trash2, X, ChevronDown } from 'lucide-react';
+import { Plus, Settings, AlertTriangle, HelpCircle, Moon, Sun, Sparkles, ArrowLeft, Copy, Pin, PinOff, FolderInput, CheckSquare, Share2, Pencil, Trash2, X, ChevronDown, Globe } from 'lucide-react';
 import { ContextMenu, SEPARATOR, type MenuEntry } from '@/components/ContextMenu';
 import { useAccounts } from '@/hooks/useAccounts';
 import { useVault } from '@/hooks/useVault';
@@ -26,6 +26,7 @@ import { EmptyStateGuide, type GuidePath } from '@/components/EmptyStateGuide';
 import { AccountsUnavailable } from '@/components/AccountsUnavailable';
 import { RestoreBackups, RestoreOffer } from '@/components/RestoreBackups';
 import { CloudBackupSettings } from '@/components/CloudBackupSettings';
+import { CloudSyncIndicator } from '@/components/CloudSyncIndicator';
 import { ServerBanner } from '@/components/ServerBanner';
 import { NotificationBell } from '@/components/NotificationBell';
 import { GroupFilter } from '@/components/GroupFilter';
@@ -78,14 +79,15 @@ import { hasPendingCheckout, syncBilling } from '@/billing/sync';
 import { recordOpen, shouldShowReviewPrompt, snoozeReviewPrompt } from '@/utils/review-prompt';
 import { clearUpdateBadge } from '@/utils/update-badge';
 import { readActiveGroup, rememberActiveGroup, forgetActiveGroup } from '@/utils/active-group';
-import { FEATURE_REQUEST_URL, helpUrl } from '@/utils/links';
+import { helpUrl } from '@/utils/links';
 import { parseQRCode, generateRandomColor, qrFailureKey } from '@/utils/qr-parser';
 import { saveErrorMessage } from '@/utils/save-error';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, isSteamAccount, loadTimeOffset, tryGenerateTOTP } from '@/utils/totp';
 import { useEscapeLayer } from '@/hooks/useLayer';
 import { isOwnSite, pageWorthScanning } from '@/utils/screen-capture';
-import { getSuggestedAccountId, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
+import { getSiteSuggestions, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
+import { hasExactSite, normalizeSite, toggleSite } from '@/utils/account-sites';
 import { isQuickFillEnabled, setQuickFillEnabled } from '@/utils/quick-fill';
 import { isSyncEnabled, setSyncEnabled, hasSyncOverflowed } from '@/utils/storage';
 import { WHATS_NEW } from '@/utils/update-notes';
@@ -236,7 +238,16 @@ function App() {
    * e2e suite or a bookmark — which says nothing. Pending until asked.
    */
   const [pageScan, setPageScan] = useState<'pending' | 'yes' | 'no' | 'self'>('pending');
-  const [suggestedAccountId, setSuggestedAccountId] = useState<string | null>(null);
+  // The popup decides from its own tab (pageWorthScanning). The window and the
+  // side panel cannot read one, and neither can a popup.html open as a tab;
+  // they go by the welcome page's mark, and by the site the window was handed.
+  const canScanPage =
+    HOST === 'popup' && pageScan !== 'self'
+      ? pageScan === 'yes'
+      : !openedBySiteState && !(currentDomain && isOwnSite(currentDomain));
+  // Best first. Several only when the user tied several accounts to this site
+  // themselves (`explicit`); a guess is always one.
+  const [siteSuggestion, setSiteSuggestion] = useState<{ ids: string[]; explicit: boolean }>({ ids: [], explicit: false });
   const [whatsNewVersion, setWhatsNewVersion] = useState<string | null>(null);
   const [reviewDismissed, setReviewDismissed] = useState(false);
   const [openCount, setOpenCount] = useState<number | null>(null);
@@ -388,8 +399,9 @@ function App() {
       if (patch.syncOverflow !== undefined) setSyncOverflow(patch.syncOverflow);
       if (patch.quickFill !== undefined) setQuickFillOn(patch.quickFill);
       if (patch.suggestions !== undefined) {
+        // The effect on suggestionsOn works the pin out again: off clears
+        // the guess but keeps sites the user set by hand.
         setSuggestionsOn(patch.suggestions);
-        if (!patch.suggestions) setSuggestedAccountId(null);
       }
     };
     chrome.storage.onChanged.addListener(onChanged);
@@ -470,7 +482,6 @@ function App() {
       toast('error', t('settings.saveFailed'));
       return;
     }
-    if (!next) setSuggestedAccountId(null);
   };
 
   const handleSortOrderChange = (order: SortOrder) => {
@@ -707,9 +718,11 @@ function App() {
   // Pinning a duplicate on top only pays off when the list is long enough to
   // scroll; with few accounts the badge highlight in the list is enough.
   // Not while choosing: the same row twice, ticked in one place and not the other.
-  const suggestedAccount = !isFiltered && !selection && suggestedAccountId && accounts.length >= 5
-    ? accounts.find(acc => acc.id === suggestedAccountId) || null
-    : null;
+  const suggestedAccounts = !isFiltered && !selection && accounts.length >= 5
+    ? siteSuggestion.ids.map(id => accounts.find(acc => acc.id === id)).filter((acc): acc is Account => !!acc)
+    : [];
+  // A site the popup can tie an account to: a web page that is not our own.
+  const siteHost = currentDomain && !isOwnSite(currentDomain) ? normalizeSite(currentDomain) : null;
 
   // The strip carries its own bottom border, so the header drops its own while
   // the strip is up — two hairlines a chip's height apart read as clutter.
@@ -831,6 +844,12 @@ function App() {
     setAddScan(scan);
     setShowAddModal(true);
   };
+
+  // The camera page's "I have a key": a tab has no way to hand this popup a form.
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('add') === 'manual') openAddAccount('manual');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Put a deleted account back, where it was.
@@ -1125,6 +1144,18 @@ function App() {
     setCardMenu({ account, x, y, copy, page: 'main' });
   });
 
+  const toggleAccountSite = async (account: Account, host: string) => {
+    const linking = !hasExactSite(account, host);
+    try {
+      const found = await updateAccount(account.id, { sites: toggleSite(account, host) });
+      if (found === false) return;
+      toast('success', t(linking ? 'accounts.siteLinked' : 'accounts.siteUnlinked', host));
+    } catch (error) {
+      console.error('Could not change the account\'s websites:', error);
+      toast('error', t('accounts.updateFailed'));
+    }
+  };
+
   const togglePin = async (account: Account) => {
     try {
       await updateAccount(account.id, { pinned: account.pinned ? undefined : true });
@@ -1190,6 +1221,19 @@ function App() {
       },
       // Stays open on its second page: the groups.
       { label: t('menu.moveToGroup'), icon: FolderInput, onSelect: () => setCardMenu({ ...menu, page: 'groups' }) },
+      // The quickest way to say which account a page wants: right-click it
+      // with that page open. Ticked when this exact host is one of its sites.
+      ...(siteHost
+        ? [{
+            label: t('menu.useOnSite', siteHost),
+            icon: Globe,
+            checked: hasExactSite(account, siteHost),
+            onSelect: () => {
+              close();
+              void toggleAccountSite(account, siteHost);
+            },
+          }]
+        : []),
       {
         label: t('menu.select'),
         icon: CheckSquare,
@@ -1340,15 +1384,16 @@ function App() {
         await importLinks(text, 'import');
       } else {
         void reportAddStep('import', 'backup');
-        const imported = await importBackupText(text, () =>
+        const imported = await importBackupText(text, app =>
           promptDialog({
             title: t('import.passwordTitle'),
-            body: t('import.passwordText'),
+            body: app ? t('import.passwordTextOtherApp', app) : t('import.passwordText'),
             password: true,
             confirmLabel: t('common.ok'),
             cancelLabel: t('common.cancel'),
           }),
-          file.name
+          file.name,
+          file
         );
         // Null: the password prompt cancelled, or the paywall closed — the two are not told apart here.
         if (!imported) void reportAddCancel('import', 'backup_stopped');
@@ -1716,6 +1761,15 @@ function App() {
   // Opens the settings panel rather than exporting straight away: since 1.10.0
   // the user has to choose between a password-protected and a plain file, and
   // silently writing the plain one would undo the vault for anyone who enabled it.
+  /** The header's cloud: Settings, scrolled to cloud backup. */
+  const openCloudBackup = () => {
+    setShowSettings(true);
+    // After the panel has rendered: it is not in the page until then.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => document.getElementById('cloud-backup')?.scrollIntoView({ block: 'start', behavior: 'smooth' }))
+    );
+  };
+
   const handleBackupFromReminder = () => {
     setShowSettings(true);
     setShowBackupReminder(false);
@@ -1786,10 +1840,16 @@ function App() {
 
   useEffect(() => {
     if (!currentDomain || accounts.length === 0) {
-      setSuggestedAccountId(null);
+      setSiteSuggestion({ ids: [], explicit: false });
       return;
     }
-    getSuggestedAccountId(currentDomain, accounts).then(setSuggestedAccountId);
+    let live = true;
+    getSiteSuggestions(currentDomain, accounts).then(next => {
+      if (live) setSiteSuggestion(next);
+    });
+    return () => {
+      live = false;
+    };
   }, [currentDomain, accounts, suggestionsOn]);
 
   // Nothing renders until we know whether there is a vault: the alternative is
@@ -1930,6 +1990,10 @@ function App() {
                 installs included. Not inside a branch of the guide, whose
                 title needs the room. With it the icons are four again, and at
                 320px the longest titles end in an ellipsis. */}
+            {/* Cloud backup's state, there only while it is on here: a tick
+                when synced, like Google Authenticator's cloud. Opens Settings
+                at cloud backup. */}
+            {!guidePath && <CloudSyncIndicator language={language} onOpen={openCloudBackup} />}
             {!guidePath && (
               <NotificationBell language={language} offersVault={vault.enabled === false} onVault={() => setShowVaultSetup(true)} />
             )}
@@ -2094,7 +2158,9 @@ function App() {
               {/* Always here, whatever state the list is in: the copies are most
                   useful to someone who knew about them before they needed them. */}
               <RestoreBackups backups={backups} language={language} onRestored={handleRestored} />
-              <CloudBackupSettings language={language} onRestored={handleRestored} />
+              <div id="cloud-backup" className="scroll-mt-2">
+                <CloudBackupSettings language={language} onRestored={handleRestored} />
+              </div>
 
               <SettingToggle
                 label={t('settings.sync')}
@@ -2286,17 +2352,7 @@ function App() {
               />
             </SettingsSection>
 
-            {/* The last thing on the screen: the public board for ideas. It
-                used to be in the footer of every screen. */}
-            <div className="space-y-2 text-center">
-              <button
-                onClick={() => chrome.tabs.create({ url: FEATURE_REQUEST_URL })}
-                className={`${settingsButton.link} inline-flex items-center gap-1.5`}
-              >
-                <Lightbulb size={13} />
-                {t('common.requestFeature')}
-              </button>
-
+            <div className="text-center">
               {/* Selectable on purpose: the first thing a support reply asks for is
                   the version, and reading it off chrome://extensions means leaving
                   the popup to answer. */}
@@ -2433,15 +2489,7 @@ function App() {
                 onOpenPath={setOpenGuidePath}
                 onBack={leaveGuidePath}
                 onScanScreen={() => openAddAccount('qr', true)}
-                // The popup decides from its own tab (pageWorthScanning). The
-                // window and the side panel cannot read one, and neither can a
-                // popup.html open as a tab; they go by the welcome page's mark,
-                // and by the site the window was handed.
-                canScanPage={
-                  HOST === 'popup' && pageScan !== 'self'
-                    ? pageScan === 'yes'
-                    : !openedBySiteState && !(currentDomain && isOwnSite(currentDomain))
-                }
+                canScanPage={canScanPage}
                 onEnterKey={() => openAddAccount('manual')}
                 onImport={handleImportClick}
                 onPasteLinks={() => void handlePasteLinks()}
@@ -2462,37 +2510,41 @@ function App() {
             {!isFiltered && whatsNewVersion === null && (
               <ServerBanner language={language} place="accounts" offersVault={offersVaultBanner} hasAccounts={accounts.length > 0} onVault={() => setShowVaultSetup(true)} />
             )}
-            {suggestedAccount && (
+            {suggestedAccounts.length > 0 && (
               <>
                 {/* AccountCard must stay the last child so its own `last:after:hidden`
                     divider rule kicks in — the section strip below handles separation. */}
                 <div>
                   <div className="px-4 pt-2.5 pb-1 flex items-center gap-1.5 text-[11px] font-medium text-accent-600 dark:text-accent-400">
-                    <Sparkles size={12} />
-                    <span>{t('accounts.suggested')}</span>
+                    {siteSuggestion.explicit ? <Globe size={12} /> : <Sparkles size={12} />}
+                    <span>{t(siteSuggestion.explicit ? 'accounts.forThisSite' : 'accounts.suggested')}</span>
                     {currentDomain && (
-                      <span className="text-gray-500 dark:text-gray-400 font-normal truncate">
-                        · {getBaseDomain(currentDomain)}
+                      // The whole host when the user tied accounts to it: with
+                      // one account per subdomain, the subdomain is the point.
+                      <span className="text-gray-500 dark:text-gray-400 font-normal truncate" dir="ltr">
+                        · {siteSuggestion.explicit ? siteHost ?? currentDomain : getBaseDomain(currentDomain)}
                       </span>
                     )}
                   </div>
-                  <AccountCard
-                    key={`suggested-${suggestedAccount.id}`}
-                    account={suggestedAccount}
-                    onDelete={handleDeleteAccount}
-                    onEdit={setEditingAccount}
-                    onShare={setSharingAccount}
-                    language={language}
-                    viewMode={viewMode}
-                    showAvatar={showAvatars}
-                    draggable={false}
-                    currentDomain={currentDomain}
-                    // Same account, same badge: pinned at the top it was the one
-                    // place the group did not show, so the row above and the row
-                    // below disagreed about it.
-                    showGroup={activeGroup === null}
-                    onMenu={handleCardMenu}
-                  />
+                  {suggestedAccounts.map(suggested => (
+                    <AccountCard
+                      key={`suggested-${suggested.id}`}
+                      account={suggested}
+                      onDelete={handleDeleteAccount}
+                      onEdit={setEditingAccount}
+                      onShare={setSharingAccount}
+                      language={language}
+                      viewMode={viewMode}
+                      showAvatar={showAvatars}
+                      draggable={false}
+                      currentDomain={currentDomain}
+                      // Same account, same badge: pinned at the top it was the one
+                      // place the group did not show, so the row above and the row
+                      // below disagreed about it.
+                      showGroup={activeGroup === null}
+                      onMenu={handleCardMenu}
+                    />
+                  ))}
                 </div>
                 <div className="h-2 bg-gray-100 dark:bg-dark-900 border-y border-gray-200 dark:border-dark-700" />
               </>
@@ -2523,7 +2575,7 @@ function App() {
                 // Matches the condition that decides the pinned card above, so
                 // the badge and the pin never disagree about whether a
                 // suggestion is being shown.
-                isSuggested={!isFiltered && suggestedAccountId === account.id}
+                isSuggested={!isFiltered && siteSuggestion.ids.includes(account.id)}
                 showGroup={activeGroup === null}
                 onMenu={handleCardMenu}
                 selecting={selection !== null}
@@ -2688,6 +2740,7 @@ function App() {
           defaultGroup={activeGroup ?? ''}
           initialTab={addTab}
           scanScreen={addScan}
+          canScanPage={canScanPage}
           // Closed first: the file picker and the paste box report into the
           // list, and the result belongs on screen, not behind this dialog.
           onImport={() => {
@@ -2710,6 +2763,7 @@ function App() {
           language={language}
           groups={groups.map(group => group.name)}
           accounts={accounts}
+          currentHost={siteHost}
         />
       )}
 
@@ -2751,7 +2805,7 @@ function App() {
       <input
         ref={importInputRef}
         type="file"
-        accept="application/json,text/plain,image/*,.maFile,.2fas"
+        accept="application/json,text/plain,image/*,.maFile,.2fas,.xml"
         onChange={handleImportFile}
         className="hidden"
       />

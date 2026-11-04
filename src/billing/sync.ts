@@ -388,3 +388,10 @@ export async function hasPendingCheckout(now = Date.now(), within = PENDING_CHEC
   const pending = await safe(() => localGet<{ at?: number }>(BILLING_KEYS.pendingCheckout), undefined);
   return !!pending && typeof pending.at === 'number' && now - pending.at < within && pending.at <= now;
 }
+
+/** The Checkout page of a purchase still pending (see hasPendingCheckout), to go back to. */
+export async function pendingCheckoutUrl(now = Date.now(), within = PENDING_CHECKOUT_MS): Promise<string | null> {
+  if (!(await hasPendingCheckout(now, within))) return null;
+  const pending = await safe(() => localGet<{ url?: unknown }>(BILLING_KEYS.pendingCheckout), undefined);
+  return typeof pending?.url === 'string' && /^https:\/\//.test(pending.url) ? pending.url : null;
+}

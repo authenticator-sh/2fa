@@ -44,3 +44,6 @@ authenticator-*.crx
 
 # CRX signing key — NEVER commit
 *.pem
+
+# Aegis test files the FreeOTP test fetches (GPL; not ours to commit)
+test/fixtures/.aegis/

@@ -13,9 +13,11 @@
 // — over quota, rate-limited — because for them the stale copy never goes away
 // and deleting never works at all.
 //
-// So a deletion leaves a marker, and the merge honours it. The marker is local
-// only: another device still keeps its copy, which is the existing, deliberate
-// behaviour of deletions not propagating.
+// So a deletion leaves a marker, and the merge honours it. Chrome sync never
+// carries the marker: another Chrome profile keeps its copy. Cloud sync does —
+// for a device that has cloud backup on, the markers made since it started
+// syncing travel in its copy, and the other devices delete what they hold of
+// that seed unless they changed it after the deletion (billing/cloud-merge.ts).
 
 import { ageOf, stampNow } from './clock';
 import { toBase64 } from './crypto';
@@ -32,10 +34,12 @@ const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
  * in every form a copy of it can arrive in — secret, normalised secret, and
  * the fingerprints of both while a vault is open (see seedIdentities in
  * storage.ts) — so one delete costs two to four entries where it used to cost
- * one. Raised to match, so as many deletions are remembered as before; at ~60
- * bytes an entry it is still a few tens of KB of local storage.
+ * one. Raised to match, so as many deletions are remembered as before — and
+ * to 2000 with cloud sync, whose marks also arrive from other devices and
+ * must outlive the copies of builds that never delete; at ~60
+ * bytes an entry it is still about a hundred KB of local storage.
  */
-const MAX_ENTRIES = 600;
+const MAX_ENTRIES = 2000;
 
 /** identity hash -> when it was deleted. */
 type Tombstones = Record<string, number>;
@@ -82,19 +86,42 @@ async function write(tombstones: Tombstones): Promise<void> {
   await chrome.storage.local.set({ [KEY]: Object.fromEntries(kept) }).catch(() => {});
 }
 
-/** Remember that these identities were deleted here. */
-export async function markDeleted(identities: string[]): Promise<void> {
+/**
+ * Remember that these identities were deleted here.
+ *
+ * `at` is for a deletion that happened elsewhere and reached this device
+ * through cloud sync: it keeps the moment of the deletion itself, so the marker
+ * this device sends on says the same as the one it came from, and an account
+ * re-added after that moment still wins over it. An earlier marker for the
+ * same identity is never moved back.
+ */
+export async function markDeleted(identities: string[], at?: number): Promise<void> {
   if (identities.length === 0) return;
 
   const tombstones = await read();
   // A monotonic stamp, not the raw clock: a deletion recorded on a machine that
   // thinks it is 2015 must not read as eleven years old the moment the clock is
   // fixed, or the sweep below drops it and the account comes back.
-  const now = await stampNow();
+  const stamp = at !== undefined && Number.isFinite(at) ? at : await stampNow();
   for (const identity of identities) {
-    tombstones[await hashIdentity(identity)] = now;
+    const hash = await hashIdentity(identity);
+    tombstones[hash] = Math.max(tombstones[hash] ?? 0, stamp);
   }
   await write(tombstones);
+}
+
+/**
+ * Every marker, as hash -> when: what cloud sync carries to the other devices
+ * (billing/cloud-backup.ts). Hashes only — the same values the merge compares —
+ * and inside the end-to-end encrypted copy.
+ */
+export async function readDeletionMarks(): Promise<Record<string, number>> {
+  return { ...(await read()) };
+}
+
+/** The hash a marker is kept under, for comparing an account with marks from another device. */
+export function identityHash(identity: string): Promise<string> {
+  return hashIdentity(identity);
 }
 
 /**

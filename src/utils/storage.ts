@@ -1,6 +1,7 @@
 import type { Account, EncryptedAccount, StoredAccount } from '@/types';
 import { isEncryptedAccount } from '@/types';
-import { ageOf } from './clock';
+import { ageOf, raiseClock, stampNow } from './clock';
+import { planCloudMerge, sameSyncedFields, versionStamp, type RemoteCopy } from './cloud-merge';
 import { decryptJson, encryptJson, fingerprintSecret } from './crypto';
 import {
   clearVaultMeta,
@@ -18,7 +19,7 @@ import {
 } from './vault';
 import { replaceAllBackups, wipeAllBackups } from './auto-backup';
 import { isSyncEnabled, setSyncPreference } from './sync-preference';
-import { deletedHere, forgetDeleted, markDeleted } from './tombstones';
+import { deletedHere, forgetDeleted, identityHash, markDeleted, readDeletionMarks } from './tombstones';
 import { cleanSecret } from './totp';
 import {
   ImportRejectedError,
@@ -757,6 +758,12 @@ interface Retired {
   identities: string[];
   /** The seed itself, to be recorded in the forms it was NOT stored in as well. */
   secrets: string[];
+  /**
+   * The deletion is stamped after this: later than the version it removes,
+   * whatever this device's clock says, so cloud sync never ranks the deletion
+   * below what it deleted (cloud-merge.ts).
+   */
+  after?: number;
 }
 
 /**
@@ -786,9 +793,10 @@ function retiredCopies(
 }
 
 /** Record a retired seed as deleted here. Best-effort, like every marker write. */
-async function markRetired(retired: Retired): Promise<void> {
+async function markRetired(retired: Retired, at?: number): Promise<void> {
   const identities = [...retired.identities, ...(await seedIdentities(retired.secrets).catch(() => retired.secrets))];
-  await markDeleted([...new Set(identities)]).catch(() => {});
+  const when = at ?? (retired.after !== undefined ? Math.max(await stampNow(), retired.after) : undefined);
+  await markDeleted([...new Set(identities)], when).catch(() => {});
 }
 
 /**
@@ -1294,6 +1302,34 @@ type Apply<T> = (
 };
 
 /**
+ * `updatedAt` on every account a change adds or alters (see Account.updatedAt).
+ *
+ * Here, once, rather than in each edit: a rename, a group move, a pin, an
+ * import, a restore, a Steam upgrade all come through mutateAccounts, and an
+ * edit that forgot to stamp would be an edit sync quietly undoes from another
+ * device's older copy. An account new to this device — added, imported,
+ * restored — is stamped now whatever stamp it carried: restoring one deleted
+ * last week is a decision made today, and with last week's stamp the deletion
+ * would win again at the next sync. Unchanged accounts keep the stamp they had.
+ */
+function stampChanges(before: Account[], after: Account[], now: number): Account[] {
+  const byId = new Map(before.map(account => [account.id, account]));
+  return after.map(account => {
+    const was = byId.get(account.id);
+    if (was && sameSyncedFields(was, account) && secretKey(was.secret) === secretKey(account.secret)) {
+      if (account.updatedAt === was.updatedAt) return account;
+      const kept = { ...account };
+      if (was.updatedAt === undefined) delete kept.updatedAt;
+      else kept.updatedAt = was.updatedAt;
+      return kept;
+    }
+    // Later than the version it changes, whatever this clock says: an edit
+    // stamped before what it edited would lose to it on every other device.
+    return { ...account, updatedAt: was ? Math.max(now, versionStamp(was) + 1) : now };
+  });
+}
+
+/**
  * Run `apply` against the current account list and save what it returns.
  *
  * `apply` must be re-runnable: without Web Locks it is called again, on a
@@ -1301,7 +1337,11 @@ type Apply<T> = (
  */
 async function mutateAccounts<T>(
   apply: Apply<T>,
-  options: SaveOptions & { beforeSave?: (result: T) => Promise<void> } = {}
+  options: SaveOptions & {
+    beforeSave?: (result: T) => Promise<void>;
+    /** Cloud sync's own writes: the stamps it sets are other devices' edits, not this one's. */
+    keepStamps?: boolean;
+  } = {}
 ): Promise<T> {
   let wrote = false;
   const outcome = await withAccountsLock(async () => {
@@ -1314,8 +1354,9 @@ async function mutateAccounts<T>(
       // reading that separately would put the race back where it started.
       const { records: stored, revision } = await retryOperation(() => readStored(true));
       const decoded = await decodeHeld(stored);
-      const { accounts, result } = apply(decoded.accounts, stored, decoded.seedOf);
-      if (accounts === null) return result;
+      const { accounts: applied, result } = apply(decoded.accounts, stored, decoded.seedOf);
+      if (applied === null) return result;
+      const accounts = options.keepStamps ? applied : stampChanges(decoded.accounts, applied, await stampNow());
 
       await options.beforeSave?.(result);
       try {
@@ -1499,7 +1540,10 @@ export async function updateAccount(id: string, updates: Partial<Account>): Prom
       const replaced = typeof merged.secret === 'string' && secretKey(merged.secret) !== oldSeed;
       return {
         accounts: next,
-        result: { found: true, retired: replaced ? retiredCopies(stored, seedOf, id, oldSeed) : null },
+        result: {
+          found: true,
+          retired: replaced ? { ...retiredCopies(stored, seedOf, id, oldSeed), after: versionStamp(accounts[index]) + 1 } : null,
+        },
       };
     },
     // Before the write, as for a delete: the write fires onChanged, and the
@@ -1661,7 +1705,7 @@ export async function deleteAccount(id: string): Promise<void> {
         // own spelling or their own fingerprint, matched no marker and put the
         // account straight back. And in every form, not only the stored one:
         // see seedIdentities.
-        result: retiredCopies(stored, seedOf, id, seed),
+        result: { ...retiredCopies(stored, seedOf, id, seed), after: target ? versionStamp(target) + 1 : undefined },
       };
     },
     {
@@ -1698,6 +1742,7 @@ export async function deleteAccounts(ids: readonly string[]): Promise<number> {
         const copies = retiredCopies(stored, seedOf, target.id, secretKey(target.secret));
         retired.identities.push(...copies.identities);
         retired.secrets.push(...copies.secrets);
+        retired.after = Math.max(retired.after ?? 0, versionStamp(target) + 1);
       }
       return { accounts: accounts.filter(acc => !wanted.has(acc.id)), result: { removed: targets.length, retired } };
     },
@@ -1861,6 +1906,126 @@ export async function restoreFromSnapshot(records: StoredAccount[]): Promise<Res
       },
     };
   });
+}
+
+export interface CloudMergeResult {
+  added: number;
+  updated: number;
+  removed: number;
+}
+
+/** What a cloud copy holds, as it came out of decryption: nothing in it is trusted yet. */
+export interface RawCloudCopy {
+  accounts: unknown[];
+  deleted: unknown;
+}
+
+/** Marks more than this in one copy are not a list someone made by deleting accounts. */
+const MAX_REMOTE_MARKS = 5000;
+
+/**
+ * Fold other devices' cloud copies into this list (utils/cloud-merge.ts):
+ * their newer edits, the accounts they added, and the deletions they made.
+ *
+ * Each account read the way an import reads one — a copy is a file another
+ * device wrote, possibly a newer build — with its `updatedAt` kept, which the
+ * import does not. Then decided under the accounts lock on a fresh read, and
+ * written like any change: a deletion that arrives retires every stored copy
+ * of the seed, before the write, so Chrome sync cannot put it back — and with
+ * the moment of the deletion itself, not of its arrival.
+ *
+ * `since`: when this device started syncing; its deletions before that are
+ * left out of the comparison.
+ *
+ * Throws VaultLockedError while protection is locked: nothing can be compared.
+ */
+export async function applyCloudMerge(copies: RawCloudCopy[], options: { since: number }): Promise<CloudMergeResult> {
+  const remotes: RemoteCopy[] = copies.map(copy => {
+    const accounts: Account[] = [];
+    for (const [index, entry] of copy.accounts.entries()) {
+      const account = normalizeImported(entry, index);
+      if (!account) continue;
+      const raw = entry as { updatedAt?: unknown; createdAt?: unknown };
+      // The import fills a missing createdAt with now; here that would make an
+      // account of unknown age look brand new and win over a deletion.
+      if (!(typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt) && raw.createdAt > 0)) account.createdAt = 0;
+      if (typeof raw.updatedAt === 'number' && Number.isFinite(raw.updatedAt) && raw.updatedAt > 0) account.updatedAt = raw.updatedAt;
+      accounts.push(account);
+    }
+    const deleted: Record<string, number> = {};
+    if (copy.deleted && typeof copy.deleted === 'object' && !Array.isArray(copy.deleted)) {
+      for (const [hash, at] of Object.entries(copy.deleted as Record<string, unknown>).slice(0, MAX_REMOTE_MARKS)) {
+        if (typeof at === 'number' && Number.isFinite(at) && at > 0) deleted[hash] = at;
+      }
+    }
+    return { accounts, deleted };
+  });
+
+  // Whatever this device does next is later than anything it has just read
+  // (clock.ts raiseClock): a clock behind another device's must not stamp a
+  // deletion below the version it deletes.
+  let newest = 0;
+  for (const remote of remotes) {
+    for (const account of remote.accounts) newest = Math.max(newest, account.updatedAt ?? 0);
+    for (const at of Object.values(remote.deleted)) newest = Math.max(newest, at);
+  }
+  if (newest > 0) await raiseClock(newest);
+
+  // The hashes the merge compares, worked out before the lock: hashing is
+  // async and the decision under the lock is not. An account added here in
+  // between has none, and no deletion applies to it — it is newer than any.
+  const local = await getAccounts();
+  // This device's own deletions from before it started syncing are its own
+  // business, both ways: they are not sent (cloud-backup.ts), and they do not
+  // keep the other devices' accounts out — joining means getting the list.
+  const localDeleted = Object.fromEntries(Object.entries(await readDeletionMarks()).filter(([, at]) => at >= options.since));
+  const before = new Set(local.map(account => secretKey(account.secret)));
+  const hashes = new Map<string, string>();
+  for (const account of [...local, ...remotes.flatMap(remote => remote.accounts)]) {
+    const key = secretKey(account.secret);
+    if (key && !hashes.has(key)) hashes.set(key, await identityHash(key));
+  }
+
+  const outcome = await mutateAccounts<{ result: CloudMergeResult; retired: { retired: Retired; at: number }[] }>(
+    (accounts, stored, seedOf) => {
+      const plan = planCloudMerge({
+        local: accounts,
+        localDeleted,
+        remotes,
+        seedKey: secretKey,
+        hashOf: key => hashes.get(key),
+        usedIds: new Set(stored.filter(isUsableRecord).map(record => record.id)),
+        // Here at the first read and gone now: deleted meanwhile, its mark too
+        // new for the marks read above. Adding it back would also erase that
+        // mark (writeAccounts forgets the marks of what it adds).
+        skipAdd: key => before.has(key) && !accounts.some(account => secretKey(account.secret) === key),
+        removalSince: options.since,
+      });
+      if (!plan) return { accounts: null, result: { result: { added: 0, updated: 0, removed: 0 }, retired: [] } };
+      return {
+        accounts: plan.accounts,
+        result: {
+          result: { added: plan.added, updated: plan.updated, removed: plan.removed.length },
+          retired: plan.removed.map(({ account, at }) => ({
+            retired: retiredCopies(stored, seedOf, account.id, secretKey(account.secret)),
+            at,
+          })),
+        },
+      };
+    },
+    {
+      keepStamps: true,
+      // Removes accounts only through the deletions the plan names — absence
+      // never removes anything (cloud-merge.ts) — so the shrink guard, which
+      // cannot tell those from a partial read, steps aside as for a delete.
+      allowShrink: true,
+      awaitSync: true,
+      beforeSave: async ({ retired }) => {
+        for (const { retired: copies, at } of retired) await markRetired(copies, at);
+      },
+    }
+  );
+  return outcome.result;
 }
 
 /**

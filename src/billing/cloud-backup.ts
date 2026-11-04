@@ -17,12 +17,21 @@
 // the list is always one the current code opens. Turning off needs the code;
 // starting over without it needs the license key.
 //
-// Restoring goes through restoreFromSnapshot, so it only ever adds — the same
-// merge as the automatic copies in Settings.
+// Restoring a copy by hand goes through restoreFromSnapshot, so it only ever
+// adds — the same merge as the automatic copies in Settings.
+//
+// Sync: every device sends its own list, and reads the newest copy of each
+// other device (syncWithCloud) — on opening the list, on coming back to a
+// window, and every few minutes while one stays open. The copies carry each
+// account's last edit and the deletions made since the device started syncing,
+// and utils/cloud-merge.ts folds them together: the newer edit wins, and a
+// deletion removes only what was not changed after it.
 
 import type { Account, StoredAccount } from '@/types';
 import { decryptJson, encryptJson, generateRecoveryCode, normalizeRecoveryCode, toBase64 } from '@/utils/crypto';
-import { decodeRecords, getStoredAccounts, restoreFromSnapshot, type RestoreResult } from '@/utils/storage';
+import { ageOf, stampNow } from '@/utils/clock';
+import { applyCloudMerge, decodeRecords, getStoredAccounts, restoreFromSnapshot, type CloudMergeResult, type RawCloudCopy, type RestoreResult } from '@/utils/storage';
+import { readDeletionMarks } from '@/utils/tombstones';
 import { getVaultMeta, peekMasterKeyBytes, VaultLockedError } from '@/utils/vault';
 import { withAccountsLock } from '@/utils/write-lock';
 import { BillingApiError, post } from './api';
@@ -35,13 +44,15 @@ import {
   sealCodeUnderVault,
   storedFormFor,
 } from './cloud-backup-code';
-import { ensureInstall, readEntitlement, readInstall } from './state';
+import { BILLING_KEYS, ensureInstall, readEntitlement, readInstall } from './state';
 import type { Entitlement } from './types';
 
 export { CLOUD_BACKUP_CODE_KEY };
 
 /** What this install last sent (local only). */
 const STATE_KEY = 'cloudBackupState';
+/** What this install last read from the other devices (local only). */
+const SYNC_KEY = 'cloudSyncState';
 /** A code turned on but not yet confirmed, kept while the person writes it down (session only). */
 const PENDING_KEY = 'cloudBackupPendingCode';
 const LOCK = 'authenticator-cloud-backup';
@@ -79,6 +90,11 @@ interface CloudPayload {
   appVersion?: string;
   accounts: Account[];
   /**
+   * Seed hash -> when this device deleted it, for the deletions made since it
+   * started syncing (SyncState.since). Absent in copies from before sync.
+   */
+  deleted?: Record<string, number>;
+  /**
    * Records this device holds but cannot read — another vault's ciphertext,
    * damaged entries — exactly as stored. The automatic copies keep them, so
    * the one copy that survives the device must too.
@@ -92,6 +108,8 @@ export interface CloudBackupSummary {
   bytes: number;
   kid: string;
   thisDevice: boolean;
+  /** Which device sent it (the server's tag); null from a server that does not say. */
+  device: string | null;
 }
 
 export interface CloudBackupList {
@@ -110,9 +128,12 @@ export class WrongBackupCodeError extends Error {
 
 /** The copy opened but is not one of ours, or is cut short. */
 export class DamagedCloudBackupError extends Error {
-  constructor() {
+  /** Written by a later build in a format this one does not read — not broken, and readable after an update. */
+  readonly newer: boolean;
+  constructor(options: { newer?: boolean } = {}) {
     super('The backup could not be read');
     this.name = 'DamagedCloudBackupError';
+    this.newer = options.newer === true;
   }
 }
 
@@ -266,6 +287,7 @@ async function keepCode(code: string, options: { syncToo?: boolean } = {}): Prom
   await putStoredCode(form, options);
   const state = await readUploadState();
   await writeUploadState({ ...state, rejectedKid: null });
+  await updateSyncState({ needsCode: false }).catch(() => {});
 }
 
 /**
@@ -273,10 +295,14 @@ async function keepCode(code: string, options: { syncToo?: boolean } = {}): Prom
  * sync when sync holds the same one, and never adopt it again. Another
  * profile's newer code in sync is left alone.
  */
-async function forgetRefusedCode(kid: string): Promise<void> {
+async function forgetRefusedCode(kid: string, options: { needsCode?: boolean } = {}): Promise<void> {
   // The refusal first: removing the code fires a storage event, and a screen
   // reading the code on it must already know not to take it back from sync.
   await writeUploadState({ ...NO_STATE, rejectedKid: kid });
+  // Sync starts over with the next code; until then the header says the code
+  // is wanted, when the license still has one (started over elsewhere) —
+  // not when it has none (turned off elsewhere), which is just "off".
+  await resetSyncState({ needsCode: options.needsCode === true });
   await chrome.storage.local.remove(CLOUD_BACKUP_CODE_KEY).catch(() => {});
   try {
     const synced = await readSyncedCode();
@@ -390,20 +416,29 @@ async function upload(
   mac: string,
   options: { claim?: boolean } = {}
 ): Promise<void> {
-  const payload: CloudPayload = { format: FORMAT, v: 1, kid: keys.kid, createdAt: Date.now(), appVersion: appVersion(), ...content };
+  const payload: CloudPayload = {
+    format: FORMAT,
+    v: 1,
+    kid: keys.kid,
+    createdAt: Date.now(),
+    appVersion: appVersion(),
+    deleted: await deletionsToSend(),
+    ...content,
+  };
   const data = await encryptJson(payload, keys.enc);
   const install = await ensureInstall();
   const previous = await readUploadState();
   try {
-    await post<{ id: string; created_at: number }>(
+    const sent = await post<{ id: string; created_at: number }>(
       '/v1/backup/upload',
       { iid: install.id, kid: keys.kid, auth: keys.auth, data, ...(options.claim ? { claim: true } : {}) },
       UPLOAD_TIMEOUT_MS
     );
     await writeUploadState({ at: Date.now(), mac, kid: keys.kid, failedAt: null, rejectedKid: null });
+    if (typeof sent?.id === 'string') await rememberUpload(sent.id).catch(() => {});
   } catch (error) {
     if (error instanceof BillingApiError && (error.code === 'backup_off' || error.code === 'backup_wrong_code') && !options.claim) {
-      await forgetRefusedCode(keys.kid);
+      await forgetRefusedCode(keys.kid, { needsCode: error.code === 'backup_wrong_code' });
     } else {
       await writeUploadState({ ...previous, failedAt: Date.now() });
     }
@@ -411,16 +446,39 @@ async function upload(
   }
 }
 
+/**
+ * Without Web Locks (none of our platforms, but a browser could), one page's
+ * own queue: a reload that sends the copy must still wait for a sync that is
+ * merging, not run beside it and send the list twice.
+ */
+let localQueue: Promise<void> = Promise.resolve();
+let localBusy = false;
+function queueHere<T>(fn: () => Promise<T>): Promise<T> {
+  const run = localQueue.then(async () => {
+    localBusy = true;
+    try {
+      return await fn();
+    } finally {
+      localBusy = false;
+    }
+  });
+  localQueue = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
 /** Waits its turn: the user's own actions never race an upload or each other. */
 async function withBackupLock<T>(fn: () => Promise<T>): Promise<T> {
   const locks = (navigator as Navigator & { locks?: LockManager }).locks;
-  if (!locks || typeof locks.request !== 'function') return fn();
+  if (!locks || typeof locks.request !== 'function') return queueHere(fn);
   return locks.request(LOCK, () => fn()) as Promise<T>;
 }
 
 async function ifLockAvailable<T>(fn: () => Promise<T>, busy: T): Promise<T> {
   const locks = (navigator as Navigator & { locks?: LockManager }).locks;
-  if (!locks || typeof locks.request !== 'function') return fn();
+  if (!locks || typeof locks.request !== 'function') return localBusy ? busy : queueHere(fn);
   return locks.request(LOCK, { ifAvailable: true }, lock => (lock ? fn() : busy)) as Promise<T>;
 }
 
@@ -439,18 +497,33 @@ export type UploadOutcome = 'uploaded' | 'unchanged' | 'skipped' | 'failed';
 export async function cloudBackupIfDue(accounts: Account[], now = Date.now()): Promise<UploadOutcome> {
   try {
     if (accounts.length === 0) return 'skipped';
-    if (!(await cloudBackupEntitlement())) return 'skipped';
+    if (!(await cloudBackupEntitlement())) {
+      // Pro ended: no sync, so what is deleted from here on stays here.
+      await endSyncEpoch();
+      return 'skipped';
+    }
     return await ifLockAvailable(async (): Promise<UploadOutcome> => {
       let outcome: UploadOutcome = 'unchanged';
       for (let pass = 0; pass < MAX_PASSES; pass++) {
         const code = await readCode();
         if (code.kind !== 'ready') return 'skipped';
+        await syncSince();
         const state = await readUploadState();
         const keys = await deriveBackupKeys(code.code);
         const content = await snapshot();
         if (content.accounts.length === 0) return 'skipped';
         const mac = await macOf(content, keys.mac);
-        if (state.mac === mac && state.kid === keys.kid) return outcome;
+        if (state.mac === mac && state.kid === keys.kid) {
+          // Back to what the last copy holds — an upload that failed, then a
+          // change undone: nothing is missing from the cloud any more.
+          if (state.failedAt !== null) await writeUploadState({ ...state, failedAt: null });
+          return outcome;
+        }
+        // Only what other devices' copies brought in, and a copy went out from
+        // here within the hour: not sent yet. They hold all of it already, and
+        // each device sending on every merge was N uploads per change, enough
+        // on a busy day to spend the license's hundred.
+        if (pass === 0 && (await mergeOnly(mac, state.at, now))) return 'unchanged';
         if (pass === 0 && state.failedAt !== null && state.failedAt <= now && now - state.failedAt < RETRY_AFTER_FAILURE_MS) return 'skipped';
         try {
           await upload(content, keys, mac);
@@ -487,6 +560,7 @@ interface ServerSummary {
   bytes: number;
   kid: string;
   this_device: boolean;
+  device?: string;
 }
 
 /**
@@ -504,7 +578,14 @@ export async function listCloudBackups(licenseKey?: string): Promise<CloudBackup
   if (!answer || !Array.isArray(answer.backups)) throw new BillingApiError('internal', 200);
   const copies = answer.backups
     .filter(b => b && typeof b.id === 'string' && typeof b.created_at === 'number' && typeof b.kid === 'string')
-    .map(b => ({ id: b.id, createdAt: b.created_at, bytes: Number(b.bytes) || 0, kid: b.kid, thisDevice: b.this_device === true }))
+    .map(b => ({
+      id: b.id,
+      createdAt: b.created_at,
+      bytes: Number(b.bytes) || 0,
+      kid: b.kid,
+      thisDevice: b.this_device === true,
+      device: typeof b.device === 'string' && b.device ? b.device : null,
+    }))
     .sort((a, b) => b.createdAt - a.createdAt);
   return { copies, kid: typeof answer.kid === 'string' ? answer.kid : null };
 }
@@ -523,6 +604,7 @@ export async function enableCloudBackup(code: string): Promise<void> {
     const keys = await deriveBackupKeys(code);
     const { kid } = await listCloudBackups();
     if (kid !== null && kid !== keys.kid) throw new WrongBackupCodeError();
+    await syncSince();
     const content = await snapshot();
     const previous = await readUploadState();
     // Here only until the server has taken it: in sync before that, another
@@ -562,18 +644,27 @@ export async function enableCloudBackup(code: string): Promise<void> {
  *
  * Returns what the merge brought in, or null when there was no copy to merge.
  */
-export async function adoptBackupCode(typed: string, licenseKey?: string): Promise<RestoreResult | null> {
+/** What joining brought in: a restore's counts, and the edits and deletions of the other devices. */
+export type JoinResult = RestoreResult & { updated: number; removed: number };
+
+export async function adoptBackupCode(typed: string, licenseKey?: string): Promise<JoinResult | null> {
   return withBackupLock(async () => {
     if (!isWellFormedCode(typed)) throw new WrongBackupCodeError();
     const keys = await deriveBackupKeys(typed);
     const { kid, copies } = await listCloudBackups(licenseKey);
     if (kid === null || kid !== keys.kid) throw new WrongBackupCodeError();
     await keepCode(typed);
+    await syncSince();
     const newest = copies[0]?.id ?? null;
-    let merged: RestoreResult | null = null;
+    let merged: JoinResult | null = null;
     if (newest) {
       try {
-        merged = await restoreCloudBackup(newest, { typed, licenseKey });
+        // Every device's newest copy, merged as sync merges them — not the
+        // newest one restored: a restore only adds, and stamps what it adds as
+        // new, so an account another device has since deleted came back here
+        // and then went out to every device again as this one's addition.
+        const outcome = await mergeOtherDevices(keys, copies, { licenseKey });
+        merged = { added: outcome.added, skipped: 0, unreadable: outcome.unreadable, updated: outcome.updated, removed: outcome.removed };
       } catch (error) {
         // A locked vault is the person's to open; anything else (a broken
         // copy, the server gone a moment) leaves the code kept and the copies
@@ -626,7 +717,6 @@ async function holdsSomethingNew(accounts: Account[], newestId: string | null, k
  * key), otherwise the code kept here.
  */
 export async function restoreCloudBackup(id: string, options: { typed?: string; licenseKey?: string } = {}): Promise<RestoreResult> {
-  const install = await ensureInstall();
   let code: string | null = null;
   if (options.typed) code = normalizeRecoveryCode(options.typed);
   else {
@@ -636,13 +726,20 @@ export async function restoreCloudBackup(id: string, options: { typed?: string; 
   }
   if (!code || !isWellFormedCode(code)) throw new WrongBackupCodeError();
   const keys = await deriveBackupKeys(code);
+  const payload = await fetchCopy(id, keys, options.licenseKey);
+  const held = Array.isArray(payload.held) ? payload.held : [];
+  return restoreFromSnapshot([...payload.accounts, ...held]);
+}
 
+/** One copy, opened and checked. Throws WrongBackupCodeError or DamagedCloudBackupError. */
+async function fetchCopy(id: string, keys: BackupKeys, licenseKey?: string): Promise<CloudPayload> {
+  const install = await ensureInstall();
   // With the proof of the code: an install id alone reaches no ciphertext.
   const answer = await post<{ kid?: string; data?: string }>('/v1/backup/get', {
     iid: install.id,
     id,
     auth: keys.auth,
-    ...(options.licenseKey ? { key: options.licenseKey } : {}),
+    ...(licenseKey ? { key: licenseKey } : {}),
   });
   if (typeof answer?.data !== 'string' || typeof answer.kid !== 'string') throw new DamagedCloudBackupError();
   if (keys.kid !== answer.kid) throw new WrongBackupCodeError();
@@ -655,11 +752,13 @@ export async function restoreCloudBackup(id: string, options: { typed?: string; 
     throw new DamagedCloudBackupError();
   }
   // v: a copy a later version writes differently is not read as this one.
+  if (payload && payload.format === FORMAT && typeof payload.v === 'number' && payload.v > 1) {
+    throw new DamagedCloudBackupError({ newer: true });
+  }
   if (!payload || payload.format !== FORMAT || payload.v !== 1 || payload.kid !== keys.kid || !Array.isArray(payload.accounts)) {
     throw new DamagedCloudBackupError();
   }
-  const held = Array.isArray(payload.held) ? payload.held : [];
-  return restoreFromSnapshot([...payload.accounts, ...held]);
+  return payload;
 }
 
 /**
@@ -680,6 +779,8 @@ export async function disableCloudBackup(): Promise<number> {
     const answer = await post<{ deleted?: number }>('/v1/backup/delete', { iid: install.id, auth: keys.auth });
     await putStoredCode(null);
     await writeUploadState({ ...NO_STATE, rejectedKid: keys.kid });
+    // Deletions made while it is off are this device's own, as before sync.
+    await resetSyncState();
     return typeof answer?.deleted === 'number' ? answer.deleted : 0;
   });
 }
@@ -696,6 +797,7 @@ export async function resetCloudBackup(licenseKey: string): Promise<number> {
     const stale = await readCode().catch(() => ({ kind: 'none' }) as CodeState);
     await putStoredCode(null);
     await writeUploadState({ ...NO_STATE, rejectedKid: stale.kind === 'ready' ? stale.kid : null });
+    await resetSyncState();
     return typeof answer?.deleted === 'number' ? answer.deleted : 0;
   });
 }
@@ -712,6 +814,355 @@ export async function reconcileCloudBackupCode(): Promise<void> {
     const code = await readCode();
     if (code.kind !== 'ready') return;
     const { kid } = await listCloudBackups();
-    if (kid !== code.kid) await forgetRefusedCode(code.kid);
+    if (kid !== code.kid) await forgetRefusedCode(code.kid, { needsCode: kid !== null });
   });
+}
+
+// ─── Sync ──────────────────────────────────────────────────────────────────
+
+interface SyncState {
+  /** Device tag -> the id of its copy last folded in here, so an unchanged device is not read again. */
+  seen: Record<string, string>;
+  /** When the other devices were last read, all of them (written at most every few minutes when nothing changed). */
+  pulledAt: number | null;
+  /** When reading them last failed. */
+  failedAt: number | null;
+  /**
+   * When this device started syncing. Only deletions from then on go out, or
+   * remove this device's own accounts: before sync, deleting an account left
+   * the other devices alone by design, and a laptop that dropped a work
+   * account a year ago must not take it off the phone the day both update.
+   * Cleared when cloud backup is turned off here, or Pro ends.
+   */
+  since: number | null;
+  /** The license has another code now (started over elsewhere): the header asks for it. */
+  needsCode: boolean;
+  /**
+   * Ids of the copies this device sent. The server marks a copy "this device"
+   * by install id, and an iPad set up from the iPhone's backup, or a Mac moved
+   * with Migration Assistant, has the same one: their copies are told apart by
+   * this list instead, which each keeps for itself from then on.
+   */
+  mine: string[];
+  /** The copies already on the server when this list started count as this device's. */
+  mineSince: boolean;
+  /** The list right after the last merge brought something in: unchanged since, it waits to be sent (mergeOnly). */
+  mergedMac: string | null;
+}
+
+const NO_SYNC: SyncState = {
+  seen: {},
+  pulledAt: null,
+  failedAt: null,
+  since: null,
+  needsCode: false,
+  mine: [],
+  mineSince: false,
+  mergedMac: null,
+};
+
+/** Reads the other devices at most this often from one browser, unless asked by the person or the last read failed. */
+const SYNC_EVERY_MS = 60_000;
+/** A list that only changed by merging waits this long after this device's last copy before it is sent. */
+const MERGE_UPLOAD_DELAY_MS = 60 * 60_000;
+/** pulledAt is rewritten after an uneventful read only when older than this: every write is a whole file on the Mac and iPhone. */
+const PULLED_AT_REFRESH_MS = 10 * 60_000;
+const MINE_KEPT = 100;
+/** When the last read started, across this browser's windows; session storage, so it costs no disk write. */
+const ATTEMPT_KEY = 'cloudSyncAttempt';
+
+async function readSyncState(): Promise<SyncState> {
+  try {
+    const raw = (await chrome.storage.local.get(SYNC_KEY))[SYNC_KEY] as Partial<SyncState> | undefined;
+    if (!raw || typeof raw !== 'object') return NO_SYNC;
+    const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+    const seen: Record<string, string> = {};
+    if (raw.seen && typeof raw.seen === 'object' && !Array.isArray(raw.seen)) {
+      for (const [device, id] of Object.entries(raw.seen)) if (typeof id === 'string') seen[device] = id;
+    }
+    return {
+      seen,
+      pulledAt: num(raw.pulledAt),
+      failedAt: num(raw.failedAt),
+      since: num(raw.since),
+      needsCode: raw.needsCode === true,
+      mine: Array.isArray(raw.mine) ? raw.mine.filter((id): id is string => typeof id === 'string') : [],
+      mineSince: raw.mineSince === true,
+      mergedMac: typeof raw.mergedMac === 'string' ? raw.mergedMac : null,
+    };
+  } catch {
+    return NO_SYNC;
+  }
+}
+
+async function updateSyncState(patch: Partial<SyncState>): Promise<void> {
+  const state = await readSyncState();
+  await chrome.storage.local.set({ [SYNC_KEY]: { ...state, ...patch } });
+}
+
+/** Sync starts over: nothing seen, no epoch. The copies this device sent are still its own. */
+async function resetSyncState(patch: Partial<SyncState> = {}): Promise<void> {
+  const { mine, mineSince } = await readSyncState();
+  await chrome.storage.local.set({ [SYNC_KEY]: { ...NO_SYNC, mine, mineSince, ...patch } });
+}
+
+/** When this device started syncing; set the first time it is asked. */
+async function syncSince(): Promise<number> {
+  const state = await readSyncState();
+  if (state.since !== null) return state.since;
+  const since = await stampNow();
+  await updateSyncState({ since });
+  return since;
+}
+
+/** Pro ended: the epoch closes, and starts again when sync does. */
+async function endSyncEpoch(): Promise<void> {
+  const state = await readSyncState().catch(() => NO_SYNC);
+  if (state.since !== null || Object.keys(state.seen).length > 0) await resetSyncState().catch(() => {});
+}
+
+async function rememberUpload(id: string): Promise<void> {
+  const state = await readSyncState();
+  await updateSyncState({ mine: [id, ...state.mine.filter(x => x !== id)].slice(0, MINE_KEPT) });
+}
+
+/** Whether a send can wait: the list is what the last merge made of it, and this device sent a copy within the hour. */
+async function mergeOnly(mac: string, lastUpload: number | null, now: number): Promise<boolean> {
+  const state = await readSyncState();
+  if (state.mergedMac === null || state.mergedMac !== mac || lastUpload === null) return false;
+  const age = now - lastUpload;
+  return age >= 0 && age < MERGE_UPLOAD_DELAY_MS;
+}
+
+async function readAttempt(): Promise<number | null> {
+  try {
+    const value = (await chrome.storage.session.get(ATTEMPT_KEY))[ATTEMPT_KEY];
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeAttempt(at: number): Promise<void> {
+  try {
+    await chrome.storage.session.set({ [ATTEMPT_KEY]: at });
+  } catch {
+    // No session storage: each page paces itself.
+  }
+}
+
+/** The deletion marks a copy from here carries: those made since this device started syncing. */
+async function deletionsToSend(): Promise<Record<string, number>> {
+  try {
+    const since = await syncSince();
+    const marks = await readDeletionMarks();
+    return Object.fromEntries(Object.entries(marks).filter(([, at]) => at >= since));
+  } catch {
+    // A copy without them is a copy without deletions — never one that deletes.
+    return {};
+  }
+}
+
+interface OthersMerged extends CloudMergeResult {
+  /** Records in those copies this device cannot read; left where they are. */
+  unreadable: number;
+}
+
+/**
+ * Folds the newest copy of every other device into this list. With
+ * `onlyNew`, only devices whose newest copy this device has not folded in yet.
+ *
+ * A broken copy is skipped and remembered, not fetched again on every open; a
+ * copy from a later build is skipped and NOT remembered, to be read once this
+ * build is updated. A failure part way — the server refusing one fetch — still
+ * folds in the copies already fetched, and then throws.
+ */
+async function mergeOtherDevices(
+  keys: BackupKeys,
+  copies: CloudBackupSummary[],
+  options: { licenseKey?: string; onlyNew?: boolean } = {}
+): Promise<OthersMerged> {
+  const state = await readSyncState();
+  // The first sync of a device that sent copies before this list existed:
+  // those are its own (see SyncState.mine).
+  let mine = state.mine;
+  if (!state.mineSince) {
+    mine = [...copies.filter(copy => copy.thisDevice).map(copy => copy.id), ...mine].slice(0, MINE_KEPT);
+    await updateSyncState({ mine, mineSince: true });
+  }
+  const mineSet = new Set(mine);
+
+  // Newest first already (listCloudBackups), so the first of each device is its newest.
+  const newest = new Map<string, CloudBackupSummary>();
+  for (const copy of copies) {
+    if (copy.kid !== keys.kid || mineSet.has(copy.id)) continue;
+    // A copy "from this device" this device did not send: its twin's.
+    // A server that does not tag devices gives one group: the newest copy of anyone else.
+    const device = copy.thisDevice ? `twin:${copy.device ?? ''}` : (copy.device ?? 'other');
+    if (!newest.has(device)) newest.set(device, copy);
+  }
+  const todo = [...newest.entries()].filter(([device, copy]) => !options.onlyNew || state.seen[device] !== copy.id);
+
+  const read: RawCloudCopy[] = [];
+  const seen = { ...state.seen };
+  let unreadable = 0;
+  let failure: unknown = null;
+  for (const [device, copy] of todo) {
+    try {
+      const payload = await fetchCopy(copy.id, keys, options.licenseKey);
+      read.push({ accounts: payload.accounts, deleted: payload.deleted ?? {} });
+      unreadable += Array.isArray(payload.held) ? payload.held.length : 0;
+      seen[device] = copy.id;
+    } catch (error) {
+      if (error instanceof DamagedCloudBackupError) {
+        console.warn('cloud sync: a copy could not be read', copy.id);
+        if (!error.newer) seen[device] = copy.id;
+        continue;
+      }
+      failure = error;
+      break;
+    }
+  }
+
+  // Whether this list had nothing unsent before the merge — what the last
+  // copy from here held, or what an earlier merge made of it. Only then may
+  // the merged list wait (mergeOnly): an account added here a moment ago must
+  // go out now, merge or no merge.
+  let nothingUnsent = false;
+  if (read.length > 0) {
+    try {
+      const before = await macOf(await snapshot(), keys.mac);
+      nothingUnsent = before === (await readUploadState()).mac || before === state.mergedMac;
+    } catch {
+      nothingUnsent = false;
+    }
+  }
+  const result = read.length > 0 ? await applyCloudMerge(read, { since: await syncSince() }) : { added: 0, updated: 0, removed: 0 };
+  // Devices whose copies are gone from the server are forgotten with them.
+  for (const device of Object.keys(seen)) if (!newest.has(device)) delete seen[device];
+
+  const changed = result.added + result.updated + result.removed > 0;
+  const patch: Partial<SyncState> = {};
+  if (JSON.stringify(seen) !== JSON.stringify(state.seen)) patch.seen = seen;
+  if (changed) {
+    try {
+      patch.mergedMac = nothingUnsent ? await macOf(await snapshot(), keys.mac) : null;
+    } catch {
+      patch.mergedMac = null;
+    }
+  }
+  if (failure === null) {
+    const now = Date.now();
+    if (changed || patch.seen || state.failedAt !== null || state.pulledAt === null || Math.abs(now - state.pulledAt) > PULLED_AT_REFRESH_MS) {
+      patch.pulledAt = now;
+      patch.failedAt = null;
+    }
+  }
+  if (Object.keys(patch).length > 0) await updateSyncState(patch);
+  if (failure !== null) throw failure;
+  return { ...result, unreadable };
+}
+
+export type SyncOutcome = 'merged' | 'unchanged' | 'skipped' | 'failed';
+
+let active = 0;
+const listeners = new Set<() => void>();
+function setActive(delta: number): void {
+  active += delta;
+  for (const listener of listeners) listener();
+}
+
+/** Told when a sync starts or ends in this page — the header's spinner. */
+export function onCloudSyncActivity(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+const pageHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+
+/**
+ * Reads the other devices' newest copies and folds in what changed. Called on
+ * opening the list and on coming back to a window; at most once a minute from
+ * one browser unless `force` or the last read failed. Never throws.
+ */
+export async function syncWithCloud(options: { force?: boolean } = {}): Promise<SyncOutcome> {
+  try {
+    if (!(await cloudBackupEntitlement())) {
+      await endSyncEpoch();
+      return 'skipped';
+    }
+    const code = await readCode();
+    if (code.kind !== 'ready') return 'skipped';
+    // Before anything else: a deletion made from here on is one to send, even
+    // if no copy goes out until after it.
+    await syncSince();
+    if (!options.force) {
+      const state = await readSyncState();
+      const failedLast = state.failedAt !== null && (state.pulledAt === null || state.failedAt > state.pulledAt);
+      const attempt = await readAttempt();
+      if (!failedLast && attempt !== null && (ageOf(attempt) ?? Infinity) < SYNC_EVERY_MS) return 'skipped';
+    }
+  } catch (error) {
+    console.warn('cloud sync: could not check', error);
+    return 'failed';
+  }
+
+  setActive(1);
+  try {
+    return await ifLockAvailable(async (): Promise<SyncOutcome> => {
+      await writeAttempt(Date.now());
+      const code = await readCode();
+      if (code.kind !== 'ready') return 'skipped';
+      const keys = await deriveBackupKeys(code.code);
+      const { kid, copies } = await listCloudBackups();
+      // Turned off or started over in another browser: as an upload refused.
+      if (kid !== keys.kid) {
+        await forgetRefusedCode(keys.kid, { needsCode: kid !== null });
+        return 'skipped';
+      }
+      const merged = await mergeOtherDevices(keys, copies, { onlyNew: true });
+      return merged.added + merged.updated + merged.removed > 0 ? 'merged' : 'unchanged';
+    }, 'skipped');
+  } catch (error) {
+    if (error instanceof VaultLockedError) return 'skipped';
+    console.warn('cloud sync failed', error);
+    // A request cut off because the app went to the background (iOS does that
+    // the moment someone switches to Safari to paste a code) is not a failure
+    // to show: the next return to the window tries again.
+    if (!pageHidden()) await updateSyncState({ failedAt: Date.now() }).catch(() => {});
+    return 'failed';
+  } finally {
+    setActive(-1);
+  }
+}
+
+export type CloudSyncStatus =
+  /** Cloud backup is not on here — nothing to show. */
+  | { state: 'off' }
+  | { state: 'syncing' }
+  /** `at`: the last time this device and the cloud agreed, null before the first. */
+  | { state: 'ok'; at: number | null }
+  /** The last upload or read failed, or the code has to be typed again. */
+  | { state: 'error' };
+
+/** Storage keys whose change can change the status. */
+export const CLOUD_SYNC_STATUS_KEYS: readonly string[] = [STATE_KEY, SYNC_KEY, CLOUD_BACKUP_CODE_KEY, BILLING_KEYS.entitlement];
+
+export async function readCloudSyncStatus(): Promise<CloudSyncStatus> {
+  try {
+    if (!(await cloudBackupEntitlement())) return { state: 'off' };
+    const sync = await readSyncState();
+    const code = await readCode();
+    if (code.kind === 'unreadable') return { state: 'error' };
+    if (code.kind === 'none' && sync.needsCode) return { state: 'error' };
+    if (code.kind !== 'ready') return { state: 'off' };
+    if (active > 0) return { state: 'syncing' };
+    const up = await readUploadState();
+    const failed = (at: number | null, failedAt: number | null) => failedAt !== null && (at === null || failedAt > at);
+    if (failed(up.at, up.failedAt) || failed(sync.pulledAt, sync.failedAt)) return { state: 'error' };
+    const times = [up.at, sync.pulledAt].filter((t): t is number => t !== null);
+    return { state: 'ok', at: times.length > 0 ? Math.max(...times) : null };
+  } catch {
+    return { state: 'off' };
+  }
 }

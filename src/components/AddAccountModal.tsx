@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useId } from 'react';
-import { Upload, Monitor, Loader2, Camera, ChevronDown, KeyRound, Smartphone } from 'lucide-react';
+import { Upload, Monitor, Loader2, Camera, ChevronDown, KeyRound, Smartphone, Globe, Clock } from 'lucide-react';
+import { QR_ANSWER_ROW, QrAnswerFold } from './QrAnswerRow';
 import type { Account } from '@/types';
 import { validateSecret, cleanSecret, secretProblem } from '@/utils/totp';
 import { parseQRCode, parseOTPAuthURL, generateRandomColor, qrFailureKey, UnsupportedOTPTypeError } from '@/utils/qr-parser';
@@ -43,6 +44,12 @@ interface AddAccountModalProps {
    */
   scanScreen?: boolean;
   /**
+   * Whether this tab can be scanned at all (pageWorthScanning). On the welcome
+   * page or a chrome:// page the button could only fail, and it did for about 5
+   * in 100 new installs: where to go instead takes its place.
+   */
+  canScanPage?: boolean;
+  /**
    * The import and the paste box from Settings. Someone with accounts already
    * here who decides to bring the rest over from Proton, 2FAS or Aegis presses
    * "+" and found only a QR code and a form: the whole-file ways in were a
@@ -56,7 +63,7 @@ interface AddAccountModalProps {
 const FIELD =
   'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-all placeholder-gray-400 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 dark:border-dark-600 dark:bg-dark-900 dark:text-gray-100 dark:placeholder-gray-500';
 
-export function AddAccountModal({ onClose, onAdd, language, groups = [], defaultGroup = '', initialTab = 'qr', scanScreen = false, onImport, onPasteLinks }: AddAccountModalProps) {
+export function AddAccountModal({ onClose, onAdd, language, groups = [], defaultGroup = '', initialTab = 'qr', scanScreen = false, canScanPage = true, onImport, onPasteLinks }: AddAccountModalProps) {
   const t = createT(language);
   const ids = useId();
   const [tab, setTab] = useState<'manual' | 'qr'>(initialTab);
@@ -94,11 +101,12 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
   /**
    * The screen scan found no code, or could not read the page. Most who get
    * here pressed "Scan QR on this page" on the first-run screen over a page
-   * with no code on it (1.15.1, 22–26 Oct 2026: 1,182 of 1,602), and only one
-   * in five went on to add an account: the error said to open the right page,
-   * and the ways in that do not need one sat above it, unnoticed. The two
-   * commonest answers — the code is on a phone, or there is a key instead of
-   * a code — are offered right under the error.
+   * with no code on it (1.15.1, 22–26 Oct 2026: 1,182 of 1,602). About 70 % of
+   * new installs do go on to add an account (by client_ts: the "one in five"
+   * once written here compared arrival times, and events arrive in batches),
+   * many only after pressing the same button again. So the error names the
+   * miss and the answers say what to do, including the two a beginner needs:
+   * the code is on a site, or there is no code yet.
    */
   const [missed, setMissed] = useState(false);
 
@@ -812,18 +820,25 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                 {t('addAccount.scanWithCamera')}
               </button>
 
-              <button
-                onClick={handleScanFromScreen}
-                disabled={scanning || busyReading}
-                className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 hover:bg-gray-50 dark:hover:bg-dark-600 text-gray-700 dark:text-gray-200 font-medium text-sm transition-all disabled:opacity-50"
-              >
-                {scanning ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : (
-                  <Monitor size={16} />
-                )}
-                {t('addAccount.scanFromScreen')}
-              </button>
+              {canScanPage ? (
+                <button
+                  onClick={handleScanFromScreen}
+                  disabled={scanning || busyReading}
+                  className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 hover:bg-gray-50 dark:hover:bg-dark-600 text-gray-700 dark:text-gray-200 font-medium text-sm transition-all disabled:opacity-50"
+                >
+                  {scanning ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Monitor size={16} />
+                  )}
+                  {t('addAccount.scanFromScreen')}
+                </button>
+              ) : (
+                <p className="flex gap-2 px-1 text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+                  <Monitor size={16} className="shrink-0" />
+                  {t('addAccount.scanPageHint')}
+                </p>
+              )}
 
               {/* Info */}
               <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-2">
@@ -842,22 +857,31 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                   {missed && (
                     <>
                       <p className="pt-1 text-xs font-medium text-gray-600 dark:text-gray-300">{t('addAccount.missWhere')}</p>
-                      <button
-                        onClick={() => openCameraPage('miss_camera')}
-                        className="w-full flex items-center gap-2 py-2 px-3 rounded-lg border border-accent-600 bg-white dark:border-accent-400 dark:bg-dark-700 hover:bg-blue-50 dark:hover:bg-dark-600 text-accent-600 dark:text-accent-400 font-medium text-sm text-start transition-colors"
-                      >
+                      <QrAnswerFold
+                        icon={Globe}
+                        label={t('addAccount.missSite')}
+                        how={t('addAccount.missSiteHow')}
+                        onOpen={() => void reportAddStep('qr', 'miss_site')}
+                      />
+                      <button onClick={() => openCameraPage('miss_camera')} className={QR_ANSWER_ROW}>
                         <Smartphone size={16} className="shrink-0" />
                         {t('addAccount.missPhone')}
                       </button>
+                      <QrAnswerFold
+                        icon={Clock}
+                        label={t('addAccount.missNone')}
+                        how={t('addAccount.missNoneHow')}
+                        onOpen={() => void reportAddStep('qr', 'miss_none')}
+                      />
                       <button
                         onClick={() => {
                           void reportAddStep('qr', 'miss_key');
                           handleTabChange('manual');
                         }}
-                        className="w-full flex items-center gap-2 py-2 px-3 rounded-lg border border-gray-300 dark:border-dark-500 bg-white dark:bg-dark-700 hover:bg-gray-50 dark:hover:bg-dark-600 text-gray-700 dark:text-gray-200 font-medium text-sm text-start transition-colors"
+                        className={QR_ANSWER_ROW}
                       >
                         <KeyRound size={16} className="shrink-0" />
-                        {t('onboarding.new.noQr')}
+                        {t('addAccount.missKey')}
                       </button>
                     </>
                   )}

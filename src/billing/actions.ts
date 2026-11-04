@@ -61,7 +61,7 @@ export async function startCheckout(
   }
 
   await chrome.storage.local.set({
-    [BILLING_KEYS.pendingCheckout]: { id: result.checkout_id, at: Date.now(), plan },
+    [BILLING_KEYS.pendingCheckout]: { id: result.checkout_id, at: Date.now(), plan, url: result.url },
   });
   await track('checkout_open', { plan, trigger });
   await options.beforeOpen?.();

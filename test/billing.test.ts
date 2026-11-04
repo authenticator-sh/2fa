@@ -624,6 +624,22 @@ export async function run(): Promise<void> {
     check('control characters become spaces', read({ lang: 'en', title: 'a\nb', body: 'c' })?.title === 'a b');
   }
 
+  scenario('The paywall words from the server are used only when complete, plain and short');
+  {
+    const part = (title: string) => ({ title, body: 'Body.', points: [{ icon: 'refresh', text: 'Updates itself' }, { icon: 'laptop', text: 'Restore it' }, { icon: 'lock', text: 'Private' }] });
+    const good = { lang: 'en', limit: part('Limit title'), backup: part('Backup title'), social: '4.8 · 200,000+ users', legal: 'Secure payment by Stripe · Cancel anytime' };
+    const read = (content: unknown) => state.readPolicyPayload(policyPayload('11111111-1111-4111-8111-111111111111', 5, { paywall: { ...policyPayload('x', 5).paywall, content } }))?.paywall.content;
+    const ok = read(good);
+    check('complete words are kept', ok?.backup.title === 'Backup title' && ok.limit.points.length === 3 && ok.social === '4.8 · 200,000+ users' && ok.legal.startsWith('Secure'));
+    check('a policy without words has none (the paywall says it is unavailable)', read(undefined) === null);
+    check('a missing backup part drops them all', read({ ...good, backup: undefined }) === null);
+    check('a missing payment line drops them all', read({ ...good, legal: '' }) === null);
+    check('no rating line is just no line', read({ ...good, social: undefined })?.social === null);
+    check('a mark this build cannot draw drops that point only', read({ ...good, limit: { ...part('L'), points: [{ icon: 'rocket', text: 'x' }, { icon: 'lock', text: 'y' }] } })?.limit.points.length === 1);
+    check('more than three points are cut to three', read({ ...good, limit: { ...part('L'), points: Array(5).fill({ icon: 'lock', text: 'y' }) } })?.limit.points.length === 3);
+    check('an overlong title drops them all', read({ ...good, limit: part('x'.repeat(81)) }) === null);
+  }
+
   scenario('The server banner: parsed safely, shown in its place and language, closed one id at a time');
   {
     const banner = await import('@/billing/banner');
@@ -1083,26 +1099,17 @@ export async function run(): Promise<void> {
     }
   }
 
-  // The server picks a copy variant by name, but the words ship with the build:
-  // a variant missing from a language would show that reader a blank heading.
-  scenario('Every paywall copy variant is written in every language');
+  // The words are the server's (policy.paywall.content): none may linger in
+  // the build, where they would drift from what the server says.
+  scenario('The paywall content keys are gone from every locale');
   {
-    const { BACKUP_COPY, COPY } = await import('@/components/Paywall');
     const { languages } = await import('@/utils/i18n');
-    const en = (await import('@/utils/locales/en')).default as unknown as Record<string, string>;
-    const keys = [...Object.values(COPY), BACKUP_COPY].flatMap(({ title, body }) => [title, body]);
-    check('the variants the server tests are all here', ['default', 'support', 'private', 'everything'].every((name) => name in COPY));
-
-    const missing: string[] = [];
-    const untranslated: string[] = [];
+    const gone = ['paywall.default.title', 'paywall.backup.body', 'paywall.benefitUnlimited', 'paywall.backupAuto', 'paywall.legal'];
+    const left: string[] = [];
     for (const { code } of languages) {
       const table = (await import(`../src/utils/locales/${code}.ts`)).default as Record<string, string>;
-      for (const key of keys) {
-        if (!table[key]?.trim()) missing.push(`${code} ${key}`);
-        else if (code !== 'en' && table[key] === en[key]) untranslated.push(`${code} ${key}`);
-      }
+      for (const key of gone) if (key in table) left.push(`${code} ${key}`);
     }
-    check('every title and body exists in every locale', missing.length === 0, missing.join(', '));
-    check('and none is left in English', untranslated.length === 0, untranslated.join(', '));
+    check('no paywall words ship with the extension', left.length === 0, left.join(', '));
   }
 }

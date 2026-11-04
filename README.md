@@ -16,8 +16,7 @@
 [How it works](https://authenticator.sh/how-it-works) ·
 [Security](https://authenticator.sh/security) ·
 [Privacy](https://authenticator.sh/privacy) ·
-[FAQ](https://authenticator.sh/faq) ·
-[Feature requests](https://authenticator.featurebase.app)
+[FAQ](https://authenticator.sh/faq)
 
 <img src=".github/assets/screenshot.png" alt="The extension's popup: a searchable list of accounts, each with its current code and the seconds left on it" width="440">
 
@@ -29,7 +28,11 @@ A privacy-focused TOTP authenticator for Chrome. Your secrets, account names and
 
 - TOTP code generation (SHA-1, SHA-256, SHA-512; 6 to 10 digits, 7 included — it is issued in the wild). Counter-based HOTP is deliberately refused rather than stored as TOTP, which would look healthy and never once be valid.
 - QR code import from image upload, the visible tab, or a camera
-- Right-click a code field on any site to insert the code for it, without opening the popup (see [Inserting a code into a page](#inserting-a-code-into-a-page))
+- Right-click a code field on any site to insert the code for it, or anywhere else on the page to copy it, without opening the popup (see [Inserting a code into a page](#inserting-a-code-into-a-page))
+- **Websites for an account** — tie an account to the sites it is for (Edit
+  Account → Websites, or right-click it → Use on this site). There it is
+  pinned first and filled without asking; each subdomain can have an account
+  of its own (see [Which account a site gets](#which-account-a-site-gets))
 - **Optional password protection** — AES-256-GCM encryption of every account
   record and backup, with a recovery code so a forgotten password is not a
   dead end (see [Password protection](#password-protection))
@@ -66,7 +69,7 @@ The extension requests the **minimum permissions** required for its functionalit
 |--------------|---------------------------------------------------------------------------------|
 | `storage`    | Store accounts and settings in `chrome.storage` (local, session and optional sync) |
 | `activeTab`  | Read the current tab's hostname to highlight the matching account, capture the tab for QR scanning, and — only when you pick the right-click item — insert a code into that tab |
-| `contextMenus` | Add the single "Insert 2FA code" item to the right-click menu on text fields |
+| `contextMenus` | Add "Insert 2FA code" to the right-click menu on text fields, and "Copy 2FA code for this site" everywhere else on a page |
 | `scripting`  | Run the insert routine in the tab, for that one invocation, under the `activeTab` grant the click provides |
 | `sidePanel`  | Open the app in Chrome's side panel, when you pick that in Settings → Open as. It grants the extension nothing about the browser or its tabs: it is what lets an extension page be docked beside them |
 
@@ -89,8 +92,10 @@ right-click menu.
 
 ### Inserting a code into a page
 
-Right-clicking a text field offers one item, "Insert 2FA code" — removable in
-Settings. The same action has a keyboard shortcut, `Ctrl+Shift+Y`
+Right-clicking a text field offers one item, "Insert 2FA code"; right-clicking
+anywhere else on a page offers "Copy 2FA code for this site", which puts the
+same code on the clipboard and never types it into a field. Both are removable
+in Settings. The same action has a keyboard shortcut, `Ctrl+Shift+Y`
 (`⌘⇧Y` on macOS), which can be changed or cleared at
 `chrome://extensions/shortcuts`. Choosing either is what grants `activeTab`: for
 that one invocation, in that one tab, the extension may put the code for the
@@ -98,7 +103,24 @@ site into the field you clicked. The grant ends with the invocation, nothing is
 left behind in the page, and no code of ours runs there again until you ask
 again.
 
-Which account is chosen is deliberately conservative. An account you have
+### Which account a site gets
+
+An account can carry websites, set by hand: Edit Account → Websites, or
+right-click the account with the page open → **Use on** *that site*. They are
+stored as hostnames, `www.` dropped, inside the account record — so password
+protection encrypts them, and exports and cloud backup carry them. A website
+covers itself and its subdomains, and the most specific one wins: with
+`main.com` on one account and `sub1.main.com` on another, sub1.main.com gets
+only the second, and main.com or sub2.main.com only the first. An account with
+websites is never guessed for any other site.
+
+Websites outrank everything below, and they count even with suggestions
+switched off — that setting is about what is learned and guessed, and a site
+you typed in is neither. One account on the site is inserted without asking;
+several are all pinned at the top of the popup, and inserting picks the one
+you used there before, or asks.
+
+Without websites, which account is chosen is deliberately conservative. An account you have
 already used *on that site* wins — inserted into a field there, or picked when
 this asked you which account the site wanted. Failing that, the site's name has
 to match exactly one account. Anything less certain — several plausible
@@ -417,7 +439,6 @@ The extension never sends your secrets, account names, issuers, codes or the sit
 | `https://chromewebstore.google.com/.../reviews` | User takes the rating prompt | Opens the Web Store review form |
 | `https://www.authenticator.sh/support`      | User clicks "Help & support"  | Opens the support page         |
 | `https://www.authenticator.sh/faq` (or `/<lang>/faq`) | User clicks the help icon, or "How do I fix this?" on the clock warning | Opens the answers, in the popup's language |
-| `https://authenticator.featurebase.app`     | User clicks "Request a feature" | Opens the public feature board |
 | `https://chromewebstore.google.com/detail/password-manager/...` | User clicks the cross-promo banner | Opens our other extension's listing |
 | `https://time.akamai.com/?iso`              | Popup open (optional, cached) | Clock drift detection for TOTP |
 | `https://timeapi.io/api/time/current/zone?timeZone=UTC` | Popup open (optional, cached) | Clock drift detection for TOTP |
@@ -502,7 +523,19 @@ check-in sends only their number).
   copy arrives the server keeps the 20 newest, the newest of each hour of the
   last day, the newest of each day for 30 days, and the newest from each of
   the 10 most recently active browsers, and deletes the rest.
-- Restoring only adds accounts that are missing, like the automatic copies. On
+- **Sync between devices** (from 1.16.0). Each browser also reads the newest
+  copy of every other browser on the license — when the list opens, when you
+  come back to its window, and every few minutes while it stays open, never
+  more than once a minute — and folds in what changed
+  (`src/utils/cloud-merge.ts`): the newer edit of an account wins, a deletion
+  removes an account only if it was not edited after it, and an account
+  missing from another browser's copy is never removed for that. Deletions
+  travel inside the encrypted copy, as hashes of the deleted keys with their
+  time. To tell the browsers apart the server labels each copy in that list
+  with a tag (a hash of the license and the installation that sent it), and so
+  it sees when a browser with cloud backup on asks for the list — not what
+  any copy holds.
+- Restoring by hand only adds accounts that are missing, like the automatic copies. On
   another computer: activate the license key, then enter the backup recovery
   code. After Pro has ended: **Restore from cloud backup with your license
   key** finds the copies with the key; the backup recovery code opens them.

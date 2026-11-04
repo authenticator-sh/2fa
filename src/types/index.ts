@@ -13,6 +13,18 @@ export interface Account {
   digits: number;
   period: number;
   createdAt: number;
+  /**
+   * When this account was last changed on any device — added, renamed, moved,
+   * pinned — as stampNow on the device that changed it. What cloud sync
+   * compares (billing/cloud-merge.ts): the newer edit of one seed wins, and a
+   * deletion wins over an edit older than itself. Absent on records written
+   * before sync, which then count from `createdAt`.
+   *
+   * Set in one place, mutateAccounts in storage.ts, for every record a change
+   * adds or alters; never by the screens. Reordering the list leaves it alone:
+   * the order is this device's own.
+   */
+  updatedAt?: number;
   color?: string;
   /**
    * Optional group name, free text, one per account.
@@ -32,6 +44,14 @@ export interface Account {
   groupRank?: number;
   /** Kept at the top of the list, whatever the sort. */
   pinned?: boolean;
+  /**
+   * Websites the user tied this account to, as hostnames (`example.com`,
+   * `sub.example.com`), www. dropped. Outranks every guess about which account
+   * a page wants; see utils/account-sites.ts for how they match. Absent means
+   * none, which is every account until someone sets one. Inside the vault's
+   * ciphertext like everything else but `id` and `fp`.
+   */
+  sites?: string[];
   /**
    * Which code the secret produces. Absent means RFC 6238 TOTP, which is every
    * record written before Steam Guard support and still nearly all of them.

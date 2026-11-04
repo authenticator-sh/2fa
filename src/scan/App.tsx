@@ -11,7 +11,8 @@
 // and "activeTab".
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CameraOff, Check, Loader2, Lock, Upload, Video } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CameraOff, Check, Globe, KeyRound, Loader2, Lock, Smartphone, Upload, Video } from 'lucide-react';
+import { QR_ANSWER_ROW, QrAnswerFold } from '@/components/QrAnswerRow';
 import { BlockedGuide, PromptMock } from '@/components/CameraHelp';
 import { cameraPermissionState, classifyDenial, type DenialKind } from '@/utils/camera-denial';
 import type jsQRType from 'jsqr';
@@ -68,13 +69,26 @@ type Status =
   // is translated when the card is drawn, in the language of that render.
   | { kind: 'error'; body: TranslationKey; title?: TranslationKey };
 
-export default function App() {
+/**
+ * The scanner drawn inside another window instead of as its own tab — the Mac
+ * app (desktop/), whose camera this is. There is no browser around it: "Done"
+ * and the back arrow close it, the camera question is the system's own (so no
+ * picture of Chrome's), and any refusal is the system's.
+ */
+export interface EmbeddedScanner {
+  mode?: 'image';
+  onClose: () => void;
+}
+
+export default function App({ embedded }: { embedded?: EmbeddedScanner }) {
   const [language, setLanguage] = useState<Language>('en');
   const [darkMode, setDarkMode] = useState(() => cachedAppearance().dark);
   const [uiStyle, setUiStyle] = useState(() => cachedAppearance().style);
   /** Read once: the address does not change under the page. */
   const imageModeRef = useRef(
-    typeof location !== 'undefined' && new URLSearchParams(location.search).get('mode') === 'image'
+    embedded
+      ? embedded.mode === 'image'
+      : typeof location !== 'undefined' && new URLSearchParams(location.search).get('mode') === 'image'
   );
   const [status, setStatus] = useState<Status>(() =>
     imageModeRef.current ? { kind: 'image' } : { kind: 'starting' }
@@ -130,7 +144,12 @@ export default function App() {
       if (lastStatus.current !== 'added') void reportAddCancel('camera', lastStatus.current);
     };
     window.addEventListener('pagehide', leaving);
-    return () => window.removeEventListener('pagehide', leaving);
+    return () => {
+      window.removeEventListener('pagehide', leaving);
+      // Embedded, closing the scanner is the leaving: the window stays.
+      if (embedded) leaving();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   /**
    * Every video input, listed once a grant makes the labels readable. An empty
@@ -432,7 +451,10 @@ export default function App() {
           setStatus({ kind: 'noCamera' });
         } else if (name === 'NotAllowedError' || name === 'SecurityError') {
           const message = error instanceof DOMException ? error.message : '';
-          setStatus({ kind: 'denied', how: classifyDenial(name, message, await cameraPermissionState()) });
+          setStatus({
+            kind: 'denied',
+            how: embedded ? 'system' : classifyDenial(name, message, await cameraPermissionState()),
+          });
         } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
           setStatus({ kind: 'noCamera' });
         } else if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') {
@@ -739,6 +761,16 @@ export default function App() {
       <div className="min-h-screen bg-gray-50 dark:bg-dark-900 flex flex-col items-center px-6 py-10">
         <div className="w-full max-w-md">
           <div className="flex items-center gap-2 mb-6">
+            {embedded && (
+              <button
+                type="button"
+                onClick={embedded.onClose}
+                aria-label={t('common.back')}
+                className="-ms-2 rounded-lg p-1.5 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+              >
+                <ArrowLeft size={20} className="rtl:rotate-180" />
+              </button>
+            )}
             <Logo size={28} />
             <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">{t('scan.title')}</h1>
           </div>
@@ -807,7 +839,7 @@ export default function App() {
                   {moreCodes ? t('scan.scanNext') : t('scan.scanAnother')}
                 </button>
                 <button
-                  onClick={() => window.close()}
+                  onClick={() => (embedded ? embedded.onClose() : window.close())}
                   className={`flex-1 font-medium text-sm py-2.5 rounded-lg transition-colors ${
                     moreCodes
                       ? 'border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700'
@@ -851,6 +883,37 @@ export default function App() {
               {status.kind === 'denied' && status.how === 'dismissed' && (
                 <div className="mb-4">
                   <PromptMock allow={t('scan.allowLabel')} />
+                </div>
+              )}
+              {/* A computer with no camera is not stuck: whether it matters
+                  depends on where the code is, which this page cannot know. Not
+                  in the Mac app, which has no icon to click or popup to open. */}
+              {status.kind === 'noCamera' && !embedded && (
+                <div className="mb-4 space-y-2 text-start">
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-300">{t('addAccount.missWhere')}</p>
+                  <QrAnswerFold
+                    icon={Globe}
+                    label={t('addAccount.missSite')}
+                    how={t('addAccount.missSiteHow')}
+                    onOpen={() => void reportAddStep('camera', 'miss_site')}
+                  />
+                  <QrAnswerFold
+                    icon={Smartphone}
+                    label={t('scan.noCameraPhone')}
+                    how={t('scan.noCameraPhoneHow')}
+                    onOpen={() => void reportAddStep('camera', 'miss_phone')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void reportAddStep('camera', 'miss_key');
+                      location.assign(chrome.runtime.getURL('popup.html?add=manual'));
+                    }}
+                    className={QR_ANSWER_ROW}
+                  >
+                    <KeyRound size={16} className="shrink-0" />
+                    {t('addAccount.missKey')}
+                  </button>
                 </div>
               )}
               {/* A retry cannot work until something outside this page changes
@@ -937,7 +1000,7 @@ export default function App() {
               {/* Plain text on purpose: with an icon in front it read as a
                   third button — same layout as the two real ones below it —
                   and it did nothing when clicked. */}
-              {status.kind === 'starting' && slowStart && (
+              {status.kind === 'starting' && slowStart && !embedded && (
                 <div className="mt-4">
                   <PromptMock allow={t('scan.allowLabel')} />
                 </div>

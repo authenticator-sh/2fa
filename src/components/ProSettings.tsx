@@ -4,10 +4,10 @@ import { SettingRow, SettingsSection, settingsButton, settingsInput, settingsWel
 import { createT, type Language } from '@/utils/i18n';
 import { confirmDialog, toast } from '@/utils/ui-feedback';
 import { activateLicenseKey, deactivateLicense, openBillingPortal } from '@/billing/actions';
-import { openPaywall } from '@/billing/bridge';
+import { getStoreRestore, openPaywall } from '@/billing/bridge';
 import { track } from '@/billing/events';
 import { readEntitlement, readInstall, readPolicy } from '@/billing/state';
-import { hasPendingCheckout, syncBilling } from '@/billing/sync';
+import { hasPendingCheckout, pendingCheckoutUrl, syncBilling } from '@/billing/sync';
 import type { Entitlement, Policy } from '@/billing/types';
 import { billingErrorMessage } from '@/billing/messages';
 
@@ -19,21 +19,22 @@ interface ProState {
   policy: Policy | null;
   entitlement: Entitlement | null;
   pending: boolean;
+  checkoutUrl: string | null;
 }
 
 const PENDING_LINE_MS = 2 * 3_600_000;
 
 async function readState(): Promise<ProState> {
   const install = await readInstall();
-  if (!install) return { policy: null, entitlement: null, pending: false };
-  const [policy, entitlement, pending] = await Promise.all([
+  if (!install) return { policy: null, entitlement: null, pending: false, checkoutUrl: null };
+  const [policy, entitlement, pending, checkoutUrl] = await Promise.all([
     readPolicy(install.id),
     readEntitlement(install.id),
-    // Opening checkout is not buying: after a couple of hours an abandoned tab
-    // is the likelier story, and "confirming your purchase" would be untrue.
+    // After a couple of hours an abandoned tab is the likelier story.
     hasPendingCheckout(Date.now(), PENDING_LINE_MS),
+    pendingCheckoutUrl(Date.now(), PENDING_LINE_MS),
   ]);
-  return { policy, entitlement, pending };
+  return { policy, entitlement, pending, checkoutUrl };
 }
 
 /**
@@ -46,7 +47,7 @@ async function readState(): Promise<ProState> {
 export function ProSettings({ language }: ProSettingsProps) {
   const t = createT(language);
   const [state, setState] = useState<ProState | null>(null);
-  const [busy, setBusy] = useState<'key' | 'portal' | 'remove' | 'check' | null>(null);
+  const [busy, setBusy] = useState<'key' | 'portal' | 'remove' | 'check' | 'restore' | null>(null);
   const [showKey, setShowKey] = useState(false);
   const [key, setKey] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +78,7 @@ export function ProSettings({ language }: ProSettingsProps) {
 
   if (!state || !visible) return null;
 
-  const { policy, entitlement, pending } = state;
+  const { policy, entitlement, pending, checkoutUrl } = state;
   const dateText = (ms: number | null) =>
     ms ? new Intl.DateTimeFormat(language, { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(ms)) : '';
 
@@ -107,6 +108,8 @@ export function ProSettings({ language }: ProSettingsProps) {
   };
 
   const unlimitedFree = !entitlement && (!policy || policy.free_limit === null);
+  // The Mac App Store edition's way back to a purchase; the key is in its paywall.
+  const storeRestore = getStoreRestore();
 
   const failure = error && (
     <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">
@@ -177,10 +180,21 @@ export function ProSettings({ language }: ProSettingsProps) {
   return (
     <SettingsSection title={t('pro.title')}>
       <SettingRow label={status} hint={unlimitedFree ? t('pro.supportHint') : undefined}>
+        {/* Opening Checkout is not paying, and closing its tab tells us nothing,
+            so no word on the payment ("waiting for it to be confirmed" read as
+            wrong to someone who had just closed it): the way back to Checkout,
+            and a check for whoever did pay. */}
         {pending && (
-          <div className="mt-2 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-            <Loader2 size={14} className="animate-spin" aria-hidden />
-            <span>{t('pro.pending')}</span>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+            {checkoutUrl && (
+              <button
+                type="button"
+                onClick={() => void chrome.tabs.create({ url: checkoutUrl })}
+                className={settingsButton.link}
+              >
+                {t('pro.openCheckout')}
+              </button>
+            )}
             <button
               type="button"
               disabled={busy !== null}
@@ -200,15 +214,27 @@ export function ProSettings({ language }: ProSettingsProps) {
           >
             {unlimitedFree ? t('pro.support') : t('pro.get')}
           </button>
-          <button
-            type="button"
-            onClick={() => setShowKey(!showKey)}
-            aria-expanded={showKey}
-            className={settingsButton.secondary}
-          >
-            <KeyRound size={13} aria-hidden />
-            {t('paywall.haveKey')}
-          </button>
+          {storeRestore ? (
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void run('restore', storeRestore.run)}
+              className={settingsButton.secondary}
+            >
+              {busy === 'restore' && <Loader2 size={13} className="animate-spin" aria-hidden />}
+              {storeRestore.label()}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowKey(!showKey)}
+              aria-expanded={showKey}
+              className={settingsButton.secondary}
+            >
+              <KeyRound size={13} aria-hidden />
+              {t('paywall.haveKey')}
+            </button>
+          )}
         </div>
 
         {showKey && (

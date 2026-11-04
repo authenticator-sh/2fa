@@ -56,6 +56,12 @@ export interface QuickFillPageArgs {
    * have copied it.
    */
   clipboard?: boolean;
+  /**
+   * False for "Copy code for this site": the code goes to the clipboard even
+   * when the caret happens to be in a field — the user asked for a copy, and
+   * a code typed into whatever input last had focus is a surprise at best.
+   */
+  fill?: boolean;
   // Toast copy, already translated — the page has no access to our locales.
   /** Shown when the code went to the clipboard instead of into the field. */
   copiedText: string;
@@ -448,10 +454,11 @@ export async function quickFillInPage(args: QuickFillPageArgs): Promise<QuickFil
     return 'shown';
   }
 
-  const focused = focusedElement();
-  const target = isFillable(focused) ? (focused as HTMLElement) : args.mayGuess ? guessTarget() : null;
-
-  if (target && (await fill(target))) return 'filled';
+  if (args.fill !== false) {
+    const focused = focusedElement();
+    const target = isFillable(focused) ? (focused as HTMLElement) : args.mayGuess ? guessTarget() : null;
+    if (target && (await fill(target))) return 'filled';
+  }
 
   if (args.clipboard === false) return 'missed';
 

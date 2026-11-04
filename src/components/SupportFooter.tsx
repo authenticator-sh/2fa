@@ -11,9 +11,6 @@ const SUPPORT_URL = 'https://www.authenticator.sh/support';
  * Sits below the scroll area rather than inside it, so it is reachable from
  * every screen without the user having to scroll a list of codes to find it.
  *
- * Help only. "Request a feature" used to sit beside it and is at the end of
- * Settings now.
- *
  * The row wraps rather than clips: at the 320px popup size a long translation
  * of the label and the language name do not always fit side by side.
  *

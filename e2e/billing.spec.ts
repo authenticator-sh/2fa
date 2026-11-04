@@ -35,6 +35,30 @@ async function sign(payload: Record<string, unknown>): Promise<string> {
   return `${h}.${p}.${b64url(s)}`;
 }
 
+/** The English words the server sends with every policy (server lib/policy/paywall.ts); the extension ships none. */
+const PAYWALL_CONTENT_EN = {
+  lang: 'en',
+  limit: {
+    title: 'Protect every account you sign in to',
+    body: 'Work, email, banking, games — keep every 2FA code in one place, on all your browsers.',
+    points: [
+      { icon: 'infinity', text: 'As many accounts as you need' },
+      { icon: 'lock', text: "We can't see your keys" },
+      { icon: 'cloud', text: 'Encrypted backup in the cloud' },
+    ],
+  },
+  backup: {
+    title: 'Keep your codes, even if you lose this computer',
+    body: 'Pro keeps an encrypted copy of your accounts in the cloud, updated whenever they change. Only you can open it: the key is never sent to us.',
+    points: [
+      { icon: 'refresh', text: 'Updates itself when accounts change' },
+      { icon: 'laptop', text: 'Restore it on a new computer' },
+      { icon: 'lock', text: "We can't see your keys" },
+    ],
+  },
+  legal: 'Secure payment by Stripe · Cancel anytime',
+};
+
 interface MockState {
   freeLimit: number | null;
   /** Prices in dollars that Checkout converts (no exact local price for the install's country). */
@@ -55,6 +79,8 @@ interface MockState {
   backups?: Array<{ id: string; iid: string; kid: string; data: string; at: number }>;
   /** The license's current backup code, as the server keeps it (kid and auth); null = off. */
   backupKey?: { kid: string; auth: string } | null;
+  /** policy.paywall.content.social: the rating line under the paywall title; left out = no line. */
+  social?: string;
   /** policy.banner as the server issues it; left out = a policy from before banners were the server's. */
   banner?: unknown;
   /** policy.notices as the server issues them; left out = none. */
@@ -91,7 +117,7 @@ async function mockBilling(context: BrowserContext, state: MockState): Promise<v
         iat: now(),
         free_limit: state.freeLimit,
         warn_at: state.freeLimit === null ? null : Math.max(0, state.freeLimit - 1),
-        paywall: { copy: 'default', plans: state.noPlans ? [] : ['pro_year', 'pro_life'], default_plan: 'pro_year', trial_days: 0, promo_codes: false },
+        paywall: { copy: 'default', plans: state.noPlans ? [] : ['pro_year', 'pro_life'], default_plan: 'pro_year', trial_days: 0, promo_codes: false, content: { ...PAYWALL_CONTENT_EN, ...(state.social ? { social: state.social } : {}) } },
         prices: state.noPlans
           ? {}
           : {
@@ -540,7 +566,7 @@ test('cloud backup: turning it on asks for the code back, sends a copy we cannot
   await dialog.getByRole('textbox').fill(code.toLowerCase());
   await dialog.getByRole('button', { name: 'Turn on cloud backup' }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByText('On · last copy today')).toBeVisible();
+  await expect(page.getByText('On · synced today')).toBeVisible();
   await expect(page.getByText(/^Today, .+ · this browser$/)).toBeVisible();
 
   // The server got one copy, and nothing in it it could read.
@@ -631,6 +657,47 @@ test('the cloud backup banner over Settings counts its views, opens the backup p
   await expect(banner).toHaveCount(0);
   // The row's own "Turn on" stays.
   await expect(page.getByRole('button', { name: 'Turn on cloud backup' })).toBeVisible();
+});
+
+test('the backup banner with its own paywall words, and the rating line the server sends under the title', async ({ context, extensionId }) => {
+  const state: MockState = {
+    freeLimit: null,
+    licensed: new Set(),
+    syncs: [],
+    social: '4.8 · 200,000+ users',
+    banner: {
+      id: 'backup',
+      action: 'backup',
+      place: 'settings',
+      text: {
+        lang: 'en',
+        eyebrow: 'Cloud backup',
+        title: 'Keep your codes, even if you lose this computer',
+        cta: 'Turn on',
+        paywall_title: "Don't lose access to your accounts",
+        paywall_body: "If this computer breaks, gets lost or Chrome is reinstalled, your codes go with it. We'll keep a copy for you and put them back on any new computer. Only you can open it.",
+      },
+    },
+  };
+  await mockBilling(context, state);
+  const page = await openPage(context, extensionId, 'popup.html');
+  await addAccountByHand(page, 'first@example.com', otherSecret(1));
+  await syncNow(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('region', { name: 'Cloud backup' }).getByRole('button', { name: /Keep your codes/ }).click();
+
+  const paywall = page.getByRole('dialog', { name: "Don't lose access to your accounts" });
+  await expect(paywall).toBeVisible();
+  await expect(paywall.getByText('4.8')).toBeVisible();
+  await expect(paywall.getByText('200,000+ users')).toBeVisible();
+  await expect(paywall.getByText('Secure payment by Stripe · Cancel anytime')).toBeVisible();
+  if (process.env.PAYWALL_SHOTS) {
+    await page.screenshot({ path: `${process.env.PAYWALL_SHOTS}/backup-plain-en.png` });
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.screenshot({ path: `${process.env.PAYWALL_SHOTS}/backup-plain-en-dark.png` });
+    await page.emulateMedia({ colorScheme: 'light' });
+  }
+
 });
 
 test('a server banner over the accounts: in its place, its own paywall, its id through to Checkout; closing it leaves the next one', async ({ context, extensionId, serviceWorker }) => {

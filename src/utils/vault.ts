@@ -36,6 +36,7 @@ import { SESSION_LOCK, withAccountsLock, withLock } from './write-lock';
 
 const VAULT_META_KEY = 'vault_meta';
 const SESSION_KEY = 'vault_session';
+const SESSION_TICK_KEY = 'vault_session_tick';
 const AUTO_LOCK_KEY = 'vault_autolock_minutes';
 const HANDOFF_KEY = 'vault_handoff';
 /** A ceremony is a few seconds of biometrics; two minutes is generous. */
@@ -218,6 +219,10 @@ async function writeSession(state: SessionState | null): Promise<void> {
     } else {
       await chrome.storage.session.remove(SESSION_KEY);
       memoryIsAuthoritative = state !== null;
+      // Removing a key that is not there fires no event, so with auto-lock at 0 a
+      // lock or an unlock from outside the interface (the Mac app's menu and its
+      // Touch ID screen) went unheard. Holds a time, nothing about the key.
+      await chrome.storage.session.set({ [SESSION_TICK_KEY]: Date.now() });
     }
   } catch {
     // Memory fallback already holds the value.
@@ -331,7 +336,7 @@ export function affectsVaultSession(
   changes: Record<string, unknown>
 ): boolean {
   if (areaName !== 'session') return false;
-  if (HANDOFF_KEY in changes) return true;
+  if (HANDOFF_KEY in changes || SESSION_TICK_KEY in changes) return true;
 
   const session = changes[SESSION_KEY] as { oldValue?: SessionState; newValue?: SessionState } | undefined;
   if (!session) return false;

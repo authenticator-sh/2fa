@@ -23,6 +23,7 @@
 //   they cost quota on every device and were never read.
 
 import type { Account } from '@/types';
+import { normalizeSiteList } from './account-sites';
 import {
   clampLabel,
   parseQRCode,
@@ -289,6 +290,8 @@ export function normalizeEntry(entry: unknown, index: number): NormalizedEntry {
     account.groupRank = raw.groupRank;
   }
   if (raw.pinned === true) account.pinned = true;
+  const sites = normalizeSiteList(raw.sites);
+  if (sites.length) account.sites = sites;
 
   return { account };
 }
@@ -360,8 +363,9 @@ function groupNames(list: unknown, idKey: string): Map<string, string> {
 /** Aegis: `{version, header, db: {entries: [{type, name, issuer, info}]}}`. */
 function readAegis(file: Record<string, unknown>): ImportFile {
   // With encryption on, Aegis writes `db` as one Base64 string sealed with a
-  // key derived by scrypt from the user's password. We do not open it: that
-  // would mean asking for the password of another app's vault, in ours.
+  // key derived by scrypt from the user's password. The file import opens it
+  // with that password first (sealed-backups.ts); still sealed here, it came
+  // from a caller that does not ask for one.
   if (typeof file.db === 'string') throw new ImportRejectedError('encrypted', 'Aegis');
   const db = record(file.db);
   const groups = groupNames(db?.groups, 'uuid');
@@ -389,7 +393,8 @@ function readAegis(file: Record<string, unknown>): ImportFile {
 function readTwoFas(file: Record<string, unknown>): ImportFile {
   const services = Array.isArray(file.services) ? file.services : [];
   // A password-protected 2FAS backup leaves `services` empty and puts all of
-  // it, AES-GCM sealed, in `servicesEncrypted`.
+  // it, AES-GCM sealed, in `servicesEncrypted` — opened first by the file
+  // import, as Aegis's is (sealed-backups.ts).
   if (services.length === 0 && text(file.servicesEncrypted)) {
     throw new ImportRejectedError('encrypted', '2FAS');
   }
@@ -419,7 +424,7 @@ function readTwoFas(file: Record<string, unknown>): ImportFile {
  * "Export data without password" on Android and desktop (read from Proton's
  * own exporter, proton-pass-common entry/exporter.rs, 2026-10-26). With a
  * password the file is `{version, salt, content}`: Argon2id and AES-GCM over
- * the same JSON, refused as the other apps' sealed files are.
+ * the same JSON, refused: WebCrypto has no Argon2id (see sealed-backups.ts).
  */
 function isProtonAuthenticator(file: Record<string, unknown>): boolean {
   if (typeof file.version !== 'number') return false;
@@ -625,21 +630,32 @@ function readSteamMaFile(file: Record<string, unknown>): ImportFile {
   };
 }
 
-/** FreeOTP+: `{tokens: [{secret: [signed bytes], issuerExt, label, algo, digits, period, type}]}`. */
+/**
+ * One token as FreeOTP and FreeOTP+ write it, in every one of their formats:
+ * `{secret: [signed bytes], issuerExt, label, algo, digits, period, type}`.
+ *
+ * Neither has a Steam type. A token whose issuer is "Steam" is a Steam Guard
+ * account, as Aegis reads these same files — stored as TOTP it would show six
+ * digits Steam never accepts.
+ */
+export function readFreeOtpToken(item: unknown): unknown {
+  const raw = record(item);
+  if (!raw) return item;
+  const issuer = text(raw.issuerExt) || text(raw.issuerInt);
+  return {
+    type: issuer === 'Steam' && text(raw.type).toLowerCase() === 'totp' ? 'steam' : raw.type,
+    name: raw.label,
+    issuer,
+    secret: signedBytesToBase32(raw.secret),
+    algorithm: raw.algo,
+    digits: raw.digits,
+    period: raw.period,
+  };
+}
+
+/** FreeOTP+: `{tokens: [token, …]}`. */
 function readFreeOtp(file: Record<string, unknown>): ImportFile {
-  const entries = (file.tokens as unknown[]).map(item => {
-    const raw = record(item);
-    if (!raw) return item;
-    return {
-      type: raw.type,
-      name: raw.label,
-      issuer: text(raw.issuerExt) || text(raw.issuerInt),
-      secret: signedBytesToBase32(raw.secret),
-      algorithm: raw.algo,
-      digits: raw.digits,
-      period: raw.period,
-    };
-  });
+  const entries = (file.tokens as unknown[]).map(readFreeOtpToken);
   return { entries, unreadable: 0, unsupported: 0, recognised: true };
 }
 

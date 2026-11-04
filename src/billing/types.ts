@@ -17,6 +17,26 @@ export interface DisplayPrice {
   approx: boolean;
 }
 
+/** The marks a paywall point may stand under; drawn by Paywall.tsx. */
+export type PaywallIcon = 'infinity' | 'lock' | 'cloud' | 'refresh' | 'laptop';
+
+export interface PaywallPart {
+  title: string;
+  body: string;
+  points: { icon: PaywallIcon; text: string }[];
+}
+
+export interface PaywallContent {
+  lang: string;
+  /** Opened by the limit, an import over it, or Pro in Settings. */
+  limit: PaywallPart;
+  /** Opened by cloud backup's "Turn on" or its banner. */
+  backup: PaywallPart;
+  /** "4.8 · 200,000+ users", without the star; null = no line. */
+  social: string | null;
+  legal: string;
+}
+
 export interface Policy {
   pid: string;
   free_limit: number | null;
@@ -32,6 +52,12 @@ export interface Policy {
      * instead of the shipped `copy` when that language is the one on screen.
      */
     text: { lang: string; title: string; body: string } | null;
+    /**
+     * Every word of the paywall above the plans, and the payment line — the
+     * server's, in one interface language (server lib/policy/paywall.ts). The
+     * extension ships none of them; null = the paywall cannot be shown.
+     */
+    content: PaywallContent | null;
   };
   prices: Record<string, DisplayPrice>;
   ui: { pro_in_settings: boolean; import_partial: boolean; import_free: boolean };

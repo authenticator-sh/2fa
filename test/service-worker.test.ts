@@ -210,7 +210,7 @@ async function runMenuSync(): Promise<void> {
     duplicateIds = 0;
     await Promise.all([qf.syncContextMenu(), qf.syncContextMenu()]);
     check('no duplicate id is created', duplicateIds === 0, String(duplicateIds));
-    check('and there is exactly one item', menu.size === 1);
+    check('and there is exactly one of each item', menu.size === 2, String(menu.size));
 
     // The toggle switched off while a sync that had already read "on" was
     // still on its way to create the item.

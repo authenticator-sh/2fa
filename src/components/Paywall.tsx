@@ -8,11 +8,11 @@ import { activateLicenseKey, recoverLicense, startCheckout } from '@/billing/act
 import { BillingApiError } from '@/billing/api';
 import type { PaywallRequest, PaywallResult, PaywallTrigger } from '@/billing/bridge';
 import { track } from '@/billing/events';
-import { formatMoney, formatPrice, monthlyEquivalent, yearlySaving } from '@/billing/format';
+import { formatPrice, monthlyEquivalent, yearlySaving } from '@/billing/format';
 import { billingErrorMessage } from '@/billing/messages';
 import { BILLING_KEYS, readEntitlement, readInstall, readPolicy } from '@/billing/state';
 import { syncBilling, syncFromWorker } from '@/billing/sync';
-import type { DisplayPrice, Policy } from '@/billing/types';
+import type { DisplayPrice, PaywallIcon, Policy } from '@/billing/types';
 
 /**
  * The paywall. It takes the whole screen, like Add account: in a 400px popup
@@ -37,59 +37,17 @@ interface PaywallProps {
   request: PaywallRequest;
 }
 
-/**
- * Copy variants the server may pick; anything else falls back to the default.
- * A new text reaches people only with a release, so every variant the server
- * might test has to ship here first. Exported for the locale check in tests.
- */
-export const COPY: Record<string, { title: TranslationKey; body: TranslationKey }> = {
-  default: { title: 'paywall.default.title', body: 'paywall.default.body' },
-  support: { title: 'paywall.support.title', body: 'paywall.support.body' },
-  private: { title: 'paywall.private.title', body: 'paywall.private.body' },
-  everything: { title: 'paywall.everything.title', body: 'paywall.everything.body' },
-};
-
-/**
- * Opened from cloud backup's "Turn on": the person asked for a backup, not for
- * room — most who see this have no limit at all (installs from before the
- * paywall) — so the server's copy, written about the limit, would answer a
- * question nobody asked. This text wins over it and over custom text.
- */
-export const BACKUP_COPY: { title: TranslationKey; body: TranslationKey } = { title: 'paywall.backup.title', body: 'paywall.backup.body' };
-
 /** Opened to sell the backup: its "Turn on" or the banner over Settings. */
 const isBackupTrigger = (trigger: PaywallTrigger): boolean => trigger === 'backup' || trigger === 'backup_banner';
 
-// What Pro gives, in the buyer's terms (2026-10-04): room for every account,
-// one key across browsers, and an encrypted copy in the cloud. "Codes keep
-// working if Pro ends" was true but read as an invitation to cancel (owner,
-// 2026-10-04).
-//
-// The cloud copy (2026-10-07) took quick fill's place: quick fill was never
-// Pro's own — every plan has it — and the copy is the one thing here that
-// answers "what if I lose this computer". Still three: the columns are 88px.
-//
-// "One key for up to 5 browsers" gave way to "we can't see your keys"
-// (2026-10-08): a seat count reads as a limit at the moment of paying, and a
-// buyer who needs more seats gets them from support. The trust line under the
-// button ("secret keys never leave your browser · open source") went the same
-// day: it repeated this, and with the cloud backup it was no longer true.
-const BENEFITS = [
-  { key: 'paywall.benefitUnlimited', Icon: InfinityIcon },
-  { key: 'paywall.benefitPrivate', Icon: Lock },
-  { key: 'paywall.benefitBackup', Icon: Cloud },
-] as const;
-
-// Opened from the backup, the three say how the copy works instead. Four in
-// five closed that paywall within six seconds (October 2026, 1,080 people),
-// before the prices could have been read: what they had clicked "Turn on" for
-// was never explained past one paragraph, and the row under it listed Pro's
-// other things — room for more accounts nobody had asked about.
-const BACKUP_POINTS = [
-  { key: 'paywall.backupAuto', Icon: RefreshCw },
-  { key: 'paywall.backupRestore', Icon: Laptop },
-  { key: 'paywall.benefitPrivate', Icon: Lock },
-] as const;
+// Every word above the plans, and the payment line, is the server's
+// (policy.paywall.content, 2026-11-03: "the paywall comes wholly from the
+// server"). What the extension keeps is the controls: plans, prices, buttons,
+// errors. The server sends two sets: the limit's, and the backup's — opened
+// from the backup, the three points say how the copy works instead of listing
+// Pro's other things (four in five closed that paywall within six seconds
+// when they did, October 2026). The marks are drawn here, picked by name.
+const ICONS: Record<PaywallIcon, typeof Cloud> = { infinity: InfinityIcon, lock: Lock, cloud: Cloud, refresh: RefreshCw, laptop: Laptop };
 
 type Failure = { at: 'checkout' | 'key' | 'restore'; text: string };
 
@@ -128,12 +86,16 @@ export default function Paywall({ language, request }: PaywallProps) {
     setPolicy('loading');
     const install = await readInstall();
     let current = install ? await readPolicy(install.id) : null;
-    if ((!current || current.paywall.plans.length === 0) && allowSync) {
+    // No words, or words in a language switched away from since the last
+    // check-in (each check-in tells the server the language on screen): ask
+    // once. If the language still differs, the server's words are shown as
+    // they are — there are no others.
+    if ((!current || current.paywall.plans.length === 0 || !current.paywall.content || current.paywall.content.lang !== language) && allowSync) {
       await syncBilling({ force: true });
       const again = await readInstall();
       current = again ? await readPolicy(again.id) : null;
     }
-    setPolicy(current && current.paywall.plans.some(id => current!.prices[id]) ? current : null);
+    setPolicy(current && current.paywall.content && current.paywall.plans.some(id => current!.prices[id]) ? current : null);
   };
 
   useEffect(() => {
@@ -235,15 +197,13 @@ export default function Paywall({ language, request }: PaywallProps) {
   }, []);
 
   const fromBackup = isBackupTrigger(request.trigger);
+  const content = policy && policy !== 'loading' ? policy.paywall.content : null;
+  const part = content ? (fromBackup ? content.backup : content.limit) : null;
   // Words the banner that opened this paywall brought with it: they win over
-  // the backup's and the server's paywall text alike, being about the very
-  // thing the person clicked.
+  // the paywall's own, being about the very thing the person clicked.
   const fromBanner = policy && policy !== 'loading' ? bannerPaywallText(policy) : null;
-  const copy = fromBackup ? BACKUP_COPY : (COPY[policy && policy !== 'loading' ? policy.paywall.copy : 'default'] ?? COPY.default!);
-  // Text the server wrote, when it is in the language on screen. After a
-  // language switch the last policy still carries the old language until the
-  // next check-in; the shipped text covers that gap rather than a mixed screen.
-  const custom = fromBanner ?? (!fromBackup && policy && policy !== 'loading' && policy.paywall.text?.lang === language ? policy.paywall.text : null);
+  const title = fromBanner?.title ?? part?.title ?? '';
+  const body = fromBanner?.body ?? part?.body ?? '';
   const prices = policy && policy !== 'loading' ? policy.prices : {};
   const monthly = Object.values(prices).find(p => p.kind === 'sub' && p.interval === 'month');
   const selectedPrice = prices[selected];
@@ -413,10 +373,17 @@ export default function Paywall({ language, request }: PaywallProps) {
             id="paywall-title"
             className="relative mx-auto max-w-sm text-balance px-6 text-[22px] font-semibold leading-[1.15] tracking-[-0.025em] text-neutral-900 dark:text-neutral-50"
           >
-            {custom ? custom.title : t(copy.title)}
+            {title}
           </h2>
+          {/* Under the title, small: the store rating and how many use it
+              (server policy social_proof; the numbers and words are its). */}
+          {content?.social && (
+            <p className="relative mt-1.5 text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
+              <span aria-hidden className="text-amber-500">★</span> {content.social}
+            </p>
+          )}
           <p className="relative mx-auto mt-2 max-w-sm text-balance text-sm leading-relaxed text-neutral-500 dark:text-neutral-400">
-            {custom ? custom.body : t(copy.body)}
+            {body}
           </p>
           {limitLine && (
             <p className="relative mx-auto mt-2.5 inline-flex max-w-sm items-center gap-2 rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs leading-snug text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
@@ -437,14 +404,19 @@ export default function Paywall({ language, request }: PaywallProps) {
               so long words are hyphenated, or broken where no dictionary has
               the language. Only long ones: left to itself the browser also
               split "чис-ло" to even out a line. */}
-          <ul className="mb-4 mt-1 grid grid-cols-3 gap-x-3">
-            {(fromBackup ? BACKUP_POINTS : BENEFITS).map(({ key: k, Icon }) => (
-              <li key={k} className="flex min-w-0 flex-col items-center gap-1.5 text-center text-xs leading-snug text-neutral-600 dark:text-neutral-400">
-                <Icon size={16} strokeWidth={1.75} className="flex-shrink-0 text-accent-600 dark:text-accent-300" aria-hidden />
-                <span className="max-w-full hyphens-auto text-balance [hyphenate-limit-chars:13_5_5] [overflow-wrap:anywhere]">{t(k)}</span>
-              </li>
-            ))}
-          </ul>
+          {part && part.points.length > 0 && (
+            <ul className={`mb-4 mt-1 grid gap-x-3 ${part.points.length === 1 ? 'grid-cols-1' : part.points.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+              {part.points.map(({ icon, text }, i) => {
+                const Icon = ICONS[icon];
+                return (
+                  <li key={i} className="flex min-w-0 flex-col items-center gap-1.5 text-center text-xs leading-snug text-neutral-600 dark:text-neutral-400">
+                    <Icon size={16} strokeWidth={1.75} className="flex-shrink-0 text-accent-600 dark:text-accent-300" aria-hidden />
+                    <span className="max-w-full hyphens-auto text-balance [hyphenate-limit-chars:13_5_5] [overflow-wrap:anywhere]">{text}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
 
           {policy === 'loading' && (
             <div className="flex justify-center py-6 text-neutral-400" aria-busy="true">
@@ -506,12 +478,6 @@ export default function Paywall({ language, request }: PaywallProps) {
                       </span>
                     </span>
                     <span className="flex flex-shrink-0 flex-col items-end tabular-nums">
-                      {/* What twelve monthly payments come to — the same sum the badge is worked out from. */}
-                      {saving !== null && monthly && (
-                        <span aria-hidden className="text-[11px] leading-tight text-neutral-400 line-through dark:text-neutral-500">
-                          {formatMoney(monthly.amount * 12, monthly.currency, monthly.exp, locale)}
-                        </span>
-                      )}
                       <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{priceLine(price)}</span>
                     </span>
                   </button>
@@ -656,7 +622,7 @@ export default function Paywall({ language, request }: PaywallProps) {
             )}
           </div>
 
-          <p className="mt-5 text-center text-[11px] leading-relaxed text-neutral-400 dark:text-neutral-500">{t('paywall.legal')}</p>
+          {content && <p className="mt-5 text-center text-[11px] leading-relaxed text-neutral-400 dark:text-neutral-500">{content.legal}</p>}
         </div>
       </div>
     </div>

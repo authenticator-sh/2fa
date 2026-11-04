@@ -1,7 +1,7 @@
 // Background service worker for Authenticator extension
 // Manifest V3 requires a service worker instead of background scripts
 
-import { COMMAND_ID, MENU_ID, startQuickFill, syncContextMenu } from './quick-fill';
+import { COMMAND_ID, COPY_MENU_ID, MENU_ID, startQuickFill, syncContextMenu } from './quick-fill';
 import { applyOpenMode, registerOpenMode } from './open-mode';
 import { registerSiteOpen } from './site-open';
 import { QUICK_FILL_ENABLED_KEY } from '@/utils/quick-fill';
@@ -166,12 +166,13 @@ registerOnboardScreen();
 // host permission. Both are synchronous up to startQuickFill: it may have to
 // open the side panel, and Chrome only allows that before the first await.
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId !== MENU_ID || tab?.id === undefined) return;
+  if ((info.menuItemId !== MENU_ID && info.menuItemId !== COPY_MENU_ID) || tab?.id === undefined) return;
   void startQuickFill({
     tabId: tab.id,
     windowId: tab.windowId,
     frameId: info.frameId,
     pageUrl: info.pageUrl || tab.url,
+    mode: info.menuItemId === COPY_MENU_ID ? 'copy' : 'fill',
   });
 });
 

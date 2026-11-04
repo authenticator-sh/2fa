@@ -114,7 +114,8 @@ const RFC = {
   },
 } as const;
 
-const STORED_FIELDS = new Set(['id', 'name', 'issuer', 'secret', 'algorithm', 'digits', 'period', 'createdAt', 'color', 'group', 'type']);
+// `updatedAt` is ours, set on every account a change writes (cloud sync's stamp), never read from a file.
+const STORED_FIELDS = new Set(['id', 'name', 'issuer', 'secret', 'algorithm', 'digits', 'period', 'createdAt', 'updatedAt', 'color', 'group', 'type']);
 
 async function otherAppsFiles(): Promise<void> {
   const fixtures = (await import('./fixtures/import-formats.json')).default as Record<string, unknown>;
@@ -132,6 +133,15 @@ async function otherAppsFiles(): Promise<void> {
       return { report, error: undefined as any };
     } catch (error) {
       return { report: undefined, error: error as any };
+    }
+  };
+  const importSealed = async (value: unknown, password: string | null) => {
+    const asked: (string | undefined)[] = [];
+    try {
+      const report = await EI.importBackupText(JSON.stringify(value), app => (asked.push(app), password));
+      return { asked, report, error: undefined as any };
+    } catch (error) {
+      return { asked, report: undefined, error: error as any };
     }
   };
   const find = (list: any[], secret: string) => list.find(a => a.secret === secret);
@@ -222,11 +232,15 @@ async function otherAppsFiles(): Promise<void> {
   check('the group is resolved from its uuid', find(aegisList, RFC.SHA1.secret)?.group === 'Work');
   checkRfc(aegisList, ['SHA1', 'SHA256', 'SHA512']);
 
-  scenario('Aegis, encrypted: refused with a way forward, nothing written');
+  // Opened with the password for real in sealed-backups.test.ts; these
+  // fixtures only have the shape, so no password opens them.
+  scenario('Aegis, encrypted: asks for Aegis\'s password, nothing written when it does not open');
   await resetState();
-  const aegisSealed = await importFile(fixtures.aegisEncrypted);
-  check('rejected as another app\'s encryption', aegisSealed.error?.reason === 'encrypted' && aegisSealed.error?.app === 'Aegis', String(aegisSealed.error?.message));
-  check('the message says to export without encryption', /Aegis.*encrypted.*Export it again/.test(aegisSealed.error ? importErrorMessage(aegisSealed.error) : ''));
+  const aegisSealed = await importSealed(fixtures.aegisEncrypted, null);
+  check('the prompt names Aegis', aegisSealed.asked.join() === 'Aegis', JSON.stringify(aegisSealed.asked));
+  check('a dismissed prompt is no error', aegisSealed.report === null && aegisSealed.error === undefined, String(aegisSealed.error?.message));
+  const aegisWrong = await importSealed(fixtures.aegisEncrypted, 'not it');
+  check('a password that does not open it is a wrong password', aegisWrong.error?.name === 'WrongExportPasswordError', String(aegisWrong.error?.message));
   check('nothing written', (await storage.getAccounts()).length === 0);
 
   scenario('2FAS: account and issuer from `otp`, Steam kept, HOTP refused');
@@ -241,10 +255,12 @@ async function otherAppsFiles(): Promise<void> {
   check('group resolved by id', find(twoFasList, RFC.SHA1.secret)?.group === 'Work');
   checkRfc(twoFasList, ['SHA1', 'SHA256']);
 
-  scenario('2FAS, password-protected: refused with a way forward');
+  scenario('2FAS, password-protected: asks for 2FAS\'s password');
   await resetState();
-  const twoFasSealed = await importFile(fixtures.twoFasEncrypted);
-  check('rejected as encrypted by 2FAS', twoFasSealed.error?.reason === 'encrypted' && twoFasSealed.error?.app === '2FAS', String(twoFasSealed.error?.message ?? JSON.stringify(twoFasSealed.report)));
+  const twoFasSealed = await importSealed(fixtures.twoFasEncrypted, 'not it');
+  check('the prompt names 2FAS', twoFasSealed.asked.join() === '2FAS', JSON.stringify(twoFasSealed.asked));
+  check('a password that does not open it is a wrong password', twoFasSealed.error?.name === 'WrongExportPasswordError', String(twoFasSealed.error?.message ?? JSON.stringify(twoFasSealed.report)));
+  check('nothing written', (await storage.getAccounts()).length === 0);
 
   scenario('Bitwarden JSON: the TOTP field of each login, as a link or a bare secret');
   await resetState();

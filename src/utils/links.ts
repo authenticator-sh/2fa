@@ -1,11 +1,5 @@
 // Outward links that appear in more than one screen, kept in one place so a
-// moved board or a renamed page is a single edit rather than a grep.
-
-// Public feature board: requests, votes and what we are working on next.
-// Deliberately not the support inbox — anything broken should reach us
-// privately and immediately, ideas are better in the open where other people
-// can add their vote.
-export const FEATURE_REQUEST_URL = 'https://authenticator.featurebase.app';
+// renamed page is a single edit rather than a grep.
 
 /**
  * The help page, in the reader's own language.

@@ -25,7 +25,10 @@ type UpdateHighlightKey =
   | 'update.feature.groupTools'
   | 'update.feature.pinAccounts'
   | 'update.feature.importApps'
-  | 'update.feature.keyboard';
+  | 'update.feature.keyboard'
+  | 'update.feature.accountSites'
+  | 'update.feature.copyForSite'
+  | 'update.feature.importEncrypted';
 
 // Maps an extension version to the changelog bullets shown in the "What's New"
 // modal right after that version is installed. Versions with no entry here
@@ -88,5 +91,10 @@ export const WHATS_NEW: Record<string, UpdateHighlightKey[]> = {
     'update.feature.pinAccounts',
     'update.feature.importApps',
     'update.feature.keyboard',
+  ],
+  '1.16.0': [
+    'update.feature.accountSites',
+    'update.feature.copyForSite',
+    'update.feature.importEncrypted',
   ],
 };

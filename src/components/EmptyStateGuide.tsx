@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeftRight, Camera, ChevronDown, ChevronRight, HelpCircle, ImagePlus, KeyRound, Link2, Monitor, QrCode, Smartphone } from 'lucide-react';
+import { ArrowLeftRight, Camera, ChevronDown, ChevronRight, Chrome, HelpCircle, ImagePlus, KeyRound, Link2, Monitor, QrCode, Smartphone } from 'lucide-react';
 import { createT, type Language, type TranslationKey } from '@/utils/i18n';
 import { reportAddStep, reportOnboardPick } from '@/billing/onboarding';
+import { useHostRow } from '@/utils/host-row';
 
 /**
  * First-run guidance.
@@ -29,6 +30,7 @@ const TONES = {
   green: 'bg-gradient-to-br from-green-100 to-green-50 text-green-700 ring-1 ring-inset ring-green-200/70 dark:from-green-900/40 dark:to-green-900/10 dark:text-green-400 dark:ring-green-800/50',
   teal: 'bg-gradient-to-br from-teal-100 to-teal-50 text-teal-700 ring-1 ring-inset ring-teal-200/70 dark:from-teal-900/40 dark:to-teal-900/10 dark:text-teal-400 dark:ring-teal-800/50',
   violet: 'bg-gradient-to-br from-violet-100 to-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200/70 dark:from-violet-900/40 dark:to-violet-900/10 dark:text-violet-400 dark:ring-violet-800/50',
+  amber: 'bg-gradient-to-br from-amber-100 to-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200/70 dark:from-amber-900/40 dark:to-amber-900/10 dark:text-amber-400 dark:ring-amber-800/50',
 };
 
 /** A row of the chooser. */
@@ -169,6 +171,7 @@ export function EmptyStateGuide({
   const t = createT(language);
   const rows = useRef<Partial<Record<PathId, HTMLButtonElement | null>>>({});
   const cameFrom = useRef<PathId | null>(null);
+  const hostRow = useHostRow();
 
   // Back lands on the row that was opened, not on <body>: the row is gone
   // while its steps are up, so there is nothing for the browser to return to.
@@ -189,6 +192,24 @@ export function EmptyStateGuide({
   };
 
   if (!openPath) {
+    // The host's row first (utils/host-row.ts): the Mac app's "In the Chrome
+    // extension", for someone who has just installed it beside the extension.
+    // Not counted as a pick: the server takes only the chooser's own ids.
+    const choices = [
+      ...(hostRow ? [{ id: 'host', icon: Chrome, tone: 'amber' as const, label: hostRow.label(), sub: hostRow.sub(), pick: hostRow.run }] : []),
+      ...PATHS.map(path => ({
+        id: path.id,
+        icon: path.icon,
+        tone: path.tone,
+        label: t(path.label),
+        sub: path.sub && t(path.sub),
+        pick: () => {
+          void reportOnboardPick(path.id);
+          if (hasSteps(path)) onOpenPath(path);
+          else run(path.action);
+        },
+      })),
+    ];
     return (
       // No logo above the title any more. It cost 56px, and with a line under
       // every row that was the difference between five rows on screen and four
@@ -232,17 +253,13 @@ export function EmptyStateGuide({
         </p>
 
         <div className="w-full space-y-2">
-          {PATHS.map((path, index) => (
+          {choices.map((path, index) => (
             <button
               key={path.id}
               ref={node => {
-                rows.current[path.id] = node;
+                if (path.id !== 'host') rows.current[path.id as PathId] = node;
               }}
-              onClick={() => {
-                void reportOnboardPick(path.id);
-                if (hasSteps(path)) onOpenPath(path);
-                else run(path.action);
-              }}
+              onClick={path.pick}
               // All alike until one is hovered. The first used to be
               // tinted from the start, which singled out Google Authenticator
               // before the reader had answered the question above the rows.
@@ -258,14 +275,14 @@ export function EmptyStateGuide({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium text-gray-900 dark:text-gray-100">
-                  {t(path.label)}
+                  {path.label}
                 </span>
                 {/* Not at the 320px popup: there the line wraps under a
                     label that already has, and the rows end up four and five
                     lines tall each. */}
                 {path.sub && (
                   <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400 max-[359px]:hidden">
-                    {t(path.sub)}
+                    {path.sub}
                   </span>
                 )}
               </span>
@@ -298,6 +315,7 @@ export function EmptyStateGuide({
     <GuideSteps
       key={openPath.id}
       path={openPath}
+      canScanPage={canScanPage}
       language={language}
       onAction={() => {
         void reportAddStep('guide', `${openPath.id}_go`);
@@ -336,11 +354,16 @@ interface GuideStepsProps {
   onEnterKey: () => void;
   onImage?: () => void;
   onBack: () => void;
+  canScanPage: boolean;
 }
 
-function GuideSteps({ path, language, onAction, onPasteLinks, onEnterKey, onImage, onBack }: GuideStepsProps) {
+function GuideSteps({ path, language, onAction, onPasteLinks, onEnterKey, onImage, onBack, canScanPage }: GuideStepsProps) {
   const t = createT(language);
   const [showMore, setShowMore] = useState(false);
+
+  // The same refusal the first-run button was hidden for: this branch's own
+  // scan, on a tab that cannot be scanned, could only end in an error.
+  const noScanHere = !canScanPage && path.action !== 'camera' && path.action !== 'import';
 
   const actionLabel: TranslationKey =
     path.action === 'camera'
@@ -448,6 +471,9 @@ function GuideSteps({ path, language, onAction, onPasteLinks, onEnterKey, onImag
             {t('onboarding.ga.noCamera')}
           </button>
         )}
+        {noScanHere && (
+          <p className="text-xs leading-relaxed text-gray-600 dark:text-gray-300">{t('addAccount.scanPageHint')}</p>
+        )}
         <div className="flex gap-2">
           <button
             onClick={onBack}
@@ -455,13 +481,15 @@ function GuideSteps({ path, language, onAction, onPasteLinks, onEnterKey, onImag
           >
             {t('common.back')}
           </button>
-          <button
-            onClick={onAction}
-            className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg bg-accent-600 px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-700"
-          >
-            {onImage && <Camera size={16} className="shrink-0" />}
-            {t(actionLabel)}
-          </button>
+          {!noScanHere && (
+            <button
+              onClick={onAction}
+              className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg bg-accent-600 px-3 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-700"
+            >
+              {onImage && <Camera size={16} className="shrink-0" />}
+              {t(actionLabel)}
+            </button>
+          )}
         </div>
       </div>
     </div>

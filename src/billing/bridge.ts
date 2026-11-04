@@ -52,6 +52,18 @@ function emit(): void {
   for (const listener of listeners) listener(current);
 }
 
+/**
+ * Another screen answers every request (the Mac App Store edition's own, App
+ * Review 3.1.1): the interface's paywall is not drawn, not even behind it.
+ */
+let hostedElsewhere = false;
+export function hostPaywallElsewhere(): void {
+  hostedElsewhere = true;
+}
+export function isPaywallHostedElsewhere(): boolean {
+  return hostedElsewhere;
+}
+
 export function subscribePaywall(listener: (request: PaywallRequest | null) => void): () => void {
   listeners.add(listener);
   listener(current);
@@ -86,4 +98,25 @@ export function openPaywall(options: {
     };
     emit();
   });
+}
+
+/**
+ * Restore Purchases, where the host sells through a store of its own: the Mac
+ * App Store edition (desktop/src/desktop.ts) puts it in Pro's row in place of
+ * "I have a license key", which its paywall still offers. It says how it went
+ * itself and never throws. Null in the extension.
+ */
+export interface StoreRestore {
+  label: () => string;
+  run: () => Promise<void>;
+}
+
+let storeRestore: StoreRestore | null = null;
+
+export function setStoreRestore(restore: StoreRestore | null): void {
+  storeRestore = restore;
+}
+
+export function getStoreRestore(): StoreRestore | null {
+  return storeRestore;
 }

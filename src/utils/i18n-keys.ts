@@ -13,6 +13,11 @@ type TranslationKeys = {
   'notices.empty': string;
   'notices.new': string;
 
+  // The cloud in the header while cloud backup is on (CloudSyncIndicator)
+  'cloudSync.synced': string;
+  'cloudSync.syncing': string;
+  'cloudSync.problem': string;
+
   // Search
   'search.placeholder': string;
 
@@ -157,6 +162,12 @@ type TranslationKeys = {
   'addAccount.errorNoQrScreen': string;
   'addAccount.missWhere': string;
   'addAccount.missPhone': string;
+  'addAccount.scanPageHint': string;
+  'addAccount.missSite': string;
+  'addAccount.missSiteHow': string;
+  'addAccount.missNone': string;
+  'addAccount.missNoneHow': string;
+  'addAccount.missKey': string;
   'addAccount.moving': string;
   'addAccount.importFile': string;
   'addAccount.errorScreenHint': string;
@@ -384,13 +395,14 @@ type VaultTranslationKeys = {
 
   'import.passwordTitle': string;
   'import.passwordText': string;
+  /** "{0}" — the other app whose backup password this is (FreeOTP, Aegis, 2FAS); says it is not kept */
+  'import.passwordTextOtherApp': string;
   'import.wrongPassword': string;
   'import.backupDamaged': string;
 
   'common.cancel': string;
   'common.back': string;
   'common.support': string;
-  'common.requestFeature': string;
 
   'update.feature.vault': string;
   'update.feature.encryptedExport': string;
@@ -441,6 +453,8 @@ type VaultTranslationKeys = {
   'scan.busyBody': string;
   'scan.noCameraTitle': string;
   'scan.noCameraBody': string;
+  'scan.noCameraPhone': string;
+  'scan.noCameraPhoneHow': string;
   'scan.lockedTitle': string;
   'scan.lockedBody': string;
   'scan.errorTitle': string;
@@ -510,6 +524,21 @@ type VaultTranslationKeys = {
   'update.feature.pinAccounts': string;
   'update.feature.importApps': string;
   'update.feature.keyboard': string;
+  'menu.useOnSite': string;
+  'accounts.forThisSite': string;
+  'accounts.siteLinked': string;
+  'accounts.siteUnlinked': string;
+  'edit.sites': string;
+  'edit.sitesHint': string;
+  'edit.sitesAdd': string;
+  'edit.sitesAddCurrent': string;
+  'edit.sitesInvalid': string;
+  'edit.sitesRemove': string;
+  'quickFill.copyMenu': string;
+  'quickFill.copyDone': string;
+  'update.feature.accountSites': string;
+  'update.feature.copyForSite': string;
+  'update.feature.importEncrypted': string;
   'edit.secretHint': string;
   'edit.secretDuplicate': string;
   'accounts.notFound': string;
@@ -590,23 +619,9 @@ type VaultTranslationKeys = {
 /** The paywall, Pro in Settings and the free-limit hints (billing/). */
 type BillingTranslationKeys = {
   'paywall.back': string;
-  'paywall.default.title': string;
-  'paywall.default.body': string;
-  'paywall.support.title': string;
-  'paywall.support.body': string;
-  'paywall.private.title': string;
-  'paywall.private.body': string;
-  'paywall.everything.title': string;
-  'paywall.everything.body': string;
   'paywall.importOver': string;
   'paywall.importNoRoom': string;
   'paywall.backup.title': string;
-  'paywall.backup.body': string;
-  'paywall.benefitUnlimited': string;
-  'paywall.benefitPrivate': string;
-  'paywall.benefitBackup': string;
-  'paywall.backupAuto': string;
-  'paywall.backupRestore': string;
   'paywall.planMonth': string;
   'paywall.planYear': string;
   'paywall.planLife': string;
@@ -632,7 +647,6 @@ type BillingTranslationKeys = {
   'paywall.emailPlaceholder': string;
   'paywall.send': string;
   'paywall.restoreSent': string;
-  'paywall.legal': string;
   'paywall.unavailable': string;
   'paywall.retry': string;
   'billing.error.network': string;
@@ -664,7 +678,7 @@ type BillingTranslationKeys = {
   'pro.removeConfirmBody': string;
   'pro.removeConfirm': string;
   'pro.removed': string;
-  'pro.pending': string;
+  'pro.openCheckout': string;
   'pro.checkNow': string;
   'cloud.title': string;
   'cloud.teaser': string;
@@ -682,6 +696,7 @@ type BillingTranslationKeys = {
   'cloud.startOverConfirm': string;
   'cloud.onLast': string;
   'cloud.onNoCopy': string;
+  'cloud.syncHint': string;
   'cloud.lapsed': string;
   'cloud.backupNow': string;
   'cloud.backingUp': string;

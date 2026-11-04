@@ -13,7 +13,7 @@ import { readNotices } from './notices';
 import { BILLING_FIRST_VERSION, BILLING_RELEASE_DATE } from './config';
 import { serverSilent, UNGATED, type GateSnapshot } from './gate';
 import { verifyToken } from './jws';
-import type { DisplayPrice, Entitlement, InstallRecord, LegacySource, Policy } from './types';
+import type { DisplayPrice, Entitlement, InstallRecord, LegacySource, PaywallContent, PaywallIcon, PaywallPart, Policy } from './types';
 
 export const BILLING_KEYS = {
   install: 'billingInstall',
@@ -365,6 +365,50 @@ function readPaywallText(value: unknown): { lang: string; title: string; body: s
   return { lang: v.lang, title, body };
 }
 
+const PAYWALL_ICONS: readonly PaywallIcon[] = ['infinity', 'lock', 'cloud', 'refresh', 'laptop'];
+
+/** Plain text of a sane length, or null; control characters become spaces. */
+const plainText = (s: unknown, max: number): string | null => {
+  if (typeof s !== 'string') return null;
+  const text = s.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  return text.length > 0 && text.length <= max ? text : null;
+};
+
+function readPaywallPart(value: unknown): PaywallPart | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  const title = plainText(v.title, 80);
+  const body = plainText(v.body, 300);
+  if (!title || !body) return null;
+  // A point with a mark this build cannot draw, or no text, is left out; the
+  // row holds three (the columns are 88px in the small popup).
+  const points = (Array.isArray(v.points) ? v.points : [])
+    .map((p) => {
+      if (!p || typeof p !== 'object') return null;
+      const { icon, text } = p as Record<string, unknown>;
+      const t = plainText(text, 60);
+      return t && PAYWALL_ICONS.includes(icon as PaywallIcon) ? { icon: icon as PaywallIcon, text: t } : null;
+    })
+    .filter((p): p is PaywallPart['points'][number] => p !== null)
+    .slice(0, 3);
+  return { title, body, points };
+}
+
+/**
+ * The paywall's words from the server. Both paywalls and the payment line
+ * have to be there and readable, or there is no content: a paywall with half
+ * its words, or none, is worse than "unavailable, try again".
+ */
+function readPaywallContent(value: unknown): PaywallContent | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  const limit = readPaywallPart(v.limit);
+  const backup = readPaywallPart(v.backup);
+  const legal = plainText(v.legal, 200);
+  if (typeof v.lang !== 'string' || !/^[a-z]{2,3}$/.test(v.lang) || !limit || !backup || !legal) return null;
+  return { lang: v.lang, limit, backup, social: plainText(v.social, 60), legal };
+}
+
 /** A signed policy payload as the paywall reads it; malformed fields fall back safely. */
 export function readPolicyPayload(payload: Record<string, unknown>): Policy | null {
   if (payload.typ !== 'policy' || typeof payload.pid !== 'string') return null;
@@ -383,6 +427,7 @@ export function readPolicyPayload(payload: Record<string, unknown>): Policy | nu
       trial_days: num(paywall.trial_days) ?? 0,
       promo_codes: paywall.promo_codes === true,
       text: readPaywallText(paywall.text),
+      content: readPaywallContent(paywall.content),
     },
     prices: readPrices(payload.prices),
     // Absent from a policy issued before the field existed: imports free, the owner's call.
