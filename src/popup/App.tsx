@@ -85,10 +85,11 @@ import { saveErrorMessage } from '@/utils/save-error';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, isSteamAccount, loadTimeOffset, tryGenerateTOTP } from '@/utils/totp';
 import { useEscapeLayer } from '@/hooks/useLayer';
-import { isOwnSite, pageWorthScanning } from '@/utils/screen-capture';
+import { isOwnPublicSite, isOwnSite, pageWorthScanning } from '@/utils/screen-capture';
+import { checkSite, countCodeUse, isSiteWarnEnabled, reportSiteWarn, reportSiteWarnAnswer, setSiteWarnEnabled, trustSite } from '@/utils/site-check';
 import { getSiteSuggestions, getBaseDomain, areSuggestionsEnabled, setSuggestionsEnabled } from '@/utils/suggestions';
-import { hasExactSite, normalizeSite, toggleSite } from '@/utils/account-sites';
-import { isQuickFillEnabled, setQuickFillEnabled } from '@/utils/quick-fill';
+import { hasExactSite, normalizeSite, pageHost, toggleSite } from '@/utils/account-sites';
+import { isQuickFillEnabled, readFillRequest, setQuickFillEnabled } from '@/utils/quick-fill';
 import { isSyncEnabled, setSyncEnabled, hasSyncOverflowed } from '@/utils/storage';
 import { WHATS_NEW } from '@/utils/update-notes';
 import {
@@ -209,6 +210,7 @@ function App() {
   const [showVaultPrompt, setShowVaultPrompt] = useState(false);
   const [showVaultSetup, setShowVaultSetup] = useState(false);
   const [suggestionsOn, setSuggestionsOn] = useState(true);
+  const [siteWarnOn, setSiteWarnOn] = useState(true);
   const [quickFillOn, setQuickFillOn] = useState(true);
   const [syncOn, setSyncOn] = useState(true);
   const [syncOverflow, setSyncOverflow] = useState(false);
@@ -365,6 +367,7 @@ function App() {
 
   useEffect(() => {
     areSuggestionsEnabled().then(setSuggestionsOn);
+    isSiteWarnEnabled().then(setSiteWarnOn);
     isQuickFillEnabled().then(setQuickFillOn);
     isSyncEnabled().then(setSyncOn);
     hasSyncOverflowed().then(setSyncOverflow);
@@ -403,6 +406,7 @@ function App() {
         // the guess but keeps sites the user set by hand.
         setSuggestionsOn(patch.suggestions);
       }
+      if (patch.siteWarn !== undefined) setSiteWarnOn(patch.siteWarn);
     };
     chrome.storage.onChanged.addListener(onChanged);
     return () => chrome.storage.onChanged.removeListener(onChanged);
@@ -481,6 +485,18 @@ function App() {
       setSuggestionsOn(!next);
       toast('error', t('settings.saveFailed'));
       return;
+    }
+  };
+
+  const handleSiteWarnToggle = async () => {
+    const next = !siteWarnOn;
+    setSiteWarnOn(next);
+    try {
+      await setSiteWarnEnabled(next);
+    } catch (error) {
+      console.error('Could not change the look-alike warning setting:', error);
+      setSiteWarnOn(!next);
+      toast('error', t('settings.saveFailed'));
     }
   };
 
@@ -721,8 +737,9 @@ function App() {
   const suggestedAccounts = !isFiltered && !selection && accounts.length >= 5
     ? siteSuggestion.ids.map(id => accounts.find(acc => acc.id === id)).filter((acc): acc is Account => !!acc)
     : [];
-  // A site the popup can tie an account to: a web page that is not our own.
-  const siteHost = currentDomain && !isOwnSite(currentDomain) ? normalizeSite(currentDomain) : null;
+  // A site the popup can tie an account to: any web page but our public site.
+  // Its subdomains count — admin.authenticator.sh is a 2FA sign-in like any other.
+  const siteHost = currentDomain && !isOwnPublicSite(currentDomain) ? normalizeSite(currentDomain) : null;
 
   // The strip carries its own bottom border, so the header drops its own while
   // the strip is up — two hairlines a chip's height apart read as clutter.
@@ -1139,6 +1156,47 @@ function App() {
       },
     });
   };
+
+  /**
+   * Before a code leaves the popup for the page behind it: when that page's
+   * address imitates the account's site (see lookalike.ts), ask first. False
+   * means the user kept the code; true also counts the use (site-check.ts).
+   */
+  const handleBeforeCopy = useStableCallback(async (account: Account): Promise<boolean> => {
+    // Where the code is going: the page quick fill asked from when this window
+    // is answering it — the side panel knows no other — and the tab behind
+    // the popup. Both, when they differ: the code goes to the clipboard as well.
+    const fillFor = (await readFillRequest())?.hostname ?? null;
+    const sites = [...new Set([fillFor, currentDomain])].filter((site): site is string => !!site && !isOwnSite(site));
+    let host: string | null = sites[0] ?? null;
+    let warning: Awaited<ReturnType<typeof checkSite>> = null;
+    for (const site of sites) {
+      warning = await checkSite(site, account, accounts);
+      if (warning) {
+        host = site;
+        break;
+      }
+    }
+    if (warning && host) {
+      reportSiteWarn('copy', warning);
+      const page = pageHost(host);
+      const proceed = await confirmDialog({
+        title: t('siteWarn.title'),
+        body: warning.basis === 'site'
+          ? t('siteWarn.bodySite', page, warning.like)
+          : t('siteWarn.bodyIssuer', page, warning.like),
+        warning: t('siteWarn.warning'),
+        confirmLabel: t('siteWarn.confirm'),
+        cancelLabel: t('siteWarn.cancel'),
+        danger: true,
+      });
+      reportSiteWarnAnswer('copy', warning, proceed);
+      if (!proceed) return false;
+      await trustSite(host, account.id).catch(() => {});
+    }
+    void countCodeUse('copy', host, account, !!warning);
+    return true;
+  });
 
   const handleCardMenu = useStableCallback((account: Account, x: number, y: number, copy: () => void) => {
     setCardMenu({ account, x, y, copy, page: 'main' });
@@ -2310,6 +2368,13 @@ function App() {
                 checked={quickFillOn}
                 onChange={handleQuickFillToggle}
               />
+
+              <SettingToggle
+                label={t('settings.siteWarn')}
+                hint={t('settings.siteWarnHint')}
+                checked={siteWarnOn}
+                onChange={handleSiteWarnToggle}
+              />
             </SettingsSection>
 
             {/* The clock, stated plainly — including when we could not check it.
@@ -2543,6 +2608,7 @@ function App() {
                       // below disagreed about it.
                       showGroup={activeGroup === null}
                       onMenu={handleCardMenu}
+                      onBeforeCopy={handleBeforeCopy}
                     />
                   ))}
                 </div>
@@ -2578,6 +2644,7 @@ function App() {
                 isSuggested={!isFiltered && siteSuggestion.ids.includes(account.id)}
                 showGroup={activeGroup === null}
                 onMenu={handleCardMenu}
+                onBeforeCopy={handleBeforeCopy}
                 selecting={selection !== null}
                 selected={selection?.ids.has(account.id) ?? false}
                 onToggleSelect={handleToggleSelect}

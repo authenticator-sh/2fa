@@ -160,6 +160,26 @@ export async function recordAccountUsage(
 }
 
 /**
+ * Every domain each account's code was used on *in the page* — inserted there,
+ * or picked when quick fill asked about it. Copies are left out: they carry
+ * whatever tab happened to be open.
+ */
+export async function siteHistory(): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const usage = await getUsageMap();
+  for (const [domain, byAccount] of Object.entries(usage)) {
+    if (!byAccount || typeof byAccount !== 'object') continue;
+    for (const [id, value] of Object.entries(byAccount)) {
+      if (readEntry(value).s <= 0) continue;
+      const list = out.get(id);
+      if (list) list.push(domain);
+      else out.set(id, [domain]);
+    }
+  }
+  return out;
+}
+
+/**
  * Which accounts the popup should pin for this site, best first, and whether
  * the user tied them to it themselves.
  *
@@ -279,7 +299,16 @@ export async function getFillCandidate(hostname: string, all: Account[]): Promis
   if (used.site) return { accountId: used.site, source: 'history' };
 
   const matches = textMatches(domain, accounts);
-  return matches.length === 1 ? { accountId: matches[0].id, source: 'text' } : null;
+  if (matches.length !== 1) return null;
+
+  // The name fits, but where has this account actually been used? If it has
+  // been put into pages on other domains and never this one — the GitHub
+  // account on github.co, the Amazon one on amazon.de — the name alone is not
+  // enough to type a code in unasked. Asking costs one pick, which is then
+  // remembered; a typosquat on another top-level domain costs the code.
+  const usedOn = (await siteHistory()).get(matches[0].id) ?? [];
+  if (usedOn.length > 0 && !usedOn.includes(domain)) return null;
+  return { accountId: matches[0].id, source: 'text' };
 }
 
 /** The domain to match on, or null when there is nothing to match against. */
@@ -317,19 +346,54 @@ async function usageOn(
  *
  * Used before anything has been learned about a site, which is every account's
  * first sign-in.
+ *
+ * The site's label has to be whole words of the issuer or name — one word
+ * ("amazon" in "Amazon Web Services", "github" in "alice@github.com") or
+ * several run together ("epicgames" for "Epic Games", "mybank" for "my-bank"
+ * and "My Bank"). It used to be a bare substring in both directions, so the
+ * "hub" of hub.xyz named GitHub, box.com named Dropbox, lab.io named GitLab
+ * and dropbox.com named an account called Box — and with one such account in
+ * the list, quick fill typed its live code into that unrelated page unasked.
  */
 function textMatches(domain: string, accounts: Account[]): Account[] {
-  const domainCore = domain.split('.')[0].toLowerCase();
+  const domainCore = compact(domain.split('.')[0]);
   if (domainCore.length < 3) return [];
 
-  return accounts.filter(acc => {
+  return accounts.filter(acc =>
     // String(), not a bare .toLowerCase(): a record from an older build or an
     // outside exporter can hold `issuer: null`, and this runs on every popup
     // open against the whole list — one such record threw here and took the
     // suggestion for every other account down with it.
-    const issuer = String(acc.issuer ?? '').toLowerCase();
-    const name = String(acc.name ?? '').toLowerCase();
-    return (issuer.length >= 3 && (issuer.includes(domainCore) || domainCore.includes(issuer))) ||
-      (name.length >= 3 && name.includes(domainCore));
-  });
+    namesSite(String(acc.issuer ?? ''), domainCore) || namesSite(String(acc.name ?? ''), domainCore)
+  );
+}
+
+/** Lowercase letters and digits only, in any script. */
+function compact(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+/**
+ * Whether a run of consecutive words in `text` spells `core` exactly, starting
+ * at the first word or at a host inside it ("alice@github.com",
+ * "accounts.google.com"). Not from a word in the middle of a phrase: "Web" of
+ * "Amazon Web Services" is not web.dev, "Games" of "Epic Games" not games.com.
+ */
+function namesSite(text: string, core: string): boolean {
+  const lower = text.toLowerCase();
+  const words: string[] = [];
+  const starts: number[] = [];
+  for (const match of lower.matchAll(/[\p{L}\p{N}]+/gu)) {
+    const before = lower[match.index - 1];
+    if (words.length === 0 || before === '@' || before === '.') starts.push(words.length);
+    words.push(match[0]);
+  }
+  for (const start of starts) {
+    let run = '';
+    for (let end = start; end < words.length && run.length < core.length; end++) {
+      run += words[end];
+      if (run === core) return true;
+    }
+  }
+  return false;
 }

@@ -101,7 +101,10 @@ export function ContextMenu({ x, y, items, above = false, onClose }: ContextMenu
     entries[(at + step + entries.length) % entries.length]?.focus();
   };
 
-  const anyChecked = items.some(item => item !== SEPARATOR && item.checked !== undefined);
+  // A column for ticks only in a menu of plain choices (the group picker). An
+  // item with an icon shows its tick in the icon's place: one such item in the
+  // account menu used to push every other row right by an empty column.
+  const anyChecked = items.some(item => item !== SEPARATOR && item.checked !== undefined && !item.icon);
 
   return (
     <div
@@ -136,7 +139,9 @@ export function ContextMenu({ x, y, items, above = false, onClose }: ContextMenu
                 {item.checked && <Check size={14} />}
               </span>
             )}
-            {Icon && <Icon aria-hidden size={14} className="flex-shrink-0" />}
+            {Icon && (item.checked && !anyChecked
+              ? <Check aria-hidden size={14} className="flex-shrink-0" />
+              : <Icon aria-hidden size={14} className="flex-shrink-0" />)}
             <span className="min-w-0 truncate">{item.label}</span>
           </button>
         );

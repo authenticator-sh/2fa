@@ -27,6 +27,7 @@ export interface SettingsPatch {
   syncOverflow?: boolean;
   quickFill?: boolean;
   suggestions?: boolean;
+  siteWarn?: boolean;
   sortOrder?: SortOrder;
 }
 
@@ -65,6 +66,7 @@ export function settingsFromChanges(changes: StorageChanges, areaName: string): 
   if (has('syncEnabled')) patch.syncEnabled = value('syncEnabled') !== false;
   if (has(QUICK_FILL_ENABLED_KEY)) patch.quickFill = value(QUICK_FILL_ENABLED_KEY) !== false;
   if (has('suggestionsEnabled')) patch.suggestions = value('suggestionsEnabled') !== false;
+  if (has('siteWarnEnabled')) patch.siteWarn = value('siteWarnEnabled') !== false;
   if (has('syncOverflow')) patch.syncOverflow = value('syncOverflow') === true;
   if (has(SORT_ORDER_KEY)) patch.sortOrder = readSortOrder(value(SORT_ORDER_KEY));
 

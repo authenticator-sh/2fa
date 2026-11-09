@@ -75,4 +75,43 @@ export async function run(): Promise<void> {
   await s.recordAccountUsage('www.hometax.go.kr', 'a2', 'site');
   check('history on one go.kr site fills there', (await s.getFillCandidate('www.hometax.go.kr', ACCOUNTS))?.accountId === 'a2');
   check('but not on a neighbour in the same zone', (await s.getFillCandidate('www.gov24.go.kr', ACCOUNTS)) === null);
+
+  await resetState();
+  scenario('A site names an account only by whole words');
+  // Reported 2026-11-08: the site label was matched as a bare substring both
+  // ways, so with one GitHub account in the list, insert-code on hub.xyz typed
+  // the live GitHub code into that page without asking.
+  const NAMED: any[] = [
+    { id: 'gh', name: 'alice', issuer: 'GitHub', secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30, createdAt: 1 },
+    { id: 'db', name: 'alice', issuer: 'Dropbox', secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30, createdAt: 2 },
+    { id: 'ms', name: 'alice', issuer: 'Microsoft', secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30, createdAt: 3 },
+    { id: 'gl', name: 'alice', issuer: 'GitLab', secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30, createdAt: 4 },
+    { id: 'aws', name: 'alice', issuer: 'Amazon Web Services', secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30, createdAt: 5 },
+    { id: 'epic', name: 'alice', issuer: 'Epic Games', secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30, createdAt: 6 },
+    { id: 'bank', name: 'alice', issuer: 'My Bank', secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30, createdAt: 7 },
+    { id: 'self', name: 'alice@corp-tools.dev', issuer: '', secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30, createdAt: 8 },
+  ];
+  for (const host of ['hub.xyz', 'box.com', 'micro.com', 'lab.io', 'soft.com', 'drop.com', 'web.dev', 'tools.dev', 'example.com']) {
+    const got = await s.getFillCandidate(host, NAMED);
+    check(`${host} fills nothing`, got === null, got?.accountId);
+    check(`${host} pins nothing in the popup`, (await s.getSuggestedAccountId(host, NAMED)) === null);
+  }
+  check('a one-word issuer named Box is not dropbox.com', (await s.getFillCandidate('dropbox.com', [
+    { ...NAMED[1], id: 'box', issuer: 'Box' },
+  ])) === null);
+  for (const [host, expected] of [
+    ['github.com', 'gh'],
+    ['www.dropbox.com', 'db'],
+    ['login.microsoftonline.com', null],
+    ['account.microsoft.com', 'ms'],
+    ['gitlab.com', 'gl'],
+    ['signin.aws.amazon.com', 'aws'],
+    ['www.epicgames.com', 'epic'],
+    ['online.my-bank.com', 'bank'],
+    ['mybank.co.uk', 'bank'],
+    ['sso.corp-tools.dev', 'self'],
+  ] as const) {
+    const got = await s.getFillCandidate(host, NAMED);
+    check(`${host} → ${expected}`, (got?.accountId ?? null) === expected, got?.accountId);
+  }
 }

@@ -15,6 +15,7 @@ import type { QuickFillOutcome } from '@/background/quick-fill-page';
 import { readFillRequest, takeFillRequest, type FillRequest } from './quick-fill';
 import { getFillCandidate, hostnameOf, recordAccountUsage } from './suggestions';
 import { tryGenerateTOTP, whenTimeOffsetSettled } from './totp';
+import { checkSite } from './site-check';
 
 type FillKey = 'quickFill.copied' | 'quickFill.manual' | 'quickFill.openApp';
 export type FillTranslate = (key: FillKey, ...args: (string | number)[]) => string;
@@ -99,6 +100,9 @@ export async function finishLockedFill(accounts: Account[], t: FillTranslate): P
   const candidate = await getFillCandidate(pending.hostname, accounts);
   const account = candidate ? accounts.find(acc => acc.id === candidate.accountId) : undefined;
   if (!account) return null;
+  // As in quick fill itself: a page imitating the account's site is never
+  // filled unasked, and the pick that follows goes through the warning.
+  if (await checkSite(pending.hostname, account, accounts)) return null;
 
   // Claimed only now that there is something to do with it, and only the one
   // decided on: another window may have taken it, or quick fill replaced it.

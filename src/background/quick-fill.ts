@@ -11,6 +11,7 @@ import type { Account } from '@/types';
 import { getAccounts } from '@/utils/storage';
 import { VaultLockedError } from '@/utils/vault';
 import { getFillCandidate, hostnameOf, recordAccountUsage } from '@/utils/suggestions';
+import { checkSite, countCodeUse } from '@/utils/site-check';
 import { loadTimeOffset, tryGenerateTOTP } from '@/utils/totp';
 import { checkTimeSync } from '@/utils/time-sync';
 import { isQuickFillEnabled, noteFillRequest, notePickPrompt } from '@/utils/quick-fill';
@@ -183,6 +184,14 @@ export async function runQuickFill(invocation: Invocation, panel: Promise<boolea
     return;
   }
 
+  // The site names this account, but its address imitates where the account
+  // belongs (lookalike.ts): never typed in unasked. The window it hands over to
+  // asks again, with the warning, if the user picks the account there.
+  if (await checkSite(hostname, account, accounts)) {
+    await handOver(invocation, t, panel);
+    return;
+  }
+
   // The stored correction alone is not enough. Quick fill never opened the
   // popup, so nothing here ever measured the clock: a correction taken before
   // the OS fixed it was filled into sign-in forms, as a confidently wrong code,
@@ -228,6 +237,7 @@ export async function runQuickFill(invocation: Invocation, panel: Promise<boolea
     await recordAccountUsage(hostname, account.id, 'site').catch(() => {});
   }
   if (outcome === 'filled' || outcome === 'copied') void reportCodeUsed(outcome === 'filled' ? 'fill' : 'copy');
+  if (outcome === 'filled' || outcome === 'copied') void countCodeUse(copyOnly ? 'copy' : 'fill', hostname, account, false);
 }
 
 /**

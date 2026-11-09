@@ -37,6 +37,16 @@ export function isOwnSite(hostname: string): boolean {
 }
 
 /**
+ * The public site itself — authenticator.sh, www — where the welcome page
+ * opens the popup and nothing asks for a code. Not admin.authenticator.sh or
+ * any other subdomain: those are sign-ins like any other, and tying an account
+ * to one has to be possible.
+ */
+export function isOwnPublicSite(hostname: string): boolean {
+  return /^(www\.)?authenticator\.sh$/.test(hostname.toLowerCase().replace(/\.+$/, ''));
+}
+
+/**
  * Whether "Scan the QR code on this page" is worth offering for the tab at
  * this address, as the popup reads it.
  *

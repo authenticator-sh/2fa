@@ -137,6 +137,14 @@ type TranslationKeys = {
   'settings.suggestedHint': string;
   'settings.quickFill': string;
   'settings.quickFillHint': string;
+  'settings.siteWarn': string;
+  'settings.siteWarnHint': string;
+  'siteWarn.title': string;
+  'siteWarn.bodySite': string;
+  'siteWarn.bodyIssuer': string;
+  'siteWarn.warning': string;
+  'siteWarn.confirm': string;
+  'siteWarn.cancel': string;
   'settings.viewMode': string;
   'settings.viewNormal': string;
   'settings.viewCompact': string;

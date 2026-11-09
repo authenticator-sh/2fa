@@ -104,6 +104,11 @@ interface AccountCardProps {
    * code" is the same click on the code — quick fill, usage, "Copied" and all.
    */
   onMenu?: (account: Account, x: number, y: number, copy: () => void) => void;
+  /**
+   * Asked before the code is copied or filled: false keeps it (the page looks
+   * like a fake of the account's site and the user said no). See App.tsx.
+   */
+  onBeforeCopy?: (account: Account) => Promise<boolean>;
   /** The list is choosing accounts: a click ticks the row instead of copying. */
   selecting?: boolean;
   selected?: boolean;
@@ -145,6 +150,7 @@ export const AccountCard = memo(function AccountCard({
   isSuggested,
   showGroup,
   onMenu,
+  onBeforeCopy,
   selecting = false,
   selected = false,
   onToggleSelect,
@@ -163,6 +169,7 @@ export const AccountCard = memo(function AccountCard({
 
   const handleCopy = async () => {
     if (!totp) return;
+    if (onBeforeCopy && !(await onBeforeCopy(account))) return;
     // The code is worked out at the moment of the click, not taken from what
     // the row last drew: that is up to a tick old, and a click just after a
     // slot ends — or just after a clock correction lands — copied the code

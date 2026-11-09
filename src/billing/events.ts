@@ -51,6 +51,9 @@ export const EVENT_NAMES = [
   'share_create',
   'share_fail',
   'share_copy',
+  'site_warn',
+  'site_warn_answer',
+  'code_sites',
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];
