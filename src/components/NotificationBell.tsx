@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { ArrowUpRight, Bell, ChevronRight, Cloud, Info, Lock, Sparkles, X } from 'lucide-react';
+import { useHostVault } from '@/utils/host-vault';
 import { createT, type Language } from '@/utils/i18n';
 import { useEscapeLayer } from '@/hooks/useLayer';
 import { dismissNotice, markNoticesRead, NOTICE_KEYS, noticesToShow, readDismissedNotices, readReadNotices, unreadNotices } from '@/billing/notices';
@@ -31,6 +32,7 @@ const ICONS = { backup: Cloud, paywall: Sparkles, vault: Lock, url: ArrowUpRight
  */
 export function NotificationBell({ language, offersVault, onVault }: { language: Language; offersVault: boolean; onVault: () => void }) {
   const t = createT(language);
+  const hostVault = useHostVault();
   const [local] = useCloudBackupLocal();
   const [notices, setNotices] = useState<Notice[] | undefined>(undefined);
   const [read, setRead] = useState<string[] | null>(null);
@@ -146,6 +148,12 @@ export function NotificationBell({ language, offersVault, onVault }: { language:
 
   /** The backup and vault notifications without words of their own speak in the shipped ones. */
   const wordsOf = (n: Notice): { title: string; body: string; cta: string | null } => {
+    // On a phone a vault notice offers Face ID, whatever the server wrote for
+    // the extension's password (utils/host-vault.ts), as the banner does.
+    if (n.action === 'vault' && hostVault) {
+      const own = hostVault.offerText();
+      return { title: own.title, body: own.text, cta: own.cta };
+    }
     if (n.text) return n.text;
     if (n.action === 'vault') return { title: t('vault.prompt.title'), body: t('vault.prompt.text'), cta: t('vault.prompt.enable') };
     return { title: t('cloud.title'), body: t('paywall.backup.title'), cta: t('cloud.turnOn') };

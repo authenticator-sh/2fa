@@ -97,4 +97,7 @@ export const WHATS_NEW: Record<string, UpdateHighlightKey[]> = {
     'update.feature.copyForSite',
     'update.feature.importEncrypted',
   ],
+  // 1.16.2 has no entry on purpose: "Move to phone" points at the iPhone app,
+  // which is still in App Review when this ships. It is in Settings for whoever
+  // looks; it gets announced once the app can be installed.
 };

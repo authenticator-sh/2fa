@@ -68,7 +68,12 @@ export function ContextMenu({ x, y, items, above = false, onClose }: ContextMenu
     const outside = (event: Event) => {
       if (!ref.current?.contains(event.target as Node)) close.current(false);
     };
-    const away = () => close.current(false);
+    // Not for the menu's own list scrolling: a long one (many groups) closed at
+    // the first pixel, and whatever was below the fold could not be reached.
+    const away = (event?: Event) => {
+      if (event?.target instanceof Node && ref.current?.contains(event.target)) return;
+      close.current(false);
+    };
     // Capture, so a right-click on another chip or row closes this menu before
     // that one opens its own, instead of after.
     document.addEventListener('mousedown', outside, true);

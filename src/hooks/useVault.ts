@@ -14,6 +14,7 @@ import {
   unlockWithRecoveryCode,
 } from '@/utils/vault';
 import { detectHost } from '@/utils/open-mode';
+import { getHostVault } from '@/utils/host-vault';
 
 /**
  * How often an open page checks the idle deadline, and how often at most it
@@ -122,6 +123,11 @@ export function useVault() {
     if (state.enabled !== true || state.locked) return;
     if (state.autoLockMinutes !== 0) return;
     if (detectHost() === 'popup') return;
+    // A host with its own lock (the iPhone app, utils/host-vault.ts) locks on
+    // leaving the app itself: the page is hidden there by screens of iOS's
+    // own too (the photo picker, the camera), and locking under them asked
+    // for Face ID in the middle of adding an account.
+    if (getHostVault()) return;
 
     const lockWhenHidden = () => {
       if (document.visibilityState === 'hidden') void lockVault().then(refresh);

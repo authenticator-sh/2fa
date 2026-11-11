@@ -240,3 +240,26 @@ export function downloadBackupFile(contents: string, fileName: string, mime = 'a
   anchor.click();
   URL.revokeObjectURL(url);
 }
+
+/**
+ * A host's own way of saving a file, which can say whether it was saved: the
+ * iPhone app hands the file to the share sheet, and the sheet may be closed
+ * with nothing chosen. A download in a browser has no such answer.
+ */
+type FileSaver = (contents: string, fileName: string, mime: string) => Promise<boolean>;
+let hostFileSaver: FileSaver | null = null;
+
+export function setHostFileSaver(saver: FileSaver | null): void {
+  hostFileSaver = saver;
+}
+
+/**
+ * Save an export. False when the host knows nothing was saved (the share
+ * sheet was closed): the caller must not then say "saved", nor count a backup
+ * as made.
+ */
+export async function saveBackupFile(contents: string, fileName: string, mime = 'application/json'): Promise<boolean> {
+  if (hostFileSaver) return hostFileSaver(contents, fileName, mime);
+  downloadBackupFile(contents, fileName, mime);
+  return true;
+}

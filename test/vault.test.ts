@@ -223,6 +223,21 @@ export async function run(): Promise<void> {
   check('this page stays open — the user is looking at it', await vault.isUnlocked());
   check('and reading the key keeps it out of storage', !areas.session.vault_session);
 
+  // Each key read rewrites the session; a "something changed" tick on each
+  // one woke every listener into another read, and so on, for as long as the
+  // page was open — the iPhone app's white screen on coming back.
+  scenario('On "every time", reading the key does not tick the session again');
+  areas.session.vault_session_tick = 'marker';
+  const tickBefore = 'marker';
+  for (let i = 0; i < 5; i++) await vault.getMasterKeyBytes();
+  await flush();
+  check('no tick for an activity refresh', areas.session.vault_session_tick === tickBefore);
+  await vault.lock();
+  await flush();
+  check('a lock still ticks, so other windows hear it', areas.session.vault_session_tick !== tickBefore);
+  await vault.unlockWithPassword(PASSWORD);
+  await flush();
+
   const otherContext = () =>
     import(new URL(`../src/utils/vault.ts?ctx=autolock-${Math.random()}`, import.meta.url).href) as Promise<
       typeof import('@/utils/vault')

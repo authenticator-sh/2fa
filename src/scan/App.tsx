@@ -11,12 +11,13 @@
 // and "activeTab".
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, CameraOff, Check, Globe, KeyRound, Loader2, Lock, Smartphone, Upload, Video } from 'lucide-react';
+import { AlertTriangle, CameraOff, Check, Globe, KeyRound, Loader2, Lock, Smartphone, Upload, Video } from 'lucide-react';
 import { QR_ANSWER_ROW, QrAnswerFold } from '@/components/QrAnswerRow';
 import { BlockedGuide, PromptMock } from '@/components/CameraHelp';
 import { cameraPermissionState, classifyDenial, type DenialKind } from '@/utils/camera-denial';
 import type jsQRType from 'jsqr';
 import { Logo } from '@/components/Logo';
+import { ModalHeader } from '@/components/ModalHeader';
 import { FeedbackHost } from '@/components/FeedbackHost';
 import { PaywallHost } from '@/components/PaywallHost';
 import { addWithLimit } from '@/billing/add';
@@ -78,6 +79,12 @@ type Status =
 export interface EmbeddedScanner {
   mode?: 'image';
   onClose: () => void;
+  /**
+   * The host's way to its own camera switch (the iPhone app: Settings →
+   * Authenticator). Offered first when the system refused the camera: there
+   * is nothing on this page that can change that.
+   */
+  openSettings?: { label: string; run: () => void };
 }
 
 export default function App({ embedded }: { embedded?: EmbeddedScanner }) {
@@ -758,22 +765,19 @@ export default function App({ embedded }: { embedded?: EmbeddedScanner }) {
 
   return (
     <div className={appearanceClass({ style: uiStyle, dark: darkMode })}>
-      <div className="min-h-screen bg-gray-50 dark:bg-dark-900 flex flex-col items-center px-6 py-10">
-        <div className="w-full max-w-md">
-          <div className="flex items-center gap-2 mb-6">
-            {embedded && (
-              <button
-                type="button"
-                onClick={embedded.onClose}
-                aria-label={t('common.back')}
-                className="-ms-2 rounded-lg p-1.5 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-              >
-                <ArrowLeft size={20} className="rtl:rotate-180" />
-              </button>
-            )}
-            <Logo size={28} />
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">{t('scan.title')}</h1>
-          </div>
+      {/* Inside the Mac and iPhone apps (embedded) it is one of the app's own
+          screens: its header bar with the arrow back, content from the edges
+          the other screens use. As a tab in Chrome it is a page: a centred
+          column under the logo, with room around it. */}
+      <div className={`min-h-screen bg-gray-50 dark:bg-dark-900 flex flex-col ${embedded ? '' : 'items-center px-6 py-10'}`}>
+        {embedded && <ModalHeader title={t('scan.title')} back={t('common.back')} onBack={embedded.onClose} />}
+        <div className={embedded ? 'mx-auto w-full max-w-md p-4' : 'w-full max-w-md'}>
+          {!embedded && (
+            <div className="flex items-center gap-2 mb-6">
+              <Logo size={28} />
+              <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">{t('scan.title')}</h1>
+            </div>
+          )}
 
           {status.kind === 'added' ? (
             <div className="bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-xl p-6 text-center">
@@ -934,6 +938,19 @@ export default function App({ embedded }: { embedded?: EmbeddedScanner }) {
                     {status.kind === 'image' ? t('addAccount.scanWithCamera') : t('scan.retry')}
                   </button>
                 );
+                if (status.kind === 'denied' && status.how === 'system' && embedded?.openSettings) {
+                  return (
+                    <>
+                      <button
+                        onClick={embedded.openSettings.run}
+                        className="w-full bg-accent-600 hover:bg-accent-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
+                      >
+                        {embedded.openSettings.label}
+                      </button>
+                      <div className="mt-2">{renderUpload(false)}</div>
+                    </>
+                  );
+                }
                 return retryFirst ? (
                   <>
                     {retry}
@@ -949,7 +966,10 @@ export default function App({ embedded }: { embedded?: EmbeddedScanner }) {
               {/* The way out that does not depend on the thing that just
                   failed. Every state on this card — denied, no camera, error —
                   is one a picture of the code walks straight past. */}
-              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{t('scan.uploadHint')}</p>
+              {/* Not under "Choose a screenshot": its own line above says it already. */}
+              {status.kind !== 'image' && (
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{t('scan.uploadHint')}</p>
+              )}
             </div>
           ) : (
             <>
@@ -1018,9 +1038,12 @@ export default function App({ embedded }: { embedded?: EmbeddedScanner }) {
 
           <canvas ref={canvasRef} className="hidden" />
 
-          <div className="mt-10 rounded-xl border border-gray-200 dark:border-dark-600 overflow-hidden">
-            <SupportFooter language={language} />
-          </div>
+          {/* The app around an embedded scanner has its own way to help. */}
+          {!embedded && (
+            <div className="mt-10 rounded-xl border border-gray-200 dark:border-dark-600 overflow-hidden">
+              <SupportFooter language={language} />
+            </div>
+          )}
         </div>
         <FeedbackHost />
         <PaywallHost language={language} />

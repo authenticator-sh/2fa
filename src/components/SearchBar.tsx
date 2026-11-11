@@ -18,6 +18,13 @@ export const SearchBar = forwardRef<HTMLInputElement, SearchBarProps>(
         <input
           ref={ref}
           type="text"
+          // A phone's keyboard "corrects" a service's name into a word and
+          // capitalises it; Return puts the keyboard away.
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          enterKeyHint="search"
+          onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}

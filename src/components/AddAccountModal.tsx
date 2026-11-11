@@ -577,7 +577,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                 </label>
                 <input
                   id={`${ids}-name`}
-                  type="text"
+                  type="text" autoCorrect="off" autoComplete="off" spellCheck={false} autoCapitalize="none"
                   value={name}
                   onChange={(e) => {
                     setName(e.target.value);
@@ -595,7 +595,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                 </label>
                 <input
                   id={`${ids}-secret`}
-                  type="text"
+                  type="text" autoCorrect="off" autoComplete="off" spellCheck={false} autoCapitalize="characters"
                   value={secret}
                   onChange={(e) => {
                     handleSecretChange(e.target.value);
@@ -660,7 +660,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
                     </label>
                     <input
                       id={`${ids}-issuer`}
-                      type="text"
+                      type="text" autoCorrect="off" autoComplete="off" spellCheck={false} autoCapitalize="none"
                       value={issuer}
                       onChange={(e) => setIssuer(e.target.value)}
                       placeholder={t('addAccount.issuerPlaceholder')}
@@ -805,11 +805,13 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
               </div>
 
               {/* Scan from screen */}
-              <div className="relative flex items-center justify-center">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-200 dark:border-dark-600"></div>
-                </div>
-                <span className="relative bg-gray-50 dark:bg-dark-800 px-3 text-xs text-gray-500 dark:text-gray-400">{t('accounts.or')}</span>
+              {/* Two rules either side of the word rather than one rule under a
+                  patch of background: the patch was the sheet's colour, and
+                  showed as a box wherever the sheet's colour is another. */}
+              <div className="flex items-center gap-3">
+                <div className="flex-1 border-t border-gray-200 dark:border-dark-600"></div>
+                <span className="text-xs text-gray-500 dark:text-gray-400">{t('accounts.or')}</span>
+                <div className="flex-1 border-t border-gray-200 dark:border-dark-600"></div>
               </div>
 
               <button

@@ -203,6 +203,9 @@ async function readSession(): Promise<ReadSession | null> {
   }
 }
 
+/** Whether the last tick said open or closed (writeSession); null before the first. */
+let tickedOpen: boolean | null = null;
+
 async function writeSession(state: SessionState | null): Promise<void> {
   memoryFallback = state;
   memoryIsAuthoritative = false;
@@ -222,7 +225,18 @@ async function writeSession(state: SessionState | null): Promise<void> {
       // Removing a key that is not there fires no event, so with auto-lock at 0 a
       // lock or an unlock from outside the interface (the Mac app's menu and its
       // Touch ID screen) went unheard. Holds a time, nothing about the key.
-      await chrome.storage.session.set({ [SESSION_TICK_KEY]: Date.now() });
+      //
+      // Only when the vault opens or closes. Every key read rewrites the
+      // session (the activity stamp), and a tick on each of those woke every
+      // listener into another key read, which ticked again: a loop that queued
+      // thousands of session-lock requests a minute. On the iPhone, whose lock
+      // defaults to "Right away", the check on coming back waited at the end
+      // of that queue and the app stayed a white screen.
+      const open = state !== null;
+      if (open !== tickedOpen) {
+        tickedOpen = open;
+        await chrome.storage.session.set({ [SESSION_TICK_KEY]: Date.now() });
+      }
     }
   } catch {
     // Memory fallback already holds the value.
@@ -892,7 +906,37 @@ export async function prepareRecovery(code: string, newPassword: string): Promis
     'recoverySalt',
     'wrappedByRecovery'
   );
+  return prepareNewWays(meta, masterKeyBytes, newPassword, true);
+}
 
+/**
+ * A new password and recovery code for someone who has forgotten the password
+ * but is in through their passkey — on the iPhone, Face ID: months of opening
+ * by a glance, and the passcode typed once at set-up is gone from memory.
+ * Nothing shows it until Face ID is unlinked (a new phone, a re-enrolled
+ * face), and then it is the only way in. The passkey proves who is asking, as
+ * the recovery code does in prepareRecovery, and stays linked: it was not lost.
+ */
+export async function preparePasskeyReset(prfOutput: Uint8Array, newPassword: string): Promise<PreparedRecovery> {
+  const meta = await getVaultMeta();
+  if (!meta) throw new Error('No vault configured');
+  if (!meta.passkey) throw new Error('No passkey is registered for this vault');
+  let masterKeyBytes: Uint8Array;
+  try {
+    masterKeyBytes = await unwrapMasterKey(meta.passkey.wrapped, await deriveKeyFromPrf(prfOutput));
+  } catch {
+    throw new WrongPasswordError();
+  }
+  return prepareNewWays(meta, masterKeyBytes, newPassword, false);
+}
+
+/** The new password and recovery wrappers for `masterKeyBytes`, proven, then saved by `commit`. */
+async function prepareNewWays(
+  meta: VaultMeta,
+  masterKeyBytes: Uint8Array,
+  newPassword: string,
+  dropPasskey: boolean
+): Promise<PreparedRecovery> {
   const salt = newSalt();
   const recoverySalt = newSalt();
   const recoveryCode = generateRecoveryCode();
@@ -947,6 +991,7 @@ export async function prepareRecovery(code: string, newPassword: string): Promis
       // meant to shut out kept a key. The user adds their own passkey again
       // in one step; LockScreen tells them so.
       await updateVaultMeta(meta.vaultId, current => {
+        if (!dropPasskey) return { ...current, ...wrappers } as VaultMeta;
         const { passkey: _unlinked, ...rest } = current;
         return { ...rest, ...wrappers } as VaultMeta;
       });
@@ -958,7 +1003,7 @@ export async function prepareRecovery(code: string, newPassword: string): Promis
     return committing;
   };
 
-  return { recoveryCode, removesPasskey: !!meta.passkey, commit };
+  return { recoveryCode, removesPasskey: dropPasskey && !!meta.passkey, commit };
 }
 
 /** Verifies a password without changing session state. */

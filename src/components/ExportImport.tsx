@@ -1,7 +1,8 @@
 import { readInstall } from '@/billing/state';
 import { useId, useRef, useState } from 'react';
 import { useEscapeLayer } from '@/hooks/useLayer';
-import { ClipboardPaste, Download, Link2, Lock, Share2, Unlock, Upload } from 'lucide-react';
+import { ClipboardPaste, Download, Link2, Lock, Share2, Smartphone, Unlock, Upload } from 'lucide-react';
+import { TransferModal } from '@/components/TransferModal';
 import { settingsButton } from '@/components/SettingsSection';
 import {
   exportAccounts,
@@ -37,9 +38,10 @@ import {
   noteBackupSource,
   buildURIBackupFile,
   uriBackupFileName,
-  downloadBackupFile,
+
   isEncryptedBackupFile,
   readEncryptedBackupFile,
+  saveBackupFile,
 } from '@/utils/backup-file';
 import { buildCxfFile, cxfExportable, cxfFileName, isCxfFile, readCxf } from '@/utils/cxf';
 import { isFreeOtpBackup, readFreeOtpBackup, readFreeOtpPreferences } from '@/utils/freeotp';
@@ -216,6 +218,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
   const t = createT(language);
 
   const [showExportChoice, setShowExportChoice] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
   const [exportPassword, setExportPassword] = useState('');
   const [exportPasswordConfirm, setExportPasswordConfirm] = useState('');
   const [exportError, setExportError] = useState<string | null>(null);
@@ -300,11 +303,14 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
               ? uri.text
               : buildPlainBackupFile(accounts, fileOptions);
 
-      downloadBackupFile(
+      const saved = await saveBackupFile(
         contents,
         format === 'cxf' ? cxfFileName() : uri ? uriBackupFileName() : backupFileName(format === 'encrypted'),
         uri ? 'text/plain' : 'application/json'
       );
+      // The phone's share sheet closed with nothing chosen: no file exists, so
+      // nothing is said to be saved and the choice stays open for another go.
+      if (!saved) return;
 
       await markBackupDone(accounts.length);
       onExportComplete?.();
@@ -538,6 +544,19 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
           aria-hidden="true"
         />
       </div>
+
+      {/* To a phone without a file: QR codes it scans, in the format every
+          authenticator reads (TransferModal). The file route needed AirDrop
+          or a messenger, and left a plaintext copy of every key behind. */}
+      <button
+        type="button"
+        onClick={() => setShowTransfer(true)}
+        className={`${settingsButton.secondary} mt-2 w-full py-2`}
+      >
+        <Smartphone size={14} />
+        {t('transfer.button')}
+      </button>
+      {showTransfer && <TransferModal language={language} onClose={() => setShowTransfer(false)} />}
 
       {/* Third input, and the one the other two could not cover: a link that
           arrived as text. Until now it had to be taken apart by hand. */}

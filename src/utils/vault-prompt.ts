@@ -36,8 +36,13 @@ async function setState(state: VaultPromptState): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEY]: state });
 }
 
-export async function shouldShowVaultPrompt(accountCount: number, vaultEnabled: boolean): Promise<boolean> {
-  if (vaultEnabled || accountCount < MIN_ACCOUNTS) return false;
+/**
+ * `offers`: whether there is anything to offer (the vault is off, or on a
+ * phone Face ID is not on yet: utils/host-vault.ts). `minAccounts`: the
+ * phone's own threshold.
+ */
+export async function shouldShowVaultPrompt(accountCount: number, offers: boolean, minAccounts = MIN_ACCOUNTS): Promise<boolean> {
+  if (!offers || accountCount < minAccounts) return false;
 
   const state = await getState();
   if (state.dismissedForever) return false;

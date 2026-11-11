@@ -386,6 +386,36 @@ type VaultTranslationKeys = {
   'settings.rateUs': string;
   'export.uri': string;
   'export.uriHint': string;
+
+  // Moving accounts to a phone by QR code (TransferModal)
+  'transfer.button': string;
+  'transfer.title': string;
+  'transfer.intro': string;
+  'transfer.caution': string;
+  'transfer.selected': string;
+  'transfer.all': string;
+  'transfer.none': string;
+  'transfer.show': string;
+  'transfer.codeOf': string;
+  'transfer.scan': string;
+  'transfer.inCode': string;
+  'transfer.single': string;
+  'transfer.skipped': string;
+  'transfer.prev': string;
+  'transfer.next': string;
+  'transfer.done': string;
+  'transfer.empty': string;
+  'transfer.failed': string;
+  /** After the last code: what the phone should show, and that nothing left here. {0} = accounts moved. */
+  'transfer.checkTitle': string;
+  'transfer.checkText': string;
+  /** The first screen where there is a phone app to offer: why move, then the two numbered steps. */
+  'transfer.heroTitle': string;
+  'transfer.heroText': string;
+  'transfer.step1': string;
+  'transfer.step1Text': string;
+  'transfer.step2': string;
+  'transfer.step2Text': string;
   'export.uriSkipped': string;
   /** "{0}" accounts written to a CXF file, "{1}" Steam Guard accounts CXF cannot carry */
   'export.cxfSkippedSteam': string;

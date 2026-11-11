@@ -1,5 +1,5 @@
 import { useCallback, useState, useMemo, useRef, useEffect } from 'react';
-import { Plus, Settings, AlertTriangle, HelpCircle, Moon, Sun, Sparkles, ArrowLeft, Copy, Pin, PinOff, FolderInput, CheckSquare, Share2, Pencil, Trash2, X, ChevronDown, Globe } from 'lucide-react';
+import { Camera, Keyboard, Plus, Settings, AlertTriangle, HelpCircle, Moon, Sun, Sparkles, ArrowLeft, Copy, Pin, PinOff, FolderInput, CheckSquare, Share2, Pencil, Trash2, X, ChevronDown, Globe } from 'lucide-react';
 import { ContextMenu, SEPARATOR, type MenuEntry } from '@/components/ContextMenu';
 import { useAccounts } from '@/hooks/useAccounts';
 import { useVault } from '@/hooks/useVault';
@@ -60,6 +60,8 @@ import { addMultipleAccounts, getAccounts, type GroupPlacement } from '@/utils/s
 import { listBackupSummaries, type BackupSummary } from '@/utils/auto-backup';
 import { shouldShowBackupReminder, markBackupDone } from '@/utils/backup-reminder';
 import { shouldShowVaultPrompt, markVaultPromptShown } from '@/utils/vault-prompt';
+import { useHostSetupRequests, useHostVault } from '@/utils/host-vault';
+import { provideAccountActions, useHostAddMenu } from '@/utils/host-touch';
 import { describeImport, importErrorKind, importErrorMessage } from '@/utils/import-message';
 import { confirmDialog, dismissToast, promptDialog, subscribe as subscribeFeedback, toast } from '@/utils/ui-feedback';
 import { useStableCallback } from '@/hooks/useStableCallback';
@@ -264,6 +266,8 @@ function App() {
    */
   const [selection, setSelection] = useState<{ ids: Set<string>; target: string | null } | null>(null);
   /** An account's right-click menu, and which of its two pages is showing. */
+  /** The + button's menu on a phone (utils/host-touch.ts): where it opens from. */
+  const [addMenuAt, setAddMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [cardMenu, setCardMenu] = useState<{
     account: Account;
     x: number;
@@ -1724,10 +1728,31 @@ function App() {
 
   // Offer the password vault once there are enough accounts to be worth
   // protecting — see vault-prompt.ts for the reasoning behind the timing.
+  // On a phone the host says what is on offer (Face ID, utils/host-vault.ts).
+  const hostVault = useHostVault();
+  const offersVault = hostVault ? hostVault.offers : vault.enabled === false;
+  const VaultSettingsView = hostVault?.Settings ?? VaultSettings;
+  const VaultSetupView = hostVault?.Setup ?? VaultSetupModal;
+  const hostSetupRequests = useHostSetupRequests();
+  const hostAddMenu = useHostAddMenu();
+  // A row swiped on a phone (mobile/src/touch.ts) edits or deletes through
+  // the same paths as the row's menu.
+  const editById = useStableCallback((id: string) => {
+    const account = accounts.find(a => a.id === id);
+    if (account) setEditingAccount(account);
+  });
+  const deleteById = useStableCallback((id: string) => void handleDeleteAccount(id));
+  useEffect(() => {
+    provideAccountActions({ edit: editById, remove: deleteById });
+    return () => provideAccountActions(null);
+  }, [editById, deleteById]);
+  useEffect(() => {
+    if (hostSetupRequests) setShowVaultSetup(true);
+  }, [hostSetupRequests]);
   useEffect(() => {
     if (loading || vault.enabled === null) return;
-    shouldShowVaultPrompt(accounts.length, vault.enabled).then(setShowVaultPrompt);
-  }, [loading, accounts.length, vault.enabled]);
+    shouldShowVaultPrompt(accounts.length, offersVault, hostVault?.minAccounts).then(setShowVaultPrompt);
+  }, [loading, accounts.length, vault.enabled, offersVault, hostVault?.minAccounts]);
 
   // The vault offer is the notice up top that gives way to all the others — an
   // error, the clock warning, the backup reminder — so
@@ -1737,7 +1762,7 @@ function App() {
   const vaultPromptVisible =
     showVaultPrompt && !showBackupReminder && !error && timeOffsetSec === null && !showSettings;
   // The server's vault banner asks what VaultPrompt asks, so never both at once.
-  const offersVaultBanner = vault.enabled === false && accounts.length > 0 && !vaultPromptVisible;
+  const offersVaultBanner = offersVault && accounts.length > 0 && !vaultPromptVisible;
   const vaultPromptCounted = useRef(false);
   useEffect(() => {
     if (!vaultPromptVisible || vaultPromptCounted.current) return;
@@ -1944,6 +1969,7 @@ function App() {
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
                 <button
+                  data-ui="theme-toggle"
                   onClick={handleThemeToggle}
                   className="p-1.5 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
                   title={t('theme.toggle')}
@@ -1955,7 +1981,11 @@ function App() {
               </div>
             </div>
           </div>
-          <LockScreen language={language} onUnlock={vault.unlock} onRecovered={vault.refresh} />
+          {hostVault ? (
+            <hostVault.LockScreen language={language} onUnlock={vault.unlock} onRecovered={vault.refresh} />
+          ) : (
+            <LockScreen language={language} onUnlock={vault.unlock} onRecovered={vault.refresh} />
+          )}
           <SupportFooter language={language} onLanguageChange={handleLanguageChange} />
           <FeedbackHost />
           <PaywallHost language={language} />
@@ -2053,7 +2083,7 @@ function App() {
                 at cloud backup. */}
             {!guidePath && <CloudSyncIndicator language={language} onOpen={openCloudBackup} />}
             {!guidePath && (
-              <NotificationBell language={language} offersVault={vault.enabled === false} onVault={() => setShowVaultSetup(true)} />
+              <NotificationBell language={language} offersVault={offersVault} onVault={() => setShowVaultSetup(true)} />
             )}
             {/* Not while a branch of the guide is open: someone following steps
                 with a phone in the other hand is not choosing a theme, and the
@@ -2061,6 +2091,7 @@ function App() {
                 Settings stay: the steps send people to both. */}
             {!guidePath && (
               <button
+                data-ui="theme-toggle"
                 onClick={handleThemeToggle}
                 className="p-1.5 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
                 title={t('theme.toggle')}
@@ -2171,6 +2202,7 @@ function App() {
       {vaultPromptVisible && (
         <VaultPrompt
           language={language}
+          text={hostVault?.offerText()}
           onEnable={() => {
             setShowVaultPrompt(false);
             setShowVaultSetup(true);
@@ -2195,7 +2227,7 @@ function App() {
             {/* First, and only when there is something to say (see ProSettings). */}
             <ProSettings language={language} />
 
-            <VaultSettings
+            <VaultSettingsView
               language={language}
               enabled={vault.enabled === true}
               autoLockMinutes={vault.autoLockMinutes}
@@ -2784,10 +2816,43 @@ function App() {
         />
       )}
 
+      {addMenuAt && hostAddMenu && (
+        <ContextMenu
+          x={addMenuAt.x}
+          y={addMenuAt.y}
+          above
+          items={[
+            {
+              label: hostAddMenu.scan(),
+              icon: Camera,
+              onSelect: () => {
+                setAddMenuAt(null);
+                void reportAddStep('qr', 'camera_page');
+                void chrome.tabs.create({ url: chrome.runtime.getURL('scan.html') });
+              },
+            },
+            {
+              label: hostAddMenu.key(),
+              icon: Keyboard,
+              onSelect: () => {
+                setAddMenuAt(null);
+                openAddAccount('manual');
+              },
+            },
+          ]}
+          onClose={() => setAddMenuAt(null)}
+        />
+      )}
+
       {/* Add Button (Floating Action Button) */}
       {!showSettings && accounts.length > 0 && !selection && (
         <button
-          onClick={() => openAddAccount()}
+          onClick={event => {
+            // On a phone: a menu above the button, the two ways in.
+            if (!hostAddMenu) return openAddAccount();
+            const box = event.currentTarget.getBoundingClientRect();
+            setAddMenuAt({ x: box.right, y: box.top - 8 });
+          }}
           className="fixed bottom-4 end-4 w-14 h-14 bg-accent-600 hover:bg-accent-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center"
           title={t('accounts.addAccount')}
           aria-label={t('accounts.addAccount')}
@@ -2845,7 +2910,7 @@ function App() {
 
       {/* Password Vault Setup */}
       {showVaultSetup && (
-        <VaultSetupModal
+        <VaultSetupView
           language={language}
           onClose={() => setShowVaultSetup(false)}
           onEnabled={() => {

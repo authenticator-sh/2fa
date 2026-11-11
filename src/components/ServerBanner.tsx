@@ -8,6 +8,7 @@ import { readInstall, readPolicy } from '@/billing/state';
 import { syncFromWorker } from '@/billing/sync';
 import type { Banner } from '@/billing/types';
 import { offersCloudBackup, useCloudBackupLocal, wishCloudBackupSetup } from '@/components/CloudBackupSettings';
+import { useHostVault } from '@/utils/host-vault';
 
 /**
  * The banners the server sets (policy.banner): whether there are any, where
@@ -45,6 +46,7 @@ export function ServerBanner({
   onVault?: () => void;
 }) {
   const t = createT(language);
+  const hostVault = useHostVault();
   const [local] = useCloudBackupLocal();
   const [banners, setBanners] = useState<Banner[] | undefined>(undefined);
   const [dismissed, setDismissed] = useState<string[] | null>(null);
@@ -124,9 +126,12 @@ export function ServerBanner({
     shown.action === 'vault'
       ? { eyebrow: t('settings.sectionSecurity'), title: t('vault.prompt.title'), cta: t('vault.prompt.enable') }
       : { eyebrow: t('cloud.title'), title: t('paywall.backup.title'), cta: t('cloud.turnOn') };
-  const eyebrow = shown.text ? shown.text.eyebrow : shipped.eyebrow;
-  const title = shown.text ? shown.text.title : shipped.title;
-  const cta = shown.text ? shown.text.cta : shipped.cta;
+  // On a phone a vault banner offers Face ID, whatever the server wrote for
+  // the extension's password (utils/host-vault.ts).
+  const own = shown.action === 'vault' && hostVault ? { eyebrow: shipped.eyebrow, ...hostVault.offerText() } : null;
+  const eyebrow = own ? own.eyebrow : shown.text ? shown.text.eyebrow : shipped.eyebrow;
+  const title = own ? own.title : shown.text ? shown.text.title : shipped.title;
+  const cta = own ? own.cta : shown.text ? shown.text.cta : shipped.cta;
 
   return (
     <section

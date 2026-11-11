@@ -16,7 +16,7 @@ import { useHostRow } from '@/utils/host-row';
  * Pick a starting point, get only the steps for it.
  */
 
-type PathId = 'ga' | 'new' | 'manual' | 'move' | 'asked';
+type PathId = 'ga' | 'new' | 'manual' | 'move' | 'asked' | 'host';
 
 /**
  * The tile behind a row's icon. One colour per row, so the rows read as
@@ -193,10 +193,33 @@ export function EmptyStateGuide({
 
   if (!openPath) {
     // The host's row first (utils/host-row.ts): the Mac app's "In the Chrome
-    // extension", for someone who has just installed it beside the extension.
+    // extension", for someone who has just installed it beside the extension;
+    // the iPhone's "On my computer", for someone moving from our extension.
     // Not counted as a pick: the server takes only the chooser's own ids.
     const choices = [
-      ...(hostRow ? [{ id: 'host', icon: Chrome, tone: 'amber' as const, label: hostRow.label(), sub: hostRow.sub(), pick: hostRow.run }] : []),
+      ...(hostRow
+        ? [
+            {
+              id: 'host' as const,
+              icon: hostRow.icon === 'computer' ? Monitor : Chrome,
+              tone: 'amber' as const,
+              label: hostRow.label(),
+              sub: hostRow.sub(),
+              pick: hostRow.steps
+                ? () =>
+                    onOpenPath({
+                      id: 'host',
+                      icon: Monitor,
+                      tone: 'amber',
+                      label: hostRow.steps!.label as TranslationKey,
+                      steps: hostRow.steps!.steps as TranslationKey,
+                      primary: hostRow.steps!.primary,
+                      action: 'camera',
+                    })
+                : hostRow.run,
+            },
+          ]
+        : []),
       ...PATHS.map(path => ({
         id: path.id,
         icon: path.icon,
@@ -204,7 +227,7 @@ export function EmptyStateGuide({
         label: t(path.label),
         sub: path.sub && t(path.sub),
         pick: () => {
-          void reportOnboardPick(path.id);
+          void reportOnboardPick(path.id as Exclude<PathId, 'host'>);
           if (hasSteps(path)) onOpenPath(path);
           else run(path.action);
         },
@@ -257,7 +280,7 @@ export function EmptyStateGuide({
             <button
               key={path.id}
               ref={node => {
-                if (path.id !== 'host') rows.current[path.id as PathId] = node;
+                rows.current[path.id as PathId] = node;
               }}
               onClick={path.pick}
               // All alike until one is hovered. The first used to be
@@ -333,8 +356,10 @@ export function EmptyStateGuide({
       // reliable about whether there is one until it has been asked (the list
       // of devices is one blank entry with and without a camera), so the way
       // for a computer without one is a button, not a guess.
+      // Not on the iPhone's "on my computer" row: the code is on a computer's
+      // screen in front of the phone, and a screenshot cannot be taken of it.
       onImage={
-        openPath.action === 'camera'
+        openPath.action === 'camera' && openPath.id !== 'host'
           ? () => {
               void reportAddStep('guide', `${openPath.id}_image`);
               onScanWithImage();

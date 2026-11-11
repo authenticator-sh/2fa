@@ -234,6 +234,14 @@
   background-color: rgb(var(--dark-900));
 }
 
+/* Full-screen screens over the list (Add account, Edit, Share, Move to phone,
+   the scanner) on the list's own background, as their header already is: in
+   dark they were dark-800 under a black header, a grey band between the
+   status bar and the header on a phone, and a different grey from the list. */
+.theme-apple.dark .fixed.inset-0.bg-gray-50 {
+  background-color: rgb(var(--dark-900));
+}
+
 .theme-apple [data-ui='header'],
 .theme-apple.dark [data-ui='header'],
 .theme-apple [data-ui='toolbar'],

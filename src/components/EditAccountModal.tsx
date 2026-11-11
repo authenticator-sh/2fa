@@ -149,7 +149,7 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
               </label>
               <input
                 id={`${ids}-name`}
-                type="text"
+                type="text" autoCorrect="off" autoComplete="off" spellCheck={false} autoCapitalize="none"
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
@@ -174,7 +174,7 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
               </label>
               <input
                 id={`${ids}-issuer`}
-                type="text"
+                type="text" autoCorrect="off" autoComplete="off" spellCheck={false} autoCapitalize="none"
                 value={issuer}
                 onChange={(e) => setIssuer(e.target.value)}
                 className="w-full bg-white dark:bg-dark-900 text-gray-900 dark:text-gray-100 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-dark-600 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500"
@@ -192,7 +192,7 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
                 <>
                   <input
                     id="edit-account-secret"
-                    type="text"
+                    type="text" autoCorrect="off" autoCapitalize="characters"
                     value={secret}
                     onChange={(e) => {
                       setSecret(e.target.value);
@@ -219,7 +219,7 @@ export function EditAccountModal({ account, onClose, onSave, language, groups = 
                 <div className="relative">
                   <input
                     id="edit-account-secret"
-                    type="text"
+                    type="text" autoCorrect="off" autoComplete="off" spellCheck={false} autoCapitalize="characters"
                     value={showSecret ? account.secret : maskedSecret}
                     readOnly
                     className="w-full bg-gray-50 dark:bg-dark-900/50 text-gray-900 dark:text-gray-100 text-sm font-mono rounded-lg px-3 py-2 pe-10 border border-gray-300 dark:border-dark-600 outline-none cursor-default"

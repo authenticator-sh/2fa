@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyRound, Loader2 } from 'lucide-react';
+import { Copy, KeyRound, Loader2 } from 'lucide-react';
 import { SettingRow, SettingsSection, settingsButton, settingsInput, settingsWell } from '@/components/SettingsSection';
 import { createT, type Language } from '@/utils/i18n';
 import { confirmDialog, toast } from '@/utils/ui-feedback';
 import { activateLicenseKey, deactivateLicense, openBillingPortal } from '@/billing/actions';
 import { getStoreRestore, openPaywall } from '@/billing/bridge';
 import { track } from '@/billing/events';
-import { readEntitlement, readInstall, readPolicy } from '@/billing/state';
+import { readEntitlement, readInstall, readLocalLicenseKey, readPolicy } from '@/billing/state';
 import { hasPendingCheckout, pendingCheckoutUrl, syncBilling } from '@/billing/sync';
 import type { Entitlement, Policy } from '@/billing/types';
 import { billingErrorMessage } from '@/billing/messages';
@@ -53,8 +53,10 @@ export function ProSettings({ language }: ProSettingsProps) {
   const [error, setError] = useState<string | null>(null);
   const tracked = useRef(false);
 
+  const [heldKey, setHeldKey] = useState<string | null>(null);
   const refresh = useCallback(() => {
     void readState().then(setState);
+    void readLocalLicenseKey().then(setHeldKey, () => setHeldKey(null));
   }, []);
 
   useEffect(() => {
@@ -108,7 +110,7 @@ export function ProSettings({ language }: ProSettingsProps) {
   };
 
   const unlimitedFree = !entitlement && (!policy || policy.free_limit === null);
-  // The Mac App Store edition's way back to a purchase; the key is in its paywall.
+  // An App Store edition's way back to a purchase, beside the key.
   const storeRestore = getStoreRestore();
 
   const failure = error && (
@@ -146,9 +148,28 @@ export function ProSettings({ language }: ProSettingsProps) {
         />
         <div className="px-3 py-2.5">
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-            <span className="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
-              {entitlement.key_hint ? t('pro.keyHint', entitlement.key_hint) : ''}
-            </span>
+            {/* The key itself, where this install holds it: a purchase in the App
+                Store is never emailed one, and cloud backup on another device,
+                the extension and the Mac app all ask for it. A tap copies it. */}
+            {entitlement.key_hint && heldKey ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard.writeText(heldKey).then(
+                    () => toast('success', t('accounts.copied')),
+                    () => toast('error', t('billing.error.generic'))
+                  );
+                }}
+                className="inline-flex items-center gap-1 text-[11px] leading-relaxed text-gray-500 underline decoration-dotted underline-offset-2 dark:text-gray-400"
+              >
+                <Copy size={11} aria-hidden />
+                {t('pro.keyHint', entitlement.key_hint)}
+              </button>
+            ) : (
+              <span className="text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                {entitlement.key_hint ? t('pro.keyHint', entitlement.key_hint) : ''}
+              </span>
+            )}
             <button
               type="button"
               disabled={busy !== null}
@@ -214,7 +235,7 @@ export function ProSettings({ language }: ProSettingsProps) {
           >
             {unlimitedFree ? t('pro.support') : t('pro.get')}
           </button>
-          {storeRestore ? (
+          {storeRestore && (
             <button
               type="button"
               disabled={busy !== null}
@@ -224,17 +245,19 @@ export function ProSettings({ language }: ProSettingsProps) {
               {busy === 'restore' && <Loader2 size={13} className="animate-spin" aria-hidden />}
               {storeRestore.label()}
             </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowKey(!showKey)}
-              aria-expanded={showKey}
-              className={settingsButton.secondary}
-            >
-              <KeyRound size={13} aria-hidden />
-              {t('paywall.haveKey')}
-            </button>
           )}
+          {/* In an App Store edition too, and quieter there: the key of a
+              purchase made on the site has to go in somewhere, and the
+              iPhone's paywall — a screen for buying — no longer asks for it. */}
+          <button
+            type="button"
+            onClick={() => setShowKey(!showKey)}
+            aria-expanded={showKey}
+            className={storeRestore ? `${settingsButton.link} inline-flex items-center gap-1` : settingsButton.secondary}
+          >
+            <KeyRound size={13} aria-hidden />
+            {t('paywall.haveKey')}
+          </button>
         </div>
 
         {showKey && (

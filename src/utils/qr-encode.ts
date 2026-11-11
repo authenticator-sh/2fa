@@ -1,4 +1,4 @@
-// Drawing a QR code, for the share link.
+// Drawing a QR code, for the share link and for moving accounts to a phone.
 //
 // The encoder is loaded on demand for the same reason jsQR is: it is needed
 // only once someone presses "Share", and the popup should not parse it on
@@ -24,9 +24,11 @@ export interface QRDrawing {
  * camera that cannot quite focus cost more than the ten percent of modules the
  * extra correction adds — an hour of codes stays inside version 18 either way.
  */
-export async function drawQR(text: string): Promise<QRDrawing> {
+export async function drawQR(text: string, level: 'L' | 'M' = 'M'): Promise<QRDrawing> {
   const { default: qrcode } = await import('qrcode-generator');
-  const qr = qrcode(0, 'M');
+  // L for the transfer codes (utils/transfer-qr.ts): up to ten accounts in one
+  // code, and every module saved is a larger module on a 320 px popup.
+  const qr = qrcode(0, level);
   qr.addData(text, 'Byte');
   qr.make();
 
