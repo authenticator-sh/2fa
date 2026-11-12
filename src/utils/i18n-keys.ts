@@ -479,8 +479,6 @@ type VaultTranslationKeys = {
   // The Share screen: temporary access by link, and moving the account to
   // another app as a QR code. `share.title` is also the card button's tooltip.
   'share.title': string;
-  /** {0} — the chosen duration, from share.minutes or share.hour */
-  'share.intro': string;
   'share.label': string;
   'share.duration': string;
   /** "{0} min" */
