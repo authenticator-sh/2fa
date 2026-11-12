@@ -1,7 +1,7 @@
 import { readInstall } from '@/billing/state';
 import { useId, useRef, useState } from 'react';
 import { useEscapeLayer } from '@/hooks/useLayer';
-import { ClipboardPaste, Download, Link2, Lock, Share2, Unlock, Upload } from 'lucide-react';
+import { ClipboardPaste, Download, Link2, Lock, QrCode, Share2, Unlock, Upload } from 'lucide-react';
 import { settingsButton } from '@/components/SettingsSection';
 import {
   exportAccounts,
@@ -26,6 +26,7 @@ import {
   fileImportKind,
   importErrorKind, importErrorMessage,
 } from '@/utils/import-message';
+import { TransferExport } from '@/components/TransferExport';
 import { reportAddFail, reportAddStep } from '@/billing/onboarding';
 import { importURIList, looksLikeURIList } from '@/utils/uri-import';
 import { confirmDialog, promptDialog, toast } from '@/utils/ui-feedback';
@@ -216,6 +217,8 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
   const t = createT(language);
 
   const [showExportChoice, setShowExportChoice] = useState(false);
+  // The accounts being chosen for Google Authenticator, while that screen is open.
+  const [transferAccounts, setTransferAccounts] = useState<Account[] | null>(null);
   const [exportPassword, setExportPassword] = useState('');
   const [exportPasswordConfirm, setExportPasswordConfirm] = useState('');
   const [exportError, setExportError] = useState<string | null>(null);
@@ -332,13 +335,56 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
     }
   };
 
-  function closeExportChoice() {
+  const startTransfer = async () => {
+    if (exporting.current) return;
+    exporting.current = true;
+    setBusy(true);
+    setExportError(null);
+    try {
+      const accounts: Account[] = JSON.parse(await exportAccounts());
+      const heldBack = quarantinedCount();
+      if (heldBack > 0) {
+        const proceed = await confirmDialog({
+          title: t('export.plainConfirmTitle'),
+          body: t('export.warningPartial', accounts.length, accounts.length + heldBack),
+          confirmLabel: t('common.confirm'),
+          cancelLabel: t('common.cancel'),
+          danger: true,
+        });
+        if (!proceed) return;
+      }
+      // Without moving focus back to Export: the screen opening now puts it on
+      // its own Back button, and a late focus() would pull it out from under it.
+      resetExportChoice();
+      setTransferAccounts(accounts);
+    } catch (error) {
+      console.error('Export failed:', error);
+      setExportError(t('export.failed'));
+    } finally {
+      exporting.current = false;
+      setBusy(false);
+    }
+  };
+
+  function resetExportChoice() {
     setShowExportChoice(false);
     setExportPassword('');
     setExportPasswordConfirm('');
     setExportError(null);
+  }
+
+  function closeExportChoice() {
+    resetExportChoice();
     // Back to the button that opened it. The window is not a component of its
     // own, so this is done here rather than by useReturnFocus.
+    setTimeout(() => exportButtonRef.current?.focus(), 0);
+  }
+
+  // The window's "Choose accounts" button, which opened the Google
+  // Authenticator screen, is gone by the time that screen closes, so its own
+  // return of focus finds nothing to go back to.
+  function closeTransfer() {
+    setTransferAccounts(null);
     setTimeout(() => exportButtonRef.current?.focus(), 0);
   }
 
@@ -665,6 +711,23 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
               </button>
             </div>
 
+            <div className="border border-gray-200 dark:border-dark-600 rounded-lg p-3 mb-3">
+              <div className="flex items-center gap-1.5 mb-1">
+                <QrCode className="text-gray-500 dark:text-gray-400" size={14} />
+                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {t('export.ga')}
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-2">{t('export.gaHint')}</p>
+              <button
+                onClick={startTransfer}
+                disabled={busy}
+                className="w-full text-xs font-medium py-1.5 rounded-md border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors disabled:opacity-50"
+              >
+                {t('export.gaChoose')}
+              </button>
+            </div>
+
             {exportError && <p role="alert" className="text-xs text-red-600 dark:text-red-400 mb-2">{exportError}</p>}
 
             <button
@@ -675,6 +738,10 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
             </button>
           </div>
         </div>
+      )}
+
+      {transferAccounts && (
+        <TransferExport accounts={transferAccounts} language={language} onClose={closeTransfer} />
       )}
     </>
   );

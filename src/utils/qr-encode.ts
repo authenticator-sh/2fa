@@ -1,7 +1,9 @@
-// Drawing a QR code, for the share link.
+// Drawing a QR code: the share link on the Share screen, and in the QR overlay
+// an account's otpauth:// URL or the otpauth-migration:// codes that move
+// accounts to Google Authenticator.
 //
 // The encoder is loaded on demand for the same reason jsQR is: it is needed
-// only once someone presses "Share", and the popup should not parse it on
+// only once someone asks for a code, and the popup should not parse it on
 // every open to be ready for that.
 //
 // The result is a path, not a bitmap. Rendered as an inline SVG it scales to
@@ -17,8 +19,10 @@ export interface QRDrawing {
 }
 
 /**
- * The share page's link is base64url, so the payload is pure ASCII and byte
- * mode carries it without the encoder's UTF-8 helper.
+ * Every payload is pure ASCII, so byte mode carries it without the encoder's
+ * UTF-8 helper: the share page's link is base64url, an otpauth:// URL comes
+ * from buildOTPAuthURL, which percent-encodes the label and every parameter,
+ * and a migration code's payload is base64, percent-encoded into its URL.
  *
  * Level M rather than L: the link is read from a screen, where moiré and a
  * camera that cannot quite focus cost more than the ten percent of modules the

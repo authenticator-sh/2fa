@@ -40,6 +40,7 @@ const suites = [
   ['writing from two surfaces at once', () => import('./concurrency.test')],
   ['shared vectors', () => import('./parity.test')],
   ['sharing codes by link', () => import('./share.test')],
+  ['moving accounts to another app by QR', () => import('./transfer.test')],
   ['steam guard', () => import('./steam.test')],
   ['where the app opens', () => import('./open-mode.test')],
   ['the service worker, gesture by gesture', () => import('./service-worker.test')],
