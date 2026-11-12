@@ -45,6 +45,9 @@ A privacy-focused TOTP authenticator for Chrome. Your secrets, account names and
 - **Move an account to another app** — Share → Show QR code shows the account's
   otpauth:// QR for Google Authenticator, Aegis and other apps; unlike the link,
   it carries the secret, and the access it gives is permanent
+- **Export to Google Authenticator** — choose the accounts and scan them in as
+  QR codes of up to ten each; any account Google Authenticator cannot carry is
+  named on the list rather than left behind without a word
 - **Open where you need it** — the toolbar icon can open the popup, a floating
   window, or Chrome's side panel; the last two stay put while you switch tabs,
   which a popup cannot do because it closes as soon as it loses focus
@@ -421,7 +424,7 @@ src/
 │   ├── time-sync.ts         # Optional clock-drift check
 │   ├── totp.ts              # TOTP via OTPAuth
 │   ├── qr-parser.ts         # QR decoding
-│   ├── migration-parser.ts  # Google Authenticator export parser
+│   ├── migration-parser.ts  # Google Authenticator export reader and writer
 │   ├── suggestions.ts       # Which account belongs to the site you are on
 │   └── screen-capture.ts    # captureVisibleTab wrapper (activeTab only)
 └── types/
