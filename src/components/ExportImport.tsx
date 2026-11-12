@@ -353,7 +353,9 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
         });
         if (!proceed) return;
       }
-      closeExportChoice();
+      // Without moving focus back to Export: the screen opening now puts it on
+      // its own Back button, and a late focus() would pull it out from under it.
+      resetExportChoice();
       setTransferAccounts(accounts);
     } catch (error) {
       console.error('Export failed:', error);
@@ -364,13 +366,25 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
     }
   };
 
-  function closeExportChoice() {
+  function resetExportChoice() {
     setShowExportChoice(false);
     setExportPassword('');
     setExportPasswordConfirm('');
     setExportError(null);
+  }
+
+  function closeExportChoice() {
+    resetExportChoice();
     // Back to the button that opened it. The window is not a component of its
     // own, so this is done here rather than by useReturnFocus.
+    setTimeout(() => exportButtonRef.current?.focus(), 0);
+  }
+
+  // The window's "Choose accounts" button, which opened the Google
+  // Authenticator screen, is gone by the time that screen closes, so its own
+  // return of focus finds nothing to go back to.
+  function closeTransfer() {
+    setTransferAccounts(null);
     setTimeout(() => exportButtonRef.current?.focus(), 0);
   }
 
@@ -727,7 +741,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
       )}
 
       {transferAccounts && (
-        <TransferExport accounts={transferAccounts} language={language} onClose={() => setTransferAccounts(null)} />
+        <TransferExport accounts={transferAccounts} language={language} onClose={closeTransfer} />
       )}
     </>
   );

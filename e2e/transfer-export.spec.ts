@@ -29,6 +29,9 @@ test('export to Google Authenticator lets you choose accounts and pages through 
 
   const screen = page.getByRole('dialog', { name: 'To Google Authenticator' });
   await expect(screen.getByText('11 of 11 selected')).toBeVisible();
+  // Focus starts on the screen's own way out, not back behind it on Export.
+  const back = screen.getByRole('button', { name: 'Back' });
+  await expect(back).toBeFocused();
 
   await screen.getByRole('checkbox').first().uncheck();
   await expect(screen.getByText('10 of 11 selected')).toBeVisible();
@@ -52,4 +55,10 @@ test('export to Google Authenticator lets you choose accounts and pages through 
 
   await screen.getByRole('button', { name: 'Clear all' }).click();
   await expect(screen.getByRole('button', { name: /^Next \(0\)$/ })).toBeDisabled();
+
+  // The button that opened the screen went with the export window, so focus
+  // returns to Export rather than dropping to the page.
+  await back.click();
+  await expect(screen).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Export', exact: true })).toBeFocused();
 });
