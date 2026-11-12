@@ -499,6 +499,13 @@ type VaultTranslationKeys = {
   'share.failed': string;
   'share.periodTooShort': string;
   'share.done': string;
+  // The QR overlay: an account, or a batch of them, shown for another app to scan.
+  'qr.scanHint': string;
+  'qr.permanentWarning': string;
+  /** "{0} of {1}" — which code of a series is on screen */
+  'qr.position': string;
+  'qr.next': string;
+  'qr.failed': string;
   // Restoring from the automatic daily snapshots
   'restore.title': string;
   'restore.hint': string;
