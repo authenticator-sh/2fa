@@ -30,7 +30,6 @@ export function TransferExport({ accounts, language, onClose }: TransferExportPr
   const selectable = useMemo(() => rows.filter(row => row.reason === null).map(row => row.account.id), [rows]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(selectable));
   const [frames, setFrames] = useState<QrFrame[] | null>(null);
-  const [batchCount, setBatchCount] = useState(0);
 
   const allSelected = selectable.length > 0 && selected.size === selectable.length;
 
@@ -68,7 +67,6 @@ export function TransferExport({ accounts, language, onClose }: TransferExportPr
         return { caption, text: batch.url };
       })
     );
-    setBatchCount(batches.length);
   };
 
   return (
@@ -136,7 +134,7 @@ export function TransferExport({ accounts, language, onClose }: TransferExportPr
           frames={frames}
           language={language}
           onClose={() => setFrames(null)}
-          lastHint={t('transfer.lastHint', batchCount)}
+          lastHint={t('transfer.lastHint', frames.length)}
         />
       )}
     </div>
