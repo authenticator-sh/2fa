@@ -5,11 +5,13 @@
  *
  * The reader and the writer live in one file deliberately, the way
  * parseOTPAuthURL and buildOTPAuthURL do: they are one format read from both
- * ends, and `parse(build(a)) == a` is what makes "move to Google
- * Authenticator" safe to offer. A wrong byte on the way out is worse than a
- * refusal — Google Authenticator then shows confident codes no service
- * accepts. The round-trip is covered in transfer.test.ts; break either side
- * and it fails.
+ * ends, and reading back what was written is what makes "move to Google
+ * Authenticator" safe to offer. The secret and every setting a code depends on
+ * come back unchanged; the name and issuer come back as our reader stores them
+ * (trimmed, and a name with a colon but no issuer split at it). A wrong byte on
+ * the way out is worse than a refusal — Google Authenticator then shows
+ * confident codes no service accepts. The round-trip is covered in
+ * transfer.test.ts; break either side and it fails.
  */
 
 import * as OTPAuth from 'otpauth';
@@ -476,8 +478,8 @@ export function parseMigrationURL(url: string): MigrationPayload | null {
  * - `period`: the payload has no field for it, so Google would assume 30 s and
  *   show wrong codes — without a word.
  * - `params`: the payload could state the digit count or the algorithm, but
- *   Google Authenticator is known to ignore them and show six-digit SHA1 codes
- *   anyway. Wrong codes that look right are worse than a named refusal.
+ *   whether Google Authenticator honours them varies by platform and version.
+ *   Wrong codes that look right are worse than a named refusal.
  */
 export type MigrationSkipReason = 'steam' | 'secret' | 'period' | 'params';
 
@@ -491,12 +493,13 @@ export function migrationSkipReason(account: Account): MigrationSkipReason | nul
   return null;
 }
 
-/** Google's own exporter puts ten accounts in a code; its importer expects no more. */
+/** Google's own exporter puts ten accounts in a code. */
 export const MIGRATION_BATCH_ACCOUNTS = 10;
 
 /**
- * Past this a QR gets dense enough that phone cameras start failing on it.
- * Long labels close a batch before ten.
+ * A limit we chose, not one the format sets: past it the code gets dense
+ * enough in the overlay's field that phone cameras struggle with it. Long
+ * labels close a batch before ten.
  */
 export const MIGRATION_MAX_URL_LENGTH = 1500;
 
