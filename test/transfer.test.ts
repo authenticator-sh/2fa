@@ -149,4 +149,27 @@ export async function run() {
     'a given batch id writes the same codes',
     buildMigrationURLs(trio, 12345).batches[0].url === buildMigrationURLs(trio, 12345).batches[0].url,
   );
+
+  // Bytes written out by hand from Google's migration.proto, not by our
+  // encoder: a wrong enum on both the writing and the reading side would still
+  // round-trip, but it cannot match these.
+  scenario('One account is written byte for byte as Google writes it');
+  const golden = [
+    '0a18', // otp_parameters, 24 bytes:
+    '0a0a48656c6c6f21deadbeef', //   secret: JBSWY3DPEHPK3PXP
+    '120161', //   name: "a"
+    '1a0162', //   issuer: "b"
+    '2001', //   algorithm: SHA1
+    '2801', //   digits: six
+    '3002', //   type: TOTP
+    '1001', // version: 1
+    '1801', // batch_size: 1
+    '2000', // batch_index: 0
+    '28ac02', // batch_id: 300
+  ].join('');
+  const goldenURL = `otpauth-migration://offline?data=${encodeURIComponent(Buffer.from(golden, 'hex').toString('base64'))}`;
+  check(
+    'the exact URL',
+    buildMigrationURLs([{ ...base, name: 'a', issuer: 'b' }], 300).batches[0]?.url === goldenURL,
+  );
 }
