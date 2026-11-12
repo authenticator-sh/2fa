@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff, Copy, Check, AlertTriangle } from 'lucide-react';
+import { Eye, EyeOff, Copy, Check, AlertTriangle, QrCode } from 'lucide-react';
+import { QrOverlay, type QrFrame } from './QrOverlay';
 import { ModalHeader } from './ModalHeader';
 import type { Account } from '@/types';
 import { accountLabel } from '@/utils/account-label';
+import { buildOTPAuthURL } from '@/utils/qr-parser';
+import { nonStandardParams } from '@/utils/transfer';
 import { createT, type Language } from '@/utils/i18n';
 import {
   buildShareLink,
@@ -74,6 +77,9 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
   const [link, setLink] = useState<ShareLink | null>(null);
   const [qr, setQr] = useState<QRDrawing | null>(null);
   const [copied, setCopied] = useState(false);
+  // The account's own otpauth URL, built on click and held only while the
+  // overlay is open — it is the secret, so it is never kept longer.
+  const [transfer, setTransfer] = useState<QrFrame | null>(null);
 
   // Once per opening: StrictMode runs the effect twice in development.
   const opened = useRef(false);
@@ -153,6 +159,19 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
     void track('share_copy', { password: !!password });
   };
 
+  const showTransfer = () => {
+    const params = nonStandardParams(account).map((param) => {
+      if (param.kind === 'period') return t('qr.paramPeriod', param.value);
+      if (param.kind === 'digits') return t('qr.paramDigits', param.value);
+      return param.value;
+    });
+    setTransfer({
+      caption: accountLabel(account),
+      text: buildOTPAuthURL(account),
+      note: params.length ? t('qr.nonStandard', params.join(', ')) : undefined,
+    });
+  };
+
   const validUntil = link
     ? new Date(link.validUntilMs).toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' })
     : '';
@@ -181,12 +200,12 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
             </p>
           )}
 
+          {!link && (
+            <h2 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">{t('share.temporaryTitle')}</h2>
+          )}
+
           {!link ? (
             <form onSubmit={handleCreate} className="space-y-4">
-              <p className="text-xs leading-relaxed text-gray-600 dark:text-gray-400">
-                {t('share.intro', durationLabel(durationSec))}
-              </p>
-
               <div>
                 <label
                   htmlFor="share-label"
@@ -348,8 +367,27 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
               </button>
             </div>
           )}
+
+          {!link && (
+            <div className="mt-4 border-t border-gray-200 pt-3 dark:border-dark-600">
+              <h2 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">{t('share.transferTitle')}</h2>
+              <button
+                type="button"
+                onClick={showTransfer}
+                className="flex w-full items-center gap-3 rounded-lg border border-gray-300 px-3 py-2 text-start transition-colors hover:bg-gray-50 dark:border-dark-500 dark:hover:bg-dark-700"
+              >
+                <QrCode size={20} className="flex-shrink-0 text-gray-600 dark:text-gray-300" aria-hidden />
+                <span className="min-w-0">
+                  <span className="block text-sm font-bold text-gray-900 dark:text-gray-100">{t('share.transferShow')}</span>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400">{t('share.transferHint')}</span>
+                </span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      {transfer && <QrOverlay frames={[transfer]} language={language} onClose={() => setTransfer(null)} />}
     </div>
   );
 }

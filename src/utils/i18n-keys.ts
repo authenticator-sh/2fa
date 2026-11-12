@@ -476,10 +476,9 @@ type VaultTranslationKeys = {
   'addAccount.errorSaveFailed': string;
   'import.successUnreadable': string;
 
-  // Sharing codes by link. `share.title` is also the card button's tooltip.
+  // The Share screen: temporary access by link, and moving the account to
+  // another app as a QR code. `share.title` is also the card button's tooltip.
   'share.title': string;
-  /** {0} — the chosen duration, from share.minutes or share.hour */
-  'share.intro': string;
   'share.label': string;
   'share.duration': string;
   /** "{0} min" */
@@ -499,6 +498,23 @@ type VaultTranslationKeys = {
   'share.failed': string;
   'share.periodTooShort': string;
   'share.done': string;
+  'share.temporaryTitle': string;
+  'share.transferTitle': string;
+  'share.transferShow': string;
+  'share.transferHint': string;
+  // The QR overlay: an account, or a batch of them, shown for another app to scan.
+  'qr.scanHint': string;
+  'qr.permanentWarning': string;
+  /** "{0} of {1}" — which code of a series is on screen */
+  'qr.position': string;
+  'qr.next': string;
+  'qr.failed': string;
+  /** {0} — the account's non-standard settings, joined with ", " */
+  'qr.nonStandard': string;
+  /** "{0}s period" */
+  'qr.paramPeriod': string;
+  /** "{0} digits" */
+  'qr.paramDigits': string;
   // Restoring from the automatic daily snapshots
   'restore.title': string;
   'restore.hint': string;

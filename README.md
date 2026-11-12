@@ -42,6 +42,9 @@ A privacy-focused TOTP authenticator for Chrome. Your secrets, account names and
 - **Share an account's codes by link**, for five minutes to an hour — the link
   carries pre-computed codes, never the secret, and there is no server behind
   it (see [Sharing codes by link](#sharing-codes-by-link))
+- **Move an account to another app** — Share → Show QR code shows the account's
+  otpauth:// QR for Google Authenticator, Aegis and other apps; unlike the link,
+  it carries the secret, and the access it gives is permanent
 - **Open where you need it** — the toolbar icon can open the popup, a floating
   window, or Chrome's side panel; the last two stay put while you switch tabs,
   which a popup cannot do because it closes as soon as it loses focus
