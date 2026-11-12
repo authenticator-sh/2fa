@@ -68,7 +68,7 @@ const ALGORITHMS = ['SHA1', 'SHA256', 'SHA512'] as const;
  * value has to match what generation computes with. Reading a value someone
  * else wrote goes through readAlgorithm below, which refuses instead.
  */
-function parseAlgorithm(raw: string | null): OTPAlgorithm {
+export function parseAlgorithm(raw: string | null): OTPAlgorithm {
   const name = (raw || 'SHA1').toUpperCase().replace(/-/g, '');
   return (ALGORITHMS as readonly string[]).includes(name) ? (name as OTPAlgorithm) : 'SHA1';
 }
