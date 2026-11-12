@@ -1,7 +1,21 @@
 /**
  * Google Authenticator Migration Parser
- * Parses otpauth-migration:// URLs that contain protobuf-encoded account data
+ * Parses otpauth-migration:// URLs that contain protobuf-encoded account data,
+ * and writes them.
+ *
+ * The reader and the writer live in one file deliberately, the way
+ * parseOTPAuthURL and buildOTPAuthURL do: they are one format read from both
+ * ends, and `parse(build(a)) == a` is what makes "move to Google
+ * Authenticator" safe to offer. A wrong byte on the way out is worse than a
+ * refusal — Google Authenticator then shows confident codes no service
+ * accepts. The round-trip is covered in transfer.test.ts; break either side
+ * and it fails.
  */
+
+import * as OTPAuth from 'otpauth';
+import type { Account } from '@/types';
+import { cleanSecret, isSteamAccount, isUsableSecret } from './totp';
+import { nonStandardParams } from './transfer';
 
 /**
  * A whole MigrationPayload, batch metadata included.
@@ -117,6 +131,31 @@ function readLengthDelimited(buffer: Uint8Array, offset: number): { data: Uint8A
 
   const data = buffer.slice(newOffset, newOffset + length);
   return { data, offset: newOffset + length };
+}
+
+/**
+ * Appends a varint: the inverse of decodeVarint. Arithmetic rather than bit
+ * shifts, as there, so a value past 32 bits is not silently wrapped.
+ */
+function encodeVarint(out: number[], value: number): void {
+  let rest = value;
+  while (rest >= 0x80) {
+    out.push((rest % 0x80) | 0x80);
+    rest = Math.floor(rest / 0x80);
+  }
+  out.push(rest);
+}
+
+function writeVarintField(out: number[], fieldNumber: number, value: number): void {
+  encodeVarint(out, (fieldNumber << 3) | WIRE_TYPE_VARINT);
+  encodeVarint(out, value);
+}
+
+/** The inverse of readLengthDelimited: tag, length, then the bytes. */
+function writeLengthDelimited(out: number[], fieldNumber: number, data: Uint8Array | number[]): void {
+  encodeVarint(out, (fieldNumber << 3) | WIRE_TYPE_LENGTH_DELIMITED);
+  encodeVarint(out, data.length);
+  for (const byte of data) out.push(byte);
 }
 
 /**
@@ -427,4 +466,165 @@ export function parseMigrationURL(url: string): MigrationPayload | null {
     console.error('Error parsing migration URL:', error);
     return null;
   }
+}
+
+/**
+ * Why an account cannot travel in a Google Authenticator migration code.
+ *
+ * - `steam`: Steam's codes are its own alphabet; Google would show digits.
+ * - `secret`: there is no key to hand over.
+ * - `period`: the payload has no field for it, so Google would assume 30 s and
+ *   show wrong codes — without a word.
+ * - `params`: the payload could state the digit count or the algorithm, but
+ *   Google Authenticator is known to ignore them and show six-digit SHA1 codes
+ *   anyway. Wrong codes that look right are worse than a named refusal.
+ */
+export type MigrationSkipReason = 'steam' | 'secret' | 'period' | 'params';
+
+/** The first reason in that order, or null when the account can go. */
+export function migrationSkipReason(account: Account): MigrationSkipReason | null {
+  if (isSteamAccount(account)) return 'steam';
+  if (!isUsableSecret(account.secret)) return 'secret';
+  const params = nonStandardParams(account);
+  if (params.some((p) => p.kind === 'period')) return 'period';
+  if (params.length > 0) return 'params';
+  return null;
+}
+
+/** Google's own exporter puts ten accounts in a code; its importer expects no more. */
+export const MIGRATION_BATCH_ACCOUNTS = 10;
+
+/**
+ * Past this a QR gets dense enough that phone cameras start failing on it.
+ * Long labels close a batch before ten.
+ */
+export const MIGRATION_MAX_URL_LENGTH = 1500;
+
+export interface MigrationBatch {
+  /** Never log it: it carries every secret in the batch. */
+  url: string;
+  accounts: Account[];
+}
+
+/** OtpParameters for one account already cleared by migrationSkipReason. */
+function encodeOtpParameters(account: Account): number[] {
+  const out: number[] = [];
+  const utf8 = new TextEncoder();
+  // The same bytes generation HMACs with: otpauth decodes the cleaned string.
+  writeLengthDelimited(out, 1, OTPAuth.Secret.fromBase32(cleanSecret(account.secret)).bytes); // secret
+  writeLengthDelimited(out, 2, utf8.encode(account.name)); // name
+  writeLengthDelimited(out, 3, utf8.encode(account.issuer ?? '')); // issuer
+  writeVarintField(out, 4, 1); // algorithm: SHA1
+  writeVarintField(out, 5, 1); // digits: six
+  writeVarintField(out, 6, 2); // type: TOTP
+  return out;
+}
+
+function migrationURL(
+  entries: number[][],
+  batchSize: number,
+  batchIndex: number,
+  batchId: number,
+): string {
+  const out: number[] = [];
+  for (const entry of entries) writeLengthDelimited(out, 1, entry); // otp_parameters
+  writeVarintField(out, 2, 1); // version
+  writeVarintField(out, 3, batchSize); // batch_size
+  writeVarintField(out, 4, batchIndex); // batch_index
+  writeVarintField(out, 5, batchId); // batch_id
+  let binary = '';
+  for (const byte of out) binary += String.fromCharCode(byte);
+  // Standard base64, percent-encoded as Google writes it: a bare `+` is read as
+  // a space by any reader that uses form decoding (see parseMigrationURL).
+  return `otpauth-migration://offline?data=${encodeURIComponent(btoa(binary))}`;
+}
+
+/** A random non-negative int32, which is what batch_id is declared as. */
+function randomBatchId(): number {
+  return crypto.getRandomValues(new Uint32Array(1))[0] >>> 1;
+}
+
+/**
+ * Split entries into batches, measuring each candidate URL exactly as it will
+ * be written. Every field but batch_size is known while filling; that one is
+ * the guess, so the caller iterates until the guess is the result.
+ */
+function fillBatches(
+  entries: number[][],
+  batchSize: number,
+  batchId: number,
+  limit: number,
+): number[] {
+  const counts: number[] = [];
+  let start = 0;
+  while (start < entries.length) {
+    let end = start + 1; // one account always gets a code, however long
+    while (
+      end < entries.length &&
+      end - start < MIGRATION_BATCH_ACCOUNTS &&
+      migrationURL(entries.slice(start, end + 1), batchSize, counts.length, batchId).length <= limit
+    ) {
+      end++;
+    }
+    counts.push(end - start);
+    start = end;
+  }
+  return counts;
+}
+
+/**
+ * Every account that can go, as Google Authenticator migration codes in
+ * order, plus every one that cannot and why — named, never dropped, so the
+ * screen can say "these three stay behind" instead of the user discovering it
+ * on the other phone.
+ *
+ * Never log the URLs: they carry the secrets.
+ */
+export function buildMigrationURLs(
+  accounts: Account[],
+  batchId: number = randomBatchId(),
+): { batches: MigrationBatch[]; skipped: { account: Account; reason: MigrationSkipReason }[] } {
+  if (!Number.isInteger(batchId) || batchId < 0 || batchId > 0x7fffffff) {
+    throw new RangeError('batchId must be a non-negative 31-bit integer');
+  }
+
+  const exportable: Account[] = [];
+  const skipped: { account: Account; reason: MigrationSkipReason }[] = [];
+  for (const account of accounts) {
+    const reason = migrationSkipReason(account);
+    if (reason) skipped.push({ account, reason });
+    else exportable.push(account);
+  }
+  if (exportable.length === 0) return { batches: [], skipped };
+
+  const entries = exportable.map(encodeOtpParameters);
+
+  // batch_size is written into every code but only known once they are all
+  // filled, and its value can move a URL by a character or two. Measure with a
+  // guess and repeat until the guess holds, so the length checked is the
+  // length written.
+  let size = Math.ceil(entries.length / MIGRATION_BATCH_ACCOUNTS);
+  let counts = fillBatches(entries, size, batchId, MIGRATION_MAX_URL_LENGTH);
+  for (let attempt = 0; attempt < 8 && counts.length !== size; attempt++) {
+    size = counts.length;
+    counts = fillBatches(entries, size, batchId, MIGRATION_MAX_URL_LENGTH);
+  }
+  if (counts.length !== size) {
+    // Never seen, but not impossible: two sizes that each split the other
+    // way. Below 128 codes batch_size is one byte, touching at most two base64
+    // characters — four URL characters once percent-encoded — so leaving that
+    // much room makes the limit hold whatever the final size reads.
+    counts = fillBatches(entries, counts.length, batchId, MIGRATION_MAX_URL_LENGTH - 4);
+  }
+
+  const batches: MigrationBatch[] = [];
+  let start = 0;
+  counts.forEach((count, index) => {
+    batches.push({
+      url: migrationURL(entries.slice(start, start + count), counts.length, index, batchId),
+      accounts: exportable.slice(start, start + count),
+    });
+    start += count;
+  });
+  return { batches, skipped };
 }
