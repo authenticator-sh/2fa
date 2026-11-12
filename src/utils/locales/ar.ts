@@ -657,7 +657,7 @@ const strings: TranslationStrings = {
   "transfer.skipSecret": "المفتاح تالف",
   "transfer.skipPeriod": "المدة {0} ث غير مدعومة",
   "transfer.skipParams": "إعدادات غير قياسية — انقله عبر «مشاركة»",
-  "transfer.batchCaption": "الحسابات {0}–{1} من {2}",
+  "transfer.batchCaption": "الحسابات في هذا الرمز: {0}",
   "transfer.lastHint": "امسح جميع الرموز بالتتابع — المجموع {0}.",
 };
 

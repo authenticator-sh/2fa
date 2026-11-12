@@ -657,7 +657,7 @@ const strings: TranslationStrings = {
   "transfer.skipSecret": "คีย์เสียหาย",
   "transfer.skipPeriod": "ไม่รองรับรอบเวลา {0} วินาที",
   "transfer.skipParams": "การตั้งค่าไม่เป็นมาตรฐาน — ย้ายด้วย “แชร์”",
-  "transfer.batchCaption": "บัญชี {0}–{1} จาก {2}",
+  "transfer.batchCaption": "บัญชีในรหัสนี้: {0}",
   "transfer.lastHint": "สแกนทุกโค้ดตามลำดับ — ทั้งหมด {0} โค้ด",
 };
 

@@ -58,15 +58,10 @@ export function TransferExport({ accounts, language, onClose }: TransferExportPr
     const chosen = accounts.filter(account => selected.has(account.id));
     const { batches } = buildMigrationURLs(chosen);
     if (batches.length === 0) return;
-    let first = 1;
-    setFrames(
-      batches.map(batch => {
-        const last = first + batch.accounts.length - 1;
-        const caption = t('transfer.batchCaption', first, last, chosen.length);
-        first = last + 1;
-        return { caption, text: batch.url };
-      })
-    );
+    // How many accounts this code adds — the one number a person scanning it
+    // can check against their phone. Which code of how many is the overlay's
+    // own "1 of 3" below the code.
+    setFrames(batches.map(batch => ({ caption: t('transfer.batchCaption', batch.accounts.length), text: batch.url })));
   };
 
   return (

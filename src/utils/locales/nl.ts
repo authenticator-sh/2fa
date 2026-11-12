@@ -657,7 +657,7 @@ const strings: TranslationStrings = {
   "transfer.skipSecret": "beschadigde sleutel",
   "transfer.skipPeriod": "periode van {0} s wordt niet ondersteund",
   "transfer.skipParams": "afwijkende instellingen — verplaats via Delen",
-  "transfer.batchCaption": "Accounts {0}–{1} van {2}",
+  "transfer.batchCaption": "Accounts in deze code: {0}",
   "transfer.lastHint": "Scan alle codes na elkaar — {0} in totaal.",
 };
 

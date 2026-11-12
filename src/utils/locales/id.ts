@@ -657,7 +657,7 @@ const strings: TranslationStrings = {
   "transfer.skipSecret": "kunci rusak",
   "transfer.skipPeriod": "periode {0} dtk tidak didukung",
   "transfer.skipParams": "pengaturan tidak standar — pindahkan dengan Bagikan",
-  "transfer.batchCaption": "Akun {0}–{1} dari {2}",
+  "transfer.batchCaption": "Akun dalam kode ini: {0}",
   "transfer.lastHint": "Pindai semua kode secara berurutan — total {0}.",
 };
 

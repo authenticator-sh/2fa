@@ -657,7 +657,7 @@ const strings: TranslationStrings = {
   "transfer.skipSecret": "khóa bị hỏng",
   "transfer.skipPeriod": "không hỗ trợ chu kỳ {0} giây",
   "transfer.skipParams": "cài đặt không chuẩn — hãy chuyển bằng Chia sẻ",
-  "transfer.batchCaption": "Tài khoản {0}–{1}/{2}",
+  "transfer.batchCaption": "Số tài khoản trong mã này: {0}",
   "transfer.lastHint": "Quét lần lượt tất cả các mã — tổng cộng {0}.",
 };
 

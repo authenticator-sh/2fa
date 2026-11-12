@@ -393,6 +393,7 @@ type VaultTranslationKeys = {
   'transfer.skipSecret': string;
   'transfer.skipPeriod': string;
   'transfer.skipParams': string;
+  /** {0} — how many accounts this one code carries */
   'transfer.batchCaption': string;
   'transfer.lastHint': string;
   'settings.avatars': string;

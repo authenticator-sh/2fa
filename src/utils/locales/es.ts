@@ -657,7 +657,7 @@ const strings: TranslationStrings = {
   "transfer.skipSecret": "clave dañada",
   "transfer.skipPeriod": "el periodo de {0} s no es compatible",
   "transfer.skipParams": "ajustes no estándar: muévela con Compartir",
-  "transfer.batchCaption": "Cuentas {0}–{1} de {2}",
+  "transfer.batchCaption": "Cuentas en este código: {0}",
   "transfer.lastHint": "Escanea todos los códigos en orden: {0} en total.",
 };
 

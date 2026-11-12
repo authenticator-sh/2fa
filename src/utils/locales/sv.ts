@@ -657,7 +657,7 @@ const strings: TranslationStrings = {
   "transfer.skipSecret": "skadad nyckel",
   "transfer.skipPeriod": "perioden {0} s stöds inte",
   "transfer.skipParams": "ovanliga inställningar — flytta med Dela",
-  "transfer.batchCaption": "Konton {0}–{1} av {2}",
+  "transfer.batchCaption": "Konton i den här koden: {0}",
   "transfer.lastHint": "Skanna alla koder i tur och ordning — {0} totalt.",
 };
 

@@ -657,7 +657,7 @@ const strings: TranslationStrings = {
   "transfer.skipSecret": "密钥已损坏",
   "transfer.skipPeriod": "不支持 {0} 秒的周期",
   "transfer.skipParams": "非标准设置——请通过“分享”转移",
-  "transfer.batchCaption": "账户 {0}–{1} / {2}",
+  "transfer.batchCaption": "此码包含账户：{0} 个",
   "transfer.lastHint": "请依次扫描所有二维码——共 {0} 个。",
 };
 

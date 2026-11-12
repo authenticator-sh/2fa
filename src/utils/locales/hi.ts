@@ -657,7 +657,7 @@ const strings: TranslationStrings = {
   "transfer.skipSecret": "कुंजी खराब है",
   "transfer.skipPeriod": "{0} सेकंड की अवधि समर्थित नहीं है",
   "transfer.skipParams": "गैर-मानक सेटिंग — «साझा करें» से ले जाएँ",
-  "transfer.batchCaption": "{2} में से खाते {0}–{1}",
+  "transfer.batchCaption": "इस कोड में खाते: {0}",
   "transfer.lastHint": "सभी कोड एक-एक करके स्कैन करें — कुल {0}।",
 };
 

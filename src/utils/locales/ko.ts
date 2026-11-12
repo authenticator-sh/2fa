@@ -657,7 +657,7 @@ const strings: TranslationStrings = {
   "transfer.skipSecret": "키가 손상되었습니다",
   "transfer.skipPeriod": "{0}초 주기는 지원하지 않습니다",
   "transfer.skipParams": "표준이 아닌 설정 — 공유로 옮기세요",
-  "transfer.batchCaption": "계정 {0}–{1} / {2}",
+  "transfer.batchCaption": "이 코드의 계정: {0}개",
   "transfer.lastHint": "모든 코드를 차례로 스캔하세요 — 총 {0}개.",
 };
 

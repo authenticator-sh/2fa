@@ -38,7 +38,7 @@ test('export to Google Authenticator lets you choose accounts and pages through 
   await screen.getByRole('button', { name: 'Next (10)' }).click();
 
   const overlay = page.getByTestId('qr-overlay');
-  await expect(overlay.getByText('Accounts 1–10 of 10')).toBeVisible();
+  await expect(overlay.getByText('Accounts in this code: 10')).toBeVisible();
   await expect(overlay.getByRole('button', { name: 'Next', exact: true })).toBeHidden();
   await expect(overlay.getByText(/^1 of 1$/)).toBeHidden();
   await page.keyboard.press('Escape');
@@ -50,6 +50,7 @@ test('export to Google Authenticator lets you choose accounts and pages through 
   await expect(overlay.getByText('1 of 2')).toBeVisible();
   await overlay.getByRole('button', { name: 'Next', exact: true }).click();
   await expect(overlay.getByText('2 of 2')).toBeVisible();
+  await expect(overlay.getByText('Accounts in this code: 1')).toBeVisible();
   await expect(overlay.getByText('Scan every code in turn — 2 in total.')).toBeVisible();
   await page.keyboard.press('Escape');
 

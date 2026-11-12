@@ -657,7 +657,7 @@ const strings: TranslationStrings = {
   "transfer.skipSecret": "anahtar bozuk",
   "transfer.skipPeriod": "{0} sn süre desteklenmiyor",
   "transfer.skipParams": "standart dışı ayarlar — Paylaş ile taşıyın",
-  "transfer.batchCaption": "{2} hesaptan {0}–{1}",
+  "transfer.batchCaption": "Bu koddaki hesaplar: {0}",
   "transfer.lastHint": "Tüm kodları sırayla tarayın — toplam {0}.",
 };
 
