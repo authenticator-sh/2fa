@@ -694,7 +694,7 @@ export function ExportImport({ onImportComplete, onExportComplete, language }: E
               </button>
             </div>
 
-            <div className="border border-gray-200 dark:border-dark-600 rounded-lg p-3 mb-2">
+            <div className="border border-gray-200 dark:border-dark-600 rounded-lg p-3 mb-3">
               <div className="flex items-center gap-1.5 mb-1">
                 <Share2 className="text-gray-500 dark:text-gray-400" size={14} />
                 <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
