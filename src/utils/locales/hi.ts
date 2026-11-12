@@ -656,7 +656,7 @@ const strings: TranslationStrings = {
   "transfer.skipSteam": "Steam समर्थित नहीं है",
   "transfer.skipSecret": "कुंजी खराब है",
   "transfer.skipPeriod": "{0} सेकंड की अवधि समर्थित नहीं है",
-  "transfer.skipParams": "गैर-मानक सेटिंग — «शेयर» से ले जाएँ",
+  "transfer.skipParams": "गैर-मानक सेटिंग — «साझा करें» से ले जाएँ",
   "transfer.batchCaption": "{2} में से खाते {0}–{1}",
   "transfer.lastHint": "सभी कोड एक-एक करके स्कैन करें — कुल {0}।",
 };
