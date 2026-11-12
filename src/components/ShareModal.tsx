@@ -200,10 +200,12 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
             </p>
           )}
 
+          {!link && (
+            <h2 className="mb-4 text-sm font-semibold text-gray-900 dark:text-gray-100">{t('share.temporaryTitle')}</h2>
+          )}
+
           {!link ? (
-            <>
             <form onSubmit={handleCreate} className="space-y-4">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t('share.temporaryTitle')}</h2>
               <p className="text-xs leading-relaxed text-gray-600 dark:text-gray-400">
                 {t('share.intro', durationLabel(durationSec))}
               </p>
@@ -304,22 +306,6 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
                 {creating ? t('share.creating') : t('share.create')}
               </button>
             </form>
-
-            <div className="mt-5 border-t border-gray-200 pt-4 dark:border-dark-600">
-              <h2 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">{t('share.transferTitle')}</h2>
-              <button
-                type="button"
-                onClick={showTransfer}
-                className="flex w-full items-center gap-3 rounded-lg border border-gray-300 px-3 py-2.5 text-start transition-colors hover:bg-gray-50 dark:border-dark-500 dark:hover:bg-dark-700"
-              >
-                <QrCode size={20} className="flex-shrink-0 text-gray-600 dark:text-gray-300" aria-hidden />
-                <span className="min-w-0">
-                  <span className="block text-sm font-bold text-gray-900 dark:text-gray-100">{t('share.transferShow')}</span>
-                  <span className="block text-xs text-gray-500 dark:text-gray-400">{t('share.transferHint')}</span>
-                </span>
-              </button>
-            </div>
-            </>
           ) : (
             <div className="space-y-3">
               {qr && (
@@ -382,6 +368,23 @@ export function ShareModal({ account, language, onClose }: ShareModalProps) {
                 className="w-full border border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-dark-700 font-medium text-sm py-2.5 rounded-lg transition-colors"
               >
                 {t('share.done')}
+              </button>
+            </div>
+          )}
+
+          {!link && (
+            <div className="mt-5 border-t border-gray-200 pt-4 dark:border-dark-600">
+              <h2 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">{t('share.transferTitle')}</h2>
+              <button
+                type="button"
+                onClick={showTransfer}
+                className="flex w-full items-center gap-3 rounded-lg border border-gray-300 px-3 py-2.5 text-start transition-colors hover:bg-gray-50 dark:border-dark-500 dark:hover:bg-dark-700"
+              >
+                <QrCode size={20} className="flex-shrink-0 text-gray-600 dark:text-gray-300" aria-hidden />
+                <span className="min-w-0">
+                  <span className="block text-sm font-bold text-gray-900 dark:text-gray-100">{t('share.transferShow')}</span>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400">{t('share.transferHint')}</span>
+                </span>
               </button>
             </div>
           )}
