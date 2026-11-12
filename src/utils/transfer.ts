@@ -10,10 +10,10 @@ export type NonStandardParam =
   | { kind: 'algorithm'; value: string };
 
 /**
- * The settings other apps may ignore (Google Authenticator shows wrong codes
- * rather than refusing). Read through totpParams so a damaged record counts as
- * the defaults it is actually generated with. Steam is its own scheme, not a
- * deviation.
+ * The settings other apps may ignore (Google Authenticator may show wrong
+ * codes rather than refusing). Read through totpParams so a damaged record
+ * counts as the defaults it is actually generated with. Steam is its own
+ * scheme, not a deviation.
  */
 export function nonStandardParams(account: Account): NonStandardParam[] {
   if (isSteamAccount(account)) return [];
