@@ -497,11 +497,12 @@ export function migrationSkipReason(account: Account): MigrationSkipReason | nul
 export const MIGRATION_BATCH_ACCOUNTS = 10;
 
 /**
- * A limit we chose, not one the format sets: past it the code gets dense
- * enough in the overlay's field that phone cameras struggle with it. Long
- * labels close a batch before ten.
+ * A limit we chose, not one the format sets: the overlay draws the code in a
+ * field at most 216 CSS px wide, and a URL of up to 1000 characters stays
+ * within 121 modules a side — about 1.8 px a module — where 1400 would take
+ * 141, about 1.5. Long labels close a batch before ten.
  */
-export const MIGRATION_MAX_URL_LENGTH = 1500;
+export const MIGRATION_MAX_URL_LENGTH = 1000;
 
 export interface MigrationBatch {
   /** Never log it: it carries every secret in the batch. */
