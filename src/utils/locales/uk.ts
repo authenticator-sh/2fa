@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "Резервне копіювання в хмару щойно ввімкнули з іншого браузера. Натомість введіть у налаштуваннях код відновлення копій із того браузера.",
   "scan.limitTitle": "Не додано: безкоштовний тариф заповнений",
   "scan.limitBody": "Нічого не змінилося. З Pro можна додати більше акаунтів, а всі ваші акаунти й далі працюватимуть.",
+  "export.ga": "У Google Authenticator",
+  "export.gaHint": "QR-коди для застосунку на телефоні — до 10 акаунтів у кожному.",
+  "export.gaChoose": "Вибрати акаунти",
+  "transfer.title": "У Google Authenticator",
+  "transfer.selected": "Вибрано {0} з {1}",
+  "transfer.selectAll": "Вибрати все",
+  "transfer.selectNone": "Зняти все",
+  "transfer.next": "Далі ({0})",
+  "transfer.skipSteam": "Steam не підтримується",
+  "transfer.skipSecret": "ключ пошкоджено",
+  "transfer.skipPeriod": "період {0} с не підтримується",
+  "transfer.skipParams": "нестандартні параметри — перенесіть через «Поділитися»",
+  "transfer.batchCaption": "Акаунти {0}–{1} з {2}",
+  "transfer.lastHint": "Відскануйте всі коди по черзі — усього {0}.",
 };
 
 export default strings;

@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "Bulut yedeği az önce başka bir tarayıcıdan açıldı. Bunun yerine o tarayıcının yedek kurtarma kodunu Ayarlar'da girin.",
   "scan.limitTitle": "Eklenmedi: ücretsiz plan dolu",
   "scan.limitBody": "Hiçbir şey değişmedi. Pro daha fazla hesap için yer açar ve mevcut tüm hesaplarınız çalışmaya devam eder.",
+  "export.ga": "Google Authenticator’a",
+  "export.gaHint": "Telefondaki uygulama için QR kodları — her birinde en fazla 10 hesap.",
+  "export.gaChoose": "Hesapları seç",
+  "transfer.title": "Google Authenticator’a",
+  "transfer.selected": "{1} hesaptan {0} tanesi seçildi",
+  "transfer.selectAll": "Tümünü seç",
+  "transfer.selectNone": "Tümünü temizle",
+  "transfer.next": "İleri ({0})",
+  "transfer.skipSteam": "Steam desteklenmiyor",
+  "transfer.skipSecret": "anahtar bozuk",
+  "transfer.skipPeriod": "{0} sn süre desteklenmiyor",
+  "transfer.skipParams": "standart dışı ayarlar — Paylaş ile taşıyın",
+  "transfer.batchCaption": "{2} hesaptan {0}–{1}",
+  "transfer.lastHint": "Tüm kodları sırayla tarayın — toplam {0}.",
 };
 
 export default strings;

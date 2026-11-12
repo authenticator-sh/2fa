@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "क्लाउड बैकअप अभी-अभी दूसरे ब्राउज़र से चालू किया गया है। इसके बजाय सेटिंग्स में उस ब्राउज़र का बैकअप रिकवरी कोड डालें।",
   "scan.limitTitle": "नहीं जोड़ा गया: मुफ़्त प्लान भर चुका है",
   "scan.limitBody": "कुछ भी नहीं बदला। Pro से और खातों के लिए जगह मिलती है, और आपके मौजूदा सभी खाते काम करते रहते हैं।",
+  "export.ga": "Google Authenticator में",
+  "export.gaHint": "फ़ोन ऐप के लिए QR कोड — हर कोड में 10 तक खाते।",
+  "export.gaChoose": "खाते चुनें",
+  "transfer.title": "Google Authenticator में",
+  "transfer.selected": "{1} में से {0} चुने गए",
+  "transfer.selectAll": "सभी चुनें",
+  "transfer.selectNone": "सभी हटाएँ",
+  "transfer.next": "आगे ({0})",
+  "transfer.skipSteam": "Steam समर्थित नहीं है",
+  "transfer.skipSecret": "कुंजी खराब है",
+  "transfer.skipPeriod": "{0} सेकंड की अवधि समर्थित नहीं है",
+  "transfer.skipParams": "गैर-मानक सेटिंग — «शेयर» से ले जाएँ",
+  "transfer.batchCaption": "{2} में से खाते {0}–{1}",
+  "transfer.lastHint": "सभी कोड एक-एक करके स्कैन करें — कुल {0}।",
 };
 
 export default strings;

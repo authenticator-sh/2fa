@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "刚刚已有另一个浏览器开启了云备份。请改为在设置中输入那个浏览器的备份恢复码。",
   "scan.limitTitle": "未添加：免费版已满",
   "scan.limitBody": "没有任何更改。升级 Pro 可添加更多账户，你已有的所有账户都能照常使用。",
+  "export.ga": "导出到 Google Authenticator",
+  "export.gaHint": "供手机应用扫描的二维码——每个最多 10 个账户。",
+  "export.gaChoose": "选择账户",
+  "transfer.title": "导出到 Google Authenticator",
+  "transfer.selected": "已选 {0} / {1}",
+  "transfer.selectAll": "全选",
+  "transfer.selectNone": "全部取消",
+  "transfer.next": "下一步（{0}）",
+  "transfer.skipSteam": "不支持 Steam",
+  "transfer.skipSecret": "密钥已损坏",
+  "transfer.skipPeriod": "不支持 {0} 秒的周期",
+  "transfer.skipParams": "非标准设置——请通过“分享”转移",
+  "transfer.batchCaption": "账户 {0}–{1} / {2}",
+  "transfer.lastHint": "请依次扫描所有二维码——共 {0} 个。",
 };
 
 export default strings;

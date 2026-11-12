@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "شُغّل النسخ الاحتياطي السحابي للتو من متصفح آخر. أدخل بدلًا من ذلك رمز استرداد النسخ الاحتياطية الخاص بذلك المتصفح في الإعدادات.",
   "scan.limitTitle": "لم تتم الإضافة: الخطة المجانية ممتلئة",
   "scan.limitBody": "لم يتغيّر شيء. يوفّر Pro مساحة لمزيد من الحسابات، وكل حساباتك الحالية تظل تعمل.",
+  "export.ga": "إلى Google Authenticator",
+  "export.gaHint": "رموز QR للتطبيق على هاتفك — حتى 10 حسابات في كل رمز.",
+  "export.gaChoose": "اختيار الحسابات",
+  "transfer.title": "إلى Google Authenticator",
+  "transfer.selected": "تم تحديد {0} من {1}",
+  "transfer.selectAll": "تحديد الكل",
+  "transfer.selectNone": "إلغاء تحديد الكل",
+  "transfer.next": "التالي ({0})",
+  "transfer.skipSteam": "Steam غير مدعوم",
+  "transfer.skipSecret": "المفتاح تالف",
+  "transfer.skipPeriod": "المدة {0} ث غير مدعومة",
+  "transfer.skipParams": "إعدادات غير قياسية — انقله عبر «مشاركة»",
+  "transfer.batchCaption": "الحسابات {0}–{1} من {2}",
+  "transfer.lastHint": "امسح جميع الرموز بالتتابع — المجموع {0}.",
 };
 
 export default strings;

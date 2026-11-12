@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "Säkerhetskopiering i molnet slogs nyss på från en annan webbläsare. Ange i stället den webbläsarens återställningskod för säkerhetskopior i Inställningar.",
   "scan.limitTitle": "Inte tillagt: gratisplanen är full",
   "scan.limitBody": "Inget har ändrats. Pro ger plats för fler konton, och alla konton du redan har fortsätter att fungera.",
+  "export.ga": "Till Google Authenticator",
+  "export.gaHint": "QR-koder för appen i din telefon — upp till 10 konton i varje.",
+  "export.gaChoose": "Välj konton",
+  "transfer.title": "Till Google Authenticator",
+  "transfer.selected": "{0} av {1} valda",
+  "transfer.selectAll": "Markera alla",
+  "transfer.selectNone": "Avmarkera alla",
+  "transfer.next": "Nästa ({0})",
+  "transfer.skipSteam": "Steam stöds inte",
+  "transfer.skipSecret": "skadad nyckel",
+  "transfer.skipPeriod": "perioden {0} s stöds inte",
+  "transfer.skipParams": "ovanliga inställningar — flytta med Dela",
+  "transfer.batchCaption": "Konton {0}–{1} av {2}",
+  "transfer.lastHint": "Skanna alla koder i tur och ordning — {0} totalt.",
 };
 
 export default strings;

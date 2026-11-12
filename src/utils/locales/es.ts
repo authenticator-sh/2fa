@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "La copia en la nube se acaba de activar desde otro navegador. En su lugar, introduce en Ajustes el código de recuperación de copias de ese navegador.",
   "scan.limitTitle": "No se añadió: el plan gratuito está lleno",
   "scan.limitBody": "No se ha cambiado nada. Pro te da espacio para más cuentas, y todas las que ya tienes siguen funcionando.",
+  "export.ga": "A Google Authenticator",
+  "export.gaHint": "Códigos QR para la app de tu teléfono: hasta 10 cuentas en cada uno.",
+  "export.gaChoose": "Elegir cuentas",
+  "transfer.title": "A Google Authenticator",
+  "transfer.selected": "{0} de {1} seleccionadas",
+  "transfer.selectAll": "Seleccionar todas",
+  "transfer.selectNone": "Quitar todas",
+  "transfer.next": "Siguiente ({0})",
+  "transfer.skipSteam": "Steam no es compatible",
+  "transfer.skipSecret": "clave dañada",
+  "transfer.skipPeriod": "el periodo de {0} s no es compatible",
+  "transfer.skipParams": "ajustes no estándar: muévela con Compartir",
+  "transfer.batchCaption": "Cuentas {0}–{1} de {2}",
+  "transfer.lastHint": "Escanea todos los códigos en orden: {0} en total.",
 };
 
 export default strings;

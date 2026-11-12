@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "Sao lưu đám mây vừa được bật từ một trình duyệt khác. Thay vào đó, hãy nhập mã khôi phục sao lưu của trình duyệt đó trong Cài đặt.",
   "scan.limitTitle": "Chưa thêm: gói miễn phí đã đầy",
   "scan.limitBody": "Không có gì thay đổi. Pro cho thêm chỗ cho nhiều tài khoản hơn, và mọi tài khoản bạn đang có vẫn hoạt động.",
+  "export.ga": "Sang Google Authenticator",
+  "export.gaHint": "Mã QR cho ứng dụng trên điện thoại — tối đa 10 tài khoản mỗi mã.",
+  "export.gaChoose": "Chọn tài khoản",
+  "transfer.title": "Sang Google Authenticator",
+  "transfer.selected": "Đã chọn {0}/{1}",
+  "transfer.selectAll": "Chọn tất cả",
+  "transfer.selectNone": "Bỏ chọn tất cả",
+  "transfer.next": "Tiếp ({0})",
+  "transfer.skipSteam": "Không hỗ trợ Steam",
+  "transfer.skipSecret": "khóa bị hỏng",
+  "transfer.skipPeriod": "không hỗ trợ chu kỳ {0} giây",
+  "transfer.skipParams": "cài đặt không chuẩn — hãy chuyển bằng Chia sẻ",
+  "transfer.batchCaption": "Tài khoản {0}–{1}/{2}",
+  "transfer.lastHint": "Quét lần lượt tất cả các mã — tổng cộng {0}.",
 };
 
 export default strings;

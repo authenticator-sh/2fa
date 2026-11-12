@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "Cloud-back-up is net ingeschakeld vanuit een andere browser. Voer in plaats daarvan bij Instellingen de back-up-herstelcode van die browser in.",
   "scan.limitTitle": "Niet toegevoegd: het gratis plan is vol",
   "scan.limitBody": "Er is niets gewijzigd. Pro maakt ruimte voor meer accounts, en al je bestaande accounts blijven werken.",
+  "export.ga": "Naar Google Authenticator",
+  "export.gaHint": "QR-codes voor de app op je telefoon — tot 10 accounts per code.",
+  "export.gaChoose": "Accounts kiezen",
+  "transfer.title": "Naar Google Authenticator",
+  "transfer.selected": "{0} van {1} geselecteerd",
+  "transfer.selectAll": "Alles selecteren",
+  "transfer.selectNone": "Selectie wissen",
+  "transfer.next": "Volgende ({0})",
+  "transfer.skipSteam": "Steam wordt niet ondersteund",
+  "transfer.skipSecret": "beschadigde sleutel",
+  "transfer.skipPeriod": "periode van {0} s wordt niet ondersteund",
+  "transfer.skipParams": "afwijkende instellingen — verplaats via Delen",
+  "transfer.batchCaption": "Accounts {0}–{1} van {2}",
+  "transfer.lastHint": "Scan alle codes na elkaar — {0} in totaal.",
 };
 
 export default strings;

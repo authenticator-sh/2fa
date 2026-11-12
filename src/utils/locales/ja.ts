@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "別のブラウザでクラウドバックアップがオンにされたところです。代わりに、そのブラウザのバックアップ復旧コードを設定で入力してください。",
   "scan.limitTitle": "追加されませんでした：無料プランの上限に達しています",
   "scan.limitBody": "何も変更されていません。Pro にするとさらにアカウントを追加でき、既存のアカウントはすべてそのまま使えます。",
+  "export.ga": "Google Authenticator へ",
+  "export.gaHint": "スマートフォンのアプリ用の QR コードです。1 つにつき最大 10 個のアカウント。",
+  "export.gaChoose": "アカウントを選択",
+  "transfer.title": "Google Authenticator へ",
+  "transfer.selected": "{1} 件中 {0} 件を選択",
+  "transfer.selectAll": "すべて選択",
+  "transfer.selectNone": "すべて解除",
+  "transfer.next": "次へ ({0})",
+  "transfer.skipSteam": "Steam には対応していません",
+  "transfer.skipSecret": "キーが破損しています",
+  "transfer.skipPeriod": "{0} 秒の周期には対応していません",
+  "transfer.skipParams": "標準外の設定です。「共有」で移してください",
+  "transfer.batchCaption": "アカウント {0}–{1} / {2}",
+  "transfer.lastHint": "すべてのコードを順にスキャンしてください（全 {0} 枚）。",
 };
 
 export default strings;

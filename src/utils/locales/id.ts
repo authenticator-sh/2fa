@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "Cadangan cloud baru saja diaktifkan dari browser lain. Sebagai gantinya, masukkan kode pemulihan cadangan dari browser tersebut di Pengaturan.",
   "scan.limitTitle": "Tidak ditambahkan: paket gratis sudah penuh",
   "scan.limitBody": "Tidak ada yang berubah. Pro memberi ruang untuk lebih banyak akun, dan semua akun yang sudah Anda miliki tetap berfungsi.",
+  "export.ga": "Ke Google Authenticator",
+  "export.gaHint": "Kode QR untuk aplikasi di ponsel Anda — hingga 10 akun di setiap kode.",
+  "export.gaChoose": "Pilih akun",
+  "transfer.title": "Ke Google Authenticator",
+  "transfer.selected": "{0} dari {1} dipilih",
+  "transfer.selectAll": "Pilih semua",
+  "transfer.selectNone": "Hapus semua",
+  "transfer.next": "Berikutnya ({0})",
+  "transfer.skipSteam": "Steam tidak didukung",
+  "transfer.skipSecret": "kunci rusak",
+  "transfer.skipPeriod": "periode {0} dtk tidak didukung",
+  "transfer.skipParams": "pengaturan tidak standar — pindahkan dengan Bagikan",
+  "transfer.batchCaption": "Akun {0}–{1} dari {2}",
+  "transfer.lastHint": "Pindai semua kode secara berurutan — total {0}.",
 };
 
 export default strings;

@@ -380,6 +380,21 @@ type VaultTranslationKeys = {
   'export.plainHint': string;
   'export.cxf': string;
   'export.cxfHint': string;
+  // Export to Google Authenticator: the card, the selection screen, the QR series.
+  'export.ga': string;
+  'export.gaHint': string;
+  'export.gaChoose': string;
+  'transfer.title': string;
+  'transfer.selected': string;
+  'transfer.selectAll': string;
+  'transfer.selectNone': string;
+  'transfer.next': string;
+  'transfer.skipSteam': string;
+  'transfer.skipSecret': string;
+  'transfer.skipPeriod': string;
+  'transfer.skipParams': string;
+  'transfer.batchCaption': string;
+  'transfer.lastHint': string;
   'settings.avatars': string;
   'settings.avatarsHint': string;
   'settings.version': string;

@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "Kopia w chmurze została właśnie włączona w innej przeglądarce. Zamiast tego wpisz w Ustawieniach kod odzyskiwania kopii z tamtej przeglądarki.",
   "scan.limitTitle": "Nie dodano: darmowy plan jest pełny",
   "scan.limitBody": "Nic się nie zmieniło. Pro daje miejsce na więcej kont, a wszystkie Twoje konta nadal działają.",
+  "export.ga": "Do Google Authenticator",
+  "export.gaHint": "Kody QR dla aplikacji w telefonie — do 10 kont w każdym.",
+  "export.gaChoose": "Wybierz konta",
+  "transfer.title": "Do Google Authenticator",
+  "transfer.selected": "Wybrano {0} z {1}",
+  "transfer.selectAll": "Zaznacz wszystko",
+  "transfer.selectNone": "Odznacz wszystko",
+  "transfer.next": "Dalej ({0})",
+  "transfer.skipSteam": "Steam nie jest obsługiwany",
+  "transfer.skipSecret": "uszkodzony klucz",
+  "transfer.skipPeriod": "okres {0} s nie jest obsługiwany",
+  "transfer.skipParams": "niestandardowe ustawienia — przenieś przez „Udostępnij”",
+  "transfer.batchCaption": "Konta {0}–{1} z {2}",
+  "transfer.lastHint": "Zeskanuj wszystkie kody po kolei — łącznie {0}.",
 };
 
 export default strings;

@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "방금 다른 브라우저에서 클라우드 백업을 켰습니다. 대신 설정에서 그 브라우저의 백업 복구 코드를 입력하세요.",
   "scan.limitTitle": "추가되지 않음: 무료 요금제가 가득 찼습니다",
   "scan.limitBody": "변경된 내용은 없습니다. Pro를 사용하면 더 많은 계정을 추가할 수 있으며, 기존 계정은 모두 계속 작동합니다.",
+  "export.ga": "Google Authenticator로",
+  "export.gaHint": "휴대폰 앱용 QR 코드 — 코드당 최대 10개 계정.",
+  "export.gaChoose": "계정 선택",
+  "transfer.title": "Google Authenticator로",
+  "transfer.selected": "{1}개 중 {0}개 선택됨",
+  "transfer.selectAll": "모두 선택",
+  "transfer.selectNone": "모두 해제",
+  "transfer.next": "다음 ({0})",
+  "transfer.skipSteam": "Steam은 지원하지 않습니다",
+  "transfer.skipSecret": "키가 손상되었습니다",
+  "transfer.skipPeriod": "{0}초 주기는 지원하지 않습니다",
+  "transfer.skipParams": "표준이 아닌 설정 — 공유로 옮기세요",
+  "transfer.batchCaption": "계정 {0}–{1} / {2}",
+  "transfer.lastHint": "모든 코드를 차례로 스캔하세요 — 총 {0}개.",
 };
 
 export default strings;

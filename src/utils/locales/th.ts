@@ -645,6 +645,20 @@ const strings: TranslationStrings = {
   "cloud.setup.taken": "เพิ่งมีการเปิดการสำรองข้อมูลบนคลาวด์จากเบราว์เซอร์อื่น โปรดใส่รหัสกู้คืนข้อมูลสำรองของเบราว์เซอร์นั้นในการตั้งค่าแทน",
   "scan.limitTitle": "ไม่ได้เพิ่ม: แพ็กเกจฟรีเต็มแล้ว",
   "scan.limitBody": "ไม่มีอะไรเปลี่ยนแปลง Pro ให้พื้นที่สำหรับบัญชีเพิ่มเติม และทุกบัญชีที่คุณมีอยู่แล้วยังใช้งานได้ตามปกติ",
+  "export.ga": "ไปยัง Google Authenticator",
+  "export.gaHint": "QR โค้ดสำหรับแอปบนโทรศัพท์ — โค้ดละไม่เกิน 10 บัญชี",
+  "export.gaChoose": "เลือกบัญชี",
+  "transfer.title": "ไปยัง Google Authenticator",
+  "transfer.selected": "เลือกแล้ว {0} จาก {1}",
+  "transfer.selectAll": "เลือกทั้งหมด",
+  "transfer.selectNone": "ล้างทั้งหมด",
+  "transfer.next": "ถัดไป ({0})",
+  "transfer.skipSteam": "ไม่รองรับ Steam",
+  "transfer.skipSecret": "คีย์เสียหาย",
+  "transfer.skipPeriod": "ไม่รองรับรอบเวลา {0} วินาที",
+  "transfer.skipParams": "การตั้งค่าไม่เป็นมาตรฐาน — ย้ายด้วย “แชร์”",
+  "transfer.batchCaption": "บัญชี {0}–{1} จาก {2}",
+  "transfer.lastHint": "สแกนทุกโค้ดตามลำดับ — ทั้งหมด {0} โค้ด",
 };
 
 export default strings;
