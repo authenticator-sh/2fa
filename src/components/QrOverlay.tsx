@@ -108,7 +108,7 @@ export function QrOverlay({ frames, language, onClose, lastHint }: QrOverlayProp
           </div>
         )}
 
-        <p className="text-center text-xs text-gray-500 dark:text-gray-400">{t('qr.scanHint')}</p>
+        {qr && !failed && <p className="text-center text-xs text-gray-500 dark:text-gray-400">{t('qr.scanHint')}</p>}
 
         {many && last && lastHint && (
           <p className="text-center text-xs leading-relaxed text-gray-600 dark:text-gray-400">{lastHint}</p>
@@ -150,9 +150,12 @@ export function QrOverlay({ frames, language, onClose, lastHint }: QrOverlayProp
           </div>
         )}
 
+        {/* Focus starts here, inside the card, so a key pressed while it is
+            open never reaches the screen underneath. */}
         <button
           type="button"
           onClick={onClose}
+          autoFocus
           className="w-full bg-accent-600 hover:bg-accent-700 text-white font-medium text-sm py-2.5 rounded-lg transition-colors"
         >
           {t('share.done')}
