@@ -57,7 +57,7 @@ A privacy-focused TOTP authenticator for Chrome. Your secrets, account names and
 - Export and import for cross-device migration, including
   [Credential Exchange Format](#credential-exchange-format) — the FIDO Alliance
   interchange format other password managers and authenticators can read
-- 20 UI languages, chosen from the browser's own language on first open and overridable in Settings
+- 21 UI languages, chosen from the browser's own language on first open and overridable in Settings
 - Works fully offline — codes never need a connection, and the popup renders before any network request
 - Free to use; new installations may have an account limit, which **Pro** removes (see [Free and Pro](#free-and-pro))
 

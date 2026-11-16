@@ -119,6 +119,7 @@ const strings: TranslationStrings = {
   "addAccount.errorNameRequired": "Ad ve gizli anahtar gereklidir",
   "addAccount.errorInvalidSecret": "Geçersiz gizli anahtar. Base32 kodlamalı olmalıdır.",
   "addAccount.errorInvalidQR": "Bu QR kodu bir kimlik doğrulayıcı kurulum kodu değil. Sitede kimlik doğrulama uygulaması seçeneğini seçin ve o QR kodunu tarayın.",
+  "addAccount.errorMicrosoftQr": "Bu QR kodu yalnızca Microsoft Authenticator uygulamasıyla çalışır. Microsoft sayfasında farklı bir kimlik doğrulama uygulaması kullanma bağlantısına tıklayın, ardından gösterilen QR kodunu tarayın.",
   "addAccount.errorHotp": "Sayaç tabanlı (HOTP) kodlar desteklenmiyor",
   "addAccount.errorUnsupportedCode": "Bu kod, bu uygulamanın üretemediği bir tür veya ayarlar kullanıyor (örneğin MD5 algoritması, 4 hane veya alışılmadık bir süre). Kodları yanlış olacağı için eklenmedi.",
   "addAccount.errorDamagedQR": "Bu bir kimlik doğrulayıcı QR kodu, ancak içeriği bozuk veya eksik. Kodu asıl cihazda yeniden gösterin ya da dışa aktarın ve tekrar tarayın.",

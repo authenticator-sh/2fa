@@ -154,6 +154,8 @@ type TranslationKeys = {
   'addAccount.errorNameRequired': string;
   'addAccount.errorInvalidSecret': string;
   'addAccount.errorInvalidQR': string;
+  /** Microsoft's own setup QR (phonefactor://): only its app reads it; the page offers another one behind a link */
+  'addAccount.errorMicrosoftQr': string;
   'addAccount.errorHotp': string;
   /** A code understood and refused: an OTP kind or parameters (MD5, 4 digits) we cannot generate */
   'addAccount.errorUnsupportedCode': string;

@@ -100,4 +100,8 @@ export const WHATS_NEW: Record<string, UpdateHighlightKey[]> = {
   // 1.16.2 has no entry on purpose: "Move to phone" points at the iPhone app,
   // which is still in App Review when this ships. It is in Settings for whoever
   // looks; it gets announced once the app can be installed.
+  //
+  // 1.16.3 has none either: a language, dragging in the compact list and a
+  // clearer refusal of Microsoft's own QR are each met by the people they are
+  // for, without a modal put in front of everyone else.
 };

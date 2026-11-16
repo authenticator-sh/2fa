@@ -2,8 +2,8 @@ import { useState, useRef, useEffect, useId } from 'react';
 import { Upload, Monitor, Loader2, Camera, ChevronDown, KeyRound, Smartphone, Globe, Clock } from 'lucide-react';
 import { QR_ANSWER_ROW, QrAnswerFold } from './QrAnswerRow';
 import type { Account } from '@/types';
-import { validateSecret, cleanSecret, secretProblem } from '@/utils/totp';
-import { parseQRCode, parseOTPAuthURL, generateRandomColor, qrFailureKey, UnsupportedOTPTypeError } from '@/utils/qr-parser';
+import { validateSecret, cleanSecret, secretProblem, secretCharsKind } from '@/utils/totp';
+import { parseQRCode, parseOTPAuthURL, generateRandomColor, qrFailureKey, qrFailureKind, UnsupportedOTPTypeError } from '@/utils/qr-parser';
 import { saveErrorMessage } from '@/utils/save-error';
 import { captureCurrentTab } from '@/utils/screen-capture';
 import { decodeQrFromImage } from '@/utils/qr-decode';
@@ -119,9 +119,9 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
   }, []);
 
   /** Shows a refusal and reports which one it was. */
-  const fail = (flow: 'manual' | 'qr', key: Parameters<typeof t>[0]) => {
+  const fail = (flow: 'manual' | 'qr', key: Parameters<typeof t>[0], kind?: string) => {
     setError(t(key));
-    void reportAddFail(flow, reasonOfKey(key));
+    void reportAddFail(flow, reasonOfKey(key), kind);
   };
 
   /** The field a refusal is about: marked, and where the cursor goes. */
@@ -194,7 +194,8 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
             ? 'addAccount.errorSecretShort'
             : problem === 'chars'
               ? 'addAccount.errorSecretChars'
-              : 'addAccount.errorInvalidSecret'
+              : 'addAccount.errorInvalidSecret',
+        problem === 'chars' ? secretCharsKind(usableSecret) : undefined
       );
       pointAt('secret');
       return;
@@ -415,7 +416,7 @@ export function AddAccountModal({ onClose, onAdd, language, groups = [], default
         // the extension's own chrome.
         console.error('Failed to parse QR code (content withheld)');
         // Ours but unreadable says so; "invalid QR" is for everything else.
-        fail('qr', qrFailureKey(result));
+        fail('qr', qrFailureKey(result), qrFailureKind(result));
       }
     } catch (err) {
       console.error('QR scan error:', err);

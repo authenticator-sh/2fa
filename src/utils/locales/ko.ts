@@ -119,6 +119,7 @@ const strings: TranslationStrings = {
   "addAccount.errorNameRequired": "이름과 비밀 키는 필수입니다",
   "addAccount.errorInvalidSecret": "잘못된 비밀 키입니다. Base32로 인코딩되어야 합니다.",
   "addAccount.errorInvalidQR": "이 QR 코드는 인증 앱 설정 코드가 아닙니다. 사이트에서 인증 앱 옵션을 선택한 뒤 그 QR 코드를 스캔하세요.",
+  "addAccount.errorMicrosoftQr": "이 QR 코드는 Microsoft Authenticator 앱에서만 작동합니다. Microsoft 페이지에서 다른 인증 앱을 사용하는 링크를 클릭한 뒤, 이후에 표시되는 QR 코드를 스캔하세요.",
   "addAccount.errorHotp": "카운터 기반(HOTP) 코드는 지원되지 않습니다",
   "addAccount.errorUnsupportedCode": "이 코드는 이 앱이 생성할 수 없는 유형이나 설정을 사용합니다(예: MD5 알고리즘, 4자리, 일반적이지 않은 주기). 코드가 틀리게 나오므로 추가하지 않았습니다.",
   "addAccount.errorDamagedQR": "인증 앱 QR 코드이지만 내용이 손상되었거나 불완전합니다. 원래 기기에서 코드를 다시 표시하거나 내보낸 뒤 다시 스캔하세요.",

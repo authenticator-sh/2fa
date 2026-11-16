@@ -360,11 +360,19 @@ export const AccountCard = memo(function AccountCard({
     onDragEnd: () => onDragEnd?.(),
   };
 
+  // Where the dragged row will land. A border in the two taller modes; in the
+  // compact row a line laid over the top edge instead, because a border adds
+  // 2px to a 38px row and the whole list below the pointer jumps mid-drag.
+  const dropMarkClass =
+    viewMode === 'compact'
+      ? "before:content-[''] before:absolute before:inset-x-0 before:top-0 before:z-10 before:h-0.5 before:bg-accent-500"
+      : 'border-t-2 border-accent-500';
+
   // Without `group` while choosing, so hovering a row does not bring up its
   // share, edit and delete buttons from under the tick overlay — visible but
   // dead, they looked like the way to act on the selection.
   const baseClass = `relative ${selecting ? '' : 'group'} bg-white dark:bg-dark-800 hover:bg-gray-50 dark:hover:bg-dark-700 transition-all duration-200 after:content-[''] after:absolute after:bottom-0 after:h-px after:bg-gray-200 dark:after:bg-dark-600 last:after:hidden ${
-    isDragOver ? 'border-t-2 border-accent-500' : ''
+    isDragOver ? dropMarkClass : ''
   }`;
 
   /**
@@ -503,17 +511,26 @@ export const AccountCard = memo(function AccountCard({
     return (
       // overflow-hidden so a row that runs out of width clips instead of laying
       // the code and the copy icon over the hover actions and the ring.
-      // px-3 and gap-1.5 rather than px-4 and gap-2, and no drag handle: at the
-      // 320px popup the fixed furniture of this row left the name about 78px —
-      // ten characters — so two accounts on one service read identically. The
-      // padding, the gaps and the handle give back 44px between them without
-      // moving anything the row exists to show; the avatar spends 24 of it, so
-      // the name's measured gain is 26px — 80px to 106px at this width.
+      // px-3 and gap-1.5 rather than px-4 and gap-2, and no drag handle in the
+      // flow: at the 320px popup the fixed furniture of this row left the name
+      // about 78px — ten characters — so two accounts on one service read
+      // identically. The padding, the gaps and the handle give back 44px
+      // between them without moving anything the row exists to show; the avatar
+      // spends 24 of it, so the name's measured gain is 26px — 80px to 106px at
+      // this width.
       //
-      // The drag goes with the handle. A row that still reorders with no
-      // affordance, and jumps 2px mid-drag when isDragOver lands, is worse than
-      // a row that does not reorder; that stays a normal-view job.
-      <div {...rowProps} data-testid="account-card" className={`${baseClass} py-1.5 px-3 after:inset-x-3 overflow-hidden`}>
+      // The row still reorders. Its handle sits in the 12px of start padding,
+      // out of the flow, so it costs the name nothing; the drop marker is an
+      // overlay for the same reason — see dropMarkClass.
+      <div {...dragProps} {...rowProps} data-testid="account-card" className={`${baseClass} py-1.5 px-3 after:inset-x-3 overflow-hidden`}>
+        {draggable && (
+          <div
+            aria-hidden="true"
+            className="absolute inset-y-0 start-0 flex w-3 items-center justify-center cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 dark:text-gray-400"
+          >
+            <GripVertical size={12} />
+          </div>
+        )}
         <div className="flex items-center gap-1.5">
           <button
             onClick={handleCopy}

@@ -119,6 +119,7 @@ const strings: TranslationStrings = {
   "addAccount.errorNameRequired": "الاسم والمفتاح السري مطلوبان",
   "addAccount.errorInvalidSecret": "مفتاح سري غير صالح. يجب أن يكون بترميز Base32.",
   "addAccount.errorInvalidQR": "رمز QR هذا ليس رمز إعداد للمصادقة. اختر في الموقع خيار تطبيق المصادقة وامسح رمز QR ذاك.",
+  "addAccount.errorMicrosoftQr": "رمز QR هذا يعمل فقط مع تطبيق Microsoft Authenticator. في صفحة Microsoft، انقر على رابط استخدام تطبيق مصادقة آخر، ثم امسح رمز QR الذي يظهر بعد ذلك.",
   "addAccount.errorHotp": "رموز العدّاد (HOTP) غير مدعومة",
   "addAccount.errorUnsupportedCode": "يستخدم هذا الرمز نوعًا أو إعدادات لا يستطيع هذا التطبيق توليدها (مثل خوارزمية MD5 أو 4 أرقام أو مدة غير معتادة). لم تتم إضافته لأن رموزه ستكون خاطئة.",
   "addAccount.errorDamagedQR": "هذا رمز QR لتطبيق مصادقة، لكن محتواه تالف أو غير مكتمل. اعرض الرمز أو صدّره مجددًا على الجهاز الأصلي ثم امسحه مرة أخرى.",

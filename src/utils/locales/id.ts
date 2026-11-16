@@ -119,6 +119,7 @@ const strings: TranslationStrings = {
   "addAccount.errorNameRequired": "Nama dan kunci rahasia wajib diisi",
   "addAccount.errorInvalidSecret": "Kunci rahasia tidak valid. Harus dikodekan Base32.",
   "addAccount.errorInvalidQR": "Kode QR ini bukan kode penyiapan autentikator. Di situs, pilih opsi aplikasi autentikator dan pindai kode QR itu.",
+  "addAccount.errorMicrosoftQr": "Kode QR ini hanya berfungsi dengan aplikasi Microsoft Authenticator. Di halaman Microsoft, klik tautan untuk menggunakan aplikasi autentikator lain, lalu pindai kode QR yang muncul setelahnya.",
   "addAccount.errorHotp": "Kode berbasis penghitung (HOTP) tidak didukung",
   "addAccount.errorUnsupportedCode": "Kode ini memakai jenis atau pengaturan yang tidak dapat dibuat oleh aplikasi ini (misalnya algoritma MD5, 4 digit, atau periode yang tidak biasa). Kode tidak ditambahkan karena hasilnya akan salah.",
   "addAccount.errorDamagedQR": "Ini kode QR autentikator, tetapi isinya rusak atau tidak lengkap. Tampilkan atau ekspor ulang kode di perangkat asal, lalu pindai lagi.",

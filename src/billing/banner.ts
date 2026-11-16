@@ -3,6 +3,7 @@
 // closing one banner never hides the next.
 
 import type { Banner } from './types';
+import { serverTextLanguage } from '@/utils/language';
 
 /**
  * Where a url banner may lead — the server checks the same list
@@ -103,7 +104,7 @@ export interface BannerContext {
  */
 export function bannerToShow(banner: Banner | null, ctx: BannerContext): Banner | null {
   if (!banner || banner.place !== ctx.place || ctx.dismissed.includes(banner.id)) return null;
-  const text = banner.text && banner.text.lang === ctx.language ? banner.text : null;
+  const text = banner.text && banner.text.lang === serverTextLanguage(ctx.language) ? banner.text : null;
   if (banner.action === 'backup') return ctx.offersBackup ? { ...banner, text } : null;
   if (banner.action === 'vault') return ctx.offersVault ? { ...banner, text } : null;
   if (!text) return null;

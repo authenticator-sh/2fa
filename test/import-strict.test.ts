@@ -264,6 +264,14 @@ export async function run(): Promise<void> {
     check(`${text.slice(0, 30)} is not ours — the scanner keeps looking`, !qr.isAuthenticatorQR(text) && qr.qrFailureKey(text) === 'addAccount.errorInvalidQR');
   }
 
+  // A QR that is not ours is named by kind, and Microsoft's own gets its own sentence.
+  const msQr = 'phonefactor://activate_account?code=123456789&url=https%3A%2F%2Fexample.invalid';
+  check("Microsoft's setup code says which link to click", qr.qrFailureKey(msQr) === 'addAccount.errorMicrosoftQr' && qr.qrFailureKind(msQr) === 'microsoft');
+  check('a web address is "web"', qr.foreignQrKind('https://example.com/login') === 'web');
+  check('another app\'s link is "app"', qr.foreignQrKind('WIFI:S:home;T:WPA;;') === 'app' && qr.foreignQrKind('oktaverify://x') === 'okta');
+  check('plain words are "text", nothing is "empty"', qr.foreignQrKind('hello there') === 'text' && qr.foreignQrKind('  ') === 'empty');
+  check('one of ours has no foreign kind', qr.qrFailureKind('otpauth://totp/a?secret=!') === undefined);
+
   // ---- 4. the scanner's upload control is a real button ------------------------
 
   scenario('The scanner\'s "Choose image" is a focusable button');

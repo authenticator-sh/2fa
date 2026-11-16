@@ -13,6 +13,7 @@ import { billingErrorMessage } from '@/billing/messages';
 import { BILLING_KEYS, readEntitlement, readInstall, readPolicy } from '@/billing/state';
 import { syncBilling, syncFromWorker } from '@/billing/sync';
 import type { DisplayPrice, PaywallIcon, Policy } from '@/billing/types';
+import { serverTextLanguage } from '@/utils/language';
 
 /**
  * The paywall. It takes the whole screen, like Add account: in a 400px popup
@@ -90,7 +91,7 @@ export default function Paywall({ language, request }: PaywallProps) {
     // check-in (each check-in tells the server the language on screen): ask
     // once. If the language still differs, the server's words are shown as
     // they are — there are no others.
-    if ((!current || current.paywall.plans.length === 0 || !current.paywall.content || current.paywall.content.lang !== language) && allowSync) {
+    if ((!current || current.paywall.plans.length === 0 || !current.paywall.content || current.paywall.content.lang !== serverTextLanguage(language)) && allowSync) {
       await syncBilling({ force: true });
       const again = await readInstall();
       current = again ? await readPolicy(again.id) : null;
@@ -123,7 +124,7 @@ export default function Paywall({ language, request }: PaywallProps) {
       // experiments' uninstall check is about.
       void track('paywall_view', {
         trigger: request.trigger,
-        copy: bannerPaywallText(policy) ? 'banner' : isBackupTrigger(request.trigger) ? 'backup' : policy.paywall.text?.lang === language ? 'custom' : policy.paywall.copy,
+        copy: bannerPaywallText(policy) ? 'banner' : isBackupTrigger(request.trigger) ? 'backup' : policy.paywall.text?.lang === serverTextLanguage(language) ? 'custom' : policy.paywall.copy,
         plans: plans.join(','),
         ...(request.banner ? { banner: request.banner } : {}),
       }).then(() => syncFromWorker());
@@ -171,7 +172,7 @@ export default function Paywall({ language, request }: PaywallProps) {
   /** The paywall words of the banner or notification that opened this paywall, in the language on screen. */
   function bannerPaywallText(current: Policy): { title: string; body: string } | null {
     const banner = current.banners.find(b => b.id === request.banner) ?? current.notices.find(n => n.id === request.banner);
-    if (!banner || banner.text?.lang !== language) return null;
+    if (!banner || banner.text?.lang !== serverTextLanguage(language)) return null;
     return banner.text.paywall_title && banner.text.paywall_body ? { title: banner.text.paywall_title, body: banner.text.paywall_body } : null;
   }
 

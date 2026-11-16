@@ -174,7 +174,7 @@ export async function run(): Promise<void> {
 
   scenario('New strings carry their placeholder in every language');
   {
-    const langs = ['ar', 'de', 'en', 'es', 'fr', 'hi', 'id', 'it', 'ja', 'ko', 'nl', 'pl', 'pt', 'ru', 'sv', 'th', 'tr', 'uk', 'vi', 'zh'];
+    const langs = ['ar', 'de', 'en', 'es', 'fr', 'hi', 'id', 'it', 'ja', 'ko', 'nl', 'pl', 'pt', 'ru', 'sv', 'th', 'tr', 'uk', 'vi', 'zh', 'zh-TW'];
     const missing: string[] = [];
     for (const lang of langs) {
       const strings = (await import(`../src/utils/locales/${lang}.ts`)).default as Record<string, string>;

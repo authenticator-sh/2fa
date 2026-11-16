@@ -90,6 +90,9 @@ export async function run(): Promise<void> {
 
       await onboarding.reportAddFail('qr', 'duplicate');
       check('a later failure does not move it back', uninstallUrl.endsWith('&s=added%3Aform'), uninstallUrl);
+      await onboarding.reportAddFail('qr', 'error_invalid_qr', 'web');
+      const kinded = (await events.peekEvents()).filter(e => e.n === 'add_fail');
+      check('a failure can say what kind it was, and says nothing when there is none', kinded[kinded.length - 1]?.p?.kind === 'web' && kinded[kinded.length - 2]?.p?.kind === undefined);
       await onboarding.reportCodeUsed('copy');
       await onboarding.reportCodeUsed('fill');
       queued = await events.peekEvents();

@@ -7,6 +7,7 @@
 
 import { clean, safeBannerUrl } from './banner';
 import type { Notice } from './types';
+import { serverTextLanguage } from '@/utils/language';
 
 /** The most a policy carries; the server allows no more. */
 export const NOTICES_MAX = 10;
@@ -79,7 +80,7 @@ export interface NoticeContext {
  */
 export function noticeToShow(notice: Notice, ctx: NoticeContext): Notice | null {
   if (ctx.dismissed.includes(notice.id)) return null;
-  const text = notice.text && notice.text.lang === ctx.language ? notice.text : null;
+  const text = notice.text && notice.text.lang === serverTextLanguage(ctx.language) ? notice.text : null;
   if (notice.action === 'backup') return ctx.offersBackup ? { ...notice, text } : null;
   if (notice.action === 'vault') return ctx.offersVault ? { ...notice, text } : null;
   if (!text) return null;

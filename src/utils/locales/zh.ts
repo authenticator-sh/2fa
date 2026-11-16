@@ -119,6 +119,7 @@ const strings: TranslationStrings = {
   "addAccount.errorNameRequired": "名称和密钥为必填项",
   "addAccount.errorInvalidSecret": "无效的密钥。必须为 Base32 编码。",
   "addAccount.errorInvalidQR": "这个二维码不是验证器的设置二维码。请在网站上选择验证器应用选项，并扫描那个二维码。",
+  "addAccount.errorMicrosoftQr": "这个二维码只能用于 Microsoft Authenticator 应用。请在 Microsoft 页面上点击使用其他验证器应用的链接，然后扫描随后显示的二维码。",
   "addAccount.errorHotp": "不支持基于计数器的 (HOTP) 验证码",
   "addAccount.errorUnsupportedCode": "此验证码使用了本应用无法生成的类型或设置（例如 MD5 算法、4 位数字或不常见的周期）。由于生成的验证码会是错误的，未添加。",
   "addAccount.errorDamagedQR": "这是一个身份验证器二维码，但内容已损坏或不完整。请在原设备上重新显示或导出该二维码，然后再次扫描。",

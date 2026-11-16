@@ -504,7 +504,39 @@ export function qrFailureKey(text: string, error?: unknown): TranslationKey {
   if (error instanceof UnsupportedOTPTypeError) {
     return error.reason === 'hotp' ? 'addAccount.errorHotp' : 'addAccount.errorUnsupportedCode';
   }
-  return isAuthenticatorQR(text) ? 'addAccount.errorDamagedQR' : 'addAccount.errorInvalidQR';
+  if (isAuthenticatorQR(text)) return 'addAccount.errorDamagedQR';
+  return foreignQrKind(text) === 'microsoft' ? 'addAccount.errorMicrosoftQr' : 'addAccount.errorInvalidQR';
+}
+
+/**
+ * What a QR that is not an authenticator setup code is, as a kind.
+ *
+ * "This isn't an authenticator setup code" was the refusal people recovered
+ * from least (1–14 Nov 2026: 590 installs, 38 % added an account afterwards,
+ * against 52–86 % for the other common ones), and nothing recorded what they
+ * had scanned. The one case known by name is Microsoft's: its setup page
+ * shows a `phonefactor://` code first, which only Microsoft Authenticator
+ * reads, and keeps the ordinary one behind a link — that gets its own
+ * sentence. The rest is reported as a kind so the next sentence can be chosen
+ * from numbers.
+ *
+ * Only ever the kind: the text of a scanned code is never shown or sent.
+ */
+export type ForeignQrKind = 'microsoft' | 'okta' | 'web' | 'app' | 'text' | 'empty';
+
+export function foreignQrKind(text: string): ForeignQrKind {
+  const value = String(text ?? '').trim();
+  if (!value) return 'empty';
+  if (/^phonefactor:\/\//i.test(value)) return 'microsoft';
+  if (/^oktaverify:\/\//i.test(value)) return 'okta';
+  if (/^https?:\/\//i.test(value)) return 'web';
+  if (/^[a-z][a-z0-9+.-]{1,31}:/i.test(value)) return 'app';
+  return 'text';
+}
+
+/** The `kind` to report beside a QR refusal: what the code was, when it was not one of ours. */
+export function qrFailureKind(text: string): ForeignQrKind | undefined {
+  return isAuthenticatorQR(text) ? undefined : foreignQrKind(text);
 }
 
 export const ACCOUNT_COLORS = [

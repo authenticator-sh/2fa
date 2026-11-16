@@ -15,7 +15,7 @@ import type { TranslationKey, TranslationStrings } from './i18n-keys';
 import { detectLanguage, SUPPORTED_LANGUAGES as SUPPORTED, type Language } from './language';
 
 export type { TranslationKey, TranslationStrings };
-export { detectLanguage, languages, matchLanguage, type Language } from './language';
+export { detectLanguage, languages, matchLanguage, serverTextLanguage, type Language } from './language';
 
 /**
  * The language a page opens in: the stored choice, else the browser's.

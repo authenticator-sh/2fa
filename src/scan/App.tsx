@@ -33,7 +33,7 @@ import { appearanceClass, cachedAppearance, readUiStyle, rememberAppearance, UI_
 import { addMultipleAccounts } from '@/utils/storage';
 import { readActiveGroup } from '@/utils/active-group';
 import { VaultLockedError } from '@/utils/vault';
-import { generateRandomColor, isAuthenticatorQR, parseQRCode, qrFailureKey } from '@/utils/qr-parser';
+import { foreignQrKind, generateRandomColor, isAuthenticatorQR, parseQRCode, qrFailureKey } from '@/utils/qr-parser';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { toast } from '@/utils/ui-feedback';
 import { cleanSecret } from '@/utils/totp';
@@ -320,6 +320,14 @@ export default function App({ embedded }: { embedded?: EmbeddedScanner }) {
         // the same payload — the camera used to keep "scanning" it forever with
         // nothing on screen to say it had been seen at all.
         if (isAuthenticatorQR(text)) {
+          stopCamera();
+          setStatus({ kind: 'error', title: 'scan.refusedTitle', body: qrFailureKey(text) });
+          return;
+        }
+        // Microsoft's own setup code: the camera is pointed at the right
+        // page and the wrong code, and scanning on in silence leaves the
+        // person holding it there. Stop and say which link gives the other one.
+        if (foreignQrKind(text) === 'microsoft') {
           stopCamera();
           setStatus({ kind: 'error', title: 'scan.refusedTitle', body: qrFailureKey(text) });
           return;
@@ -641,7 +649,7 @@ export default function App({ embedded }: { embedded?: EmbeddedScanner }) {
           // handleDecoded read it, found no otpauth in it, and reset the guard
           // expecting a live camera loop — which its early return in the
           // camera path keeps running, but this path froze. Restart it.
-          void reportAddFail('camera', 'image_not_otpauth');
+          void reportAddFail('camera', 'image_not_otpauth', foreignQrKind(text));
           toast('error', tRef.current('addAccount.errorInvalidQR'));
           // Back to the camera only if it was the camera that was running.
           if (imageModeRef.current) handledRef.current = false;

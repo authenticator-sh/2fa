@@ -444,6 +444,29 @@ export function secretProblem(secret: string): SecretProblem | null {
   return null;
 }
 
+/**
+ * What the wrong characters in a refused key were, as a kind for the report.
+ *
+ * "Only letters A–Z and digits 2–7" is shown about three times per person who
+ * meets it (1–14 Nov 2026: 2,158 times to 775 installs), and half never add
+ * the account. What they typed decides the fix — a key printed in hex wants
+ * converting, a pasted link wants the other field, a 0 for an O wants the
+ * sentence it already gets — and none of it was recorded. Only the kind is:
+ * never the key or any part of it.
+ */
+export type SecretCharsKind = 'link' | 'email' | 'hex' | 'digits' | 'nonlatin' | 'symbols';
+
+export function secretCharsKind(secret: string): SecretCharsKind {
+  const raw = String(secret ?? '').trim();
+  if (/:\/\/|^otpauth/i.test(raw)) return 'link';
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) return 'email';
+  const cleaned = cleanSecret(raw);
+  if (/^[0-9A-F]+$/.test(cleaned) && cleaned.length >= 20 && cleaned.length % 2 === 0) return 'hex';
+  if (/^[A-Z0-9]+=*$/.test(cleaned)) return 'digits';
+  if (/[^\x00-\x7F]/.test(cleaned)) return 'nonlatin';
+  return 'symbols';
+}
+
 export function validateSecret(secret: string): boolean {
   const cleaned = cleanSecret(secret);
   return BASE32.test(cleaned) && cleaned.length >= 16;

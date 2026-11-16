@@ -2,6 +2,16 @@
 // renamed page is a single edit rather than a grep.
 
 /**
+ * The site's language for an interface language.
+ *
+ * The site is written in twenty languages and Traditional Chinese is not one of
+ * them: its pages for a `zh-TW` interface are the `zh` ones, not a 404.
+ */
+export function siteLanguage(language: string): string {
+  return language.split('-')[0];
+}
+
+/**
  * The help page, in the reader's own language.
  *
  * The answers used to ship inside the extension — thirteen entries in twenty
@@ -22,7 +32,8 @@ export function helpUrl(language: string, anchor?: string): string {
   // redirect also drops the fragment in some clients, which would land someone
   // who clicked "how do I fix this?" at the top of the page instead of on the
   // answer — and every anchor this function takes is exactly that case.
-  const path = language === 'en' ? '/faq' : `/${language}/faq`;
+  const site = siteLanguage(language);
+  const path = site === 'en' ? '/faq' : `/${site}/faq`;
   return `https://www.authenticator.sh${path}${anchor ? `#${anchor}` : ''}`;
 }
 
@@ -45,7 +56,8 @@ export function helpUrl(language: string, anchor?: string): string {
  * Same www-and-no-/en rule as helpUrl above, and for the same reason.
  */
 export function whatsNewUrl(language: string, version?: string): string {
-  const base = language === 'en' ? '/whats-new' : `/${language}/whats-new`;
+  const site = siteLanguage(language);
+  const base = site === 'en' ? '/whats-new' : `/${site}/whats-new`;
   const path = version ? `${base}/${version}` : base;
   return `https://www.authenticator.sh${path}`;
 }

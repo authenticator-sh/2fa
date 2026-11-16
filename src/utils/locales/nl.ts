@@ -119,6 +119,7 @@ const strings: TranslationStrings = {
   "addAccount.errorNameRequired": "Naam en geheime sleutel zijn vereist",
   "addAccount.errorInvalidSecret": "Ongeldige geheime sleutel. Moet Base32-gecodeerd zijn.",
   "addAccount.errorInvalidQR": "Deze QR-code is geen setupcode voor een authenticator. Kies op de website de optie authenticator-app en scan die QR-code.",
+  "addAccount.errorMicrosoftQr": "Deze QR-code werkt alleen met de Microsoft Authenticator-app. Klik op de Microsoft-pagina op de link om een andere authenticator-app te gebruiken en scan de QR-code die daarna verschijnt.",
   "addAccount.errorHotp": "Op tellers gebaseerde codes (HOTP) worden niet ondersteund",
   "addAccount.errorUnsupportedCode": "Deze code gebruikt een type of instellingen die deze app niet kan genereren (bijvoorbeeld het MD5-algoritme, 4 cijfers of een ongebruikelijke periode). Hij is niet toegevoegd, omdat de codes onjuist zouden zijn.",
   "addAccount.errorDamagedQR": "Dit is een authenticator-QR-code, maar de inhoud is beschadigd of onvolledig. Toon of exporteer de code opnieuw op het oorspronkelijke apparaat en scan hem nogmaals.",

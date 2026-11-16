@@ -382,9 +382,14 @@ export function reportAddStep(flow: AddFlow, step: string): Promise<void> {
 }
 
 /** An add that did not work: what the person was told, as a kind. */
-export function reportAddFail(flow: AddFlow, reason: string): Promise<void> {
+export function reportAddFail(flow: AddFlow, reason: string, kind?: string): Promise<void> {
   const r = slug(reason);
-  return report('add_fail', { flow, reason: r }, `fail:${flow}:${r}`);
+  // `kind` narrows a refusal whose sentence covers several causes — what a
+  // foreign QR was, which wrong characters a key had. A word from a fixed list,
+  // never what was scanned or typed. Not in the uninstall stage: that has
+  // three parts and the reason is the third.
+  const k = kind ? slug(kind) : '';
+  return report('add_fail', k ? { flow, reason: r, kind: k } : { flow, reason: r }, `fail:${flow}:${r}`);
 }
 
 /** The reason in a message key the person was shown: 'addAccount.errorNoQr' → 'error_no_qr'. */

@@ -21,8 +21,15 @@ export async function run(): Promise<void> {
       ['pt-PT', 'pt'],
       ['es-419', 'es'],  // Latin American Spanish, region as a numeric code
       ['zh-CN', 'zh'],
-      ['zh-TW', 'zh'],   // Simplified is closer than English
-      ['zh-Hant-HK', 'zh'],
+      ['zh', 'zh'],
+      ['zh-Hans-TW', 'zh'],   // the script named wins over the region
+      ['zh-SG', 'zh'],
+      ['zh-TW', 'zh-TW'],     // Traditional has its own interface
+      ['zh_TW', 'zh-TW'],
+      ['zh-HK', 'zh-TW'],
+      ['zh-MO', 'zh-TW'],
+      ['zh-Hant', 'zh-TW'],
+      ['zh-Hant-HK', 'zh-TW'],
       ['in', 'id'],      // the pre-1989 code Chrome still reports for Indonesian
       ['in-ID', 'id'],
       ['nb-NO', 'en'],   // Norwegian: not translated, so English rather than a guess
@@ -42,7 +49,7 @@ export async function run(): Promise<void> {
   scenario('Every language we ship recognises itself');
   {
     const wrong = i18n.languages.filter((entry) => i18n.matchLanguage(entry.code) !== entry.code);
-    check('all twenty round-trip', wrong.length === 0, wrong.map((entry) => entry.code).join(', '));
+    check('all of them round-trip', wrong.length === 0, wrong.map((entry) => entry.code).join(', '));
 
     // The regional form of each, which is what a browser actually reports.
     const regional = i18n.languages.filter(

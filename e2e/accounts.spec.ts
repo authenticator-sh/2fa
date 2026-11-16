@@ -2,6 +2,7 @@
 // chrome.storage.local holds, across a reload, across two windows, and through
 // a delete that is taken back.
 
+import qrcode from 'qrcode-generator';
 import {
   SECRET,
   addAccountByHand,
@@ -181,6 +182,25 @@ test('no camera asks where the code is, and "I have a key" reaches the form', as
   await page.getByRole('button', { name: 'I have a key — type it in' }).click();
   const dialog = page.getByRole('dialog', { name: 'Add Account' });
   await expect(dialog.getByRole('button', { name: 'Manual', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});
+
+// Microsoft's setup page shows a QR only its own app reads (phonefactor://)
+// and keeps the ordinary one behind a link. "Not an authenticator setup code"
+// sent people back to scan the same picture; this one names the link.
+test("Microsoft's own QR is refused with the way to the other one", async ({ context, extensionId }) => {
+  await context.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('none', 'NotFoundError'));
+  });
+  const page = await openPage(context, extensionId, 'scan.html?mode=image');
+  const qr = qrcode(0, 'M');
+  qr.addData('phonefactor://activate_account?code=123456789&url=https%3A%2F%2Fexample.invalid%2Fpad%2F1');
+  qr.make();
+  const gif = Buffer.from(qr.createDataURL(6, 12).split(',')[1], 'base64');
+  await page.locator('input[type="file"]').setInputFiles({ name: 'microsoft.gif', mimeType: 'image/gif', buffer: gif });
+
+  await expect(page.getByText(/only works with the Microsoft Authenticator app/)).toBeVisible();
+  await expect(page.getByText(/I want to use a different authenticator app/)).toBeVisible();
+  if (process.env.E2E_SHOT) await page.screenshot({ path: process.env.E2E_SHOT });
 });
 
 test('"turning on 2FA" ends in the scan, with the key form beside it', async ({ context, extensionId }) => {
@@ -395,6 +415,27 @@ test('a pinned account stays on top, and the order of the group chips is the one
   await expect.poll(order).toEqual(['Gamma', 'Alpha', 'Beta']);
   await page.reload();
   await expect.poll(order).toEqual(['Gamma', 'Alpha', 'Beta']);
+});
+
+test('the compact view reorders by dragging too, and the order survives a reload', async ({ context, extensionId }) => {
+  const page = await openPage(context, extensionId, 'popup.html');
+  for (const [i, name] of ['first@example.com', 'second@example.com', 'third@example.com'].entries()) {
+    await addAccountByHand(page, name, otherSecret(i + 1));
+  }
+  await page.evaluate(() => chrome.storage.local.set({ viewMode: 'compact' }));
+  await page.reload();
+  await expect(cards(page)).toHaveCount(3);
+  const before = await cardNames(page);
+  const height = (await cards(page).first().boundingBox())!.height;
+  // One line per account: the mode is really on, not the default one.
+  expect(height).toBeLessThan(45);
+
+  await cards(page).nth(2).dragTo(cards(page).nth(0));
+  const moved = [before[2], before[0], before[1]];
+  await expect.poll(() => cardNames(page)).toEqual(moved);
+  await page.reload();
+  await expect(cards(page)).toHaveCount(3);
+  expect(await cardNames(page)).toEqual(moved);
 });
 
 test('the keyboard walks the list from the search box, and Enter there copies the first match', async ({ context, extensionId }) => {

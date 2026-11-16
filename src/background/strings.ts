@@ -180,6 +180,14 @@ export const WORKER_STRINGS: Record<Language, Record<WorkerKey, string>> = {
     "quickFill.copyMenu": "复制此网站的 2FA 验证码",
     "quickFill.copyDone": "已复制 2FA 验证码",
   },
+  'zh-TW': {
+    "quickFill.menu": "插入 2FA 驗證碼",
+    "quickFill.copied": "驗證碼已複製 — 請貼上到輸入框",
+    "quickFill.manual": "你的驗證碼：{0}",
+    "quickFill.openApp": "開啟擴充功能以選擇帳戶",
+    "quickFill.copyMenu": "複製此網站的 2FA 驗證碼",
+    "quickFill.copyDone": "已複製 2FA 驗證碼",
+  },
 };
 
 /** As the app's t(), for this handful of keys: English for anything missing, {0} filled in. */

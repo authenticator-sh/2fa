@@ -82,7 +82,7 @@ import { recordOpen, shouldShowReviewPrompt, snoozeReviewPrompt } from '@/utils/
 import { clearUpdateBadge } from '@/utils/update-badge';
 import { readActiveGroup, rememberActiveGroup, forgetActiveGroup } from '@/utils/active-group';
 import { helpUrl } from '@/utils/links';
-import { parseQRCode, generateRandomColor, qrFailureKey } from '@/utils/qr-parser';
+import { parseQRCode, generateRandomColor, qrFailureKey, qrFailureKind } from '@/utils/qr-parser';
 import { saveErrorMessage } from '@/utils/save-error';
 import { decodeQrFromImage } from '@/utils/qr-decode';
 import { cleanSecret, isSteamAccount, loadTimeOffset, tryGenerateTOTP } from '@/utils/totp';
@@ -1512,7 +1512,7 @@ function App() {
       return;
     }
     if (!parsed) {
-      void reportAddFail('import', reasonOfKey(qrFailureKey(text)));
+      void reportAddFail('import', reasonOfKey(qrFailureKey(text)), qrFailureKind(text));
       toast('error', t(qrFailureKey(text)));
       return;
     }

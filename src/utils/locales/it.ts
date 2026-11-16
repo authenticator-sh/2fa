@@ -119,6 +119,7 @@ const strings: TranslationStrings = {
   "addAccount.errorNameRequired": "Nome e chiave segreta sono obbligatori",
   "addAccount.errorInvalidSecret": "Chiave segreta non valida. Deve essere codificata in Base32.",
   "addAccount.errorInvalidQR": "Questo codice QR non è un codice di configurazione di un autenticatore. Sul sito scegli l’opzione app di autenticazione e scansiona quel codice QR.",
+  "addAccount.errorMicrosoftQr": "Questo codice QR funziona solo con l’app Microsoft Authenticator. Nella pagina di Microsoft, fai clic sul link per usare un’altra app di autenticazione, poi scansiona il codice QR mostrato subito dopo.",
   "addAccount.errorHotp": "I codici basati su contatore (HOTP) non sono supportati",
   "addAccount.errorUnsupportedCode": "Questo codice usa un tipo o delle impostazioni che questa app non sa generare (ad esempio l'algoritmo MD5, 4 cifre o un periodo insolito). Non è stato aggiunto perché i suoi codici sarebbero sbagliati.",
   "addAccount.errorDamagedQR": "È un codice QR di autenticazione, ma il contenuto è danneggiato o incompleto. Mostra o esporta di nuovo il codice sul dispositivo originale e scansionalo ancora.",

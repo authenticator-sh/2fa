@@ -119,6 +119,7 @@ const strings: TranslationStrings = {
   "addAccount.errorNameRequired": "Tên và khóa bí mật là bắt buộc",
   "addAccount.errorInvalidSecret": "Khóa bí mật không hợp lệ. Phải được mã hóa Base32.",
   "addAccount.errorInvalidQR": "Mã QR này không phải mã thiết lập trình xác thực. Trên trang web, hãy chọn tùy chọn ứng dụng xác thực rồi quét mã QR đó.",
+  "addAccount.errorMicrosoftQr": "Mã QR này chỉ dùng được với ứng dụng Microsoft Authenticator. Trên trang của Microsoft, hãy nhấp vào liên kết để dùng ứng dụng xác thực khác, rồi quét mã QR hiện ra sau đó.",
   "addAccount.errorHotp": "Mã dựa trên bộ đếm (HOTP) không được hỗ trợ",
   "addAccount.errorUnsupportedCode": "Mã này dùng loại hoặc thiết lập mà ứng dụng không thể tạo (ví dụ thuật toán MD5, 4 chữ số hoặc chu kỳ bất thường). Mã chưa được thêm vì các mã tạo ra sẽ sai.",
   "addAccount.errorDamagedQR": "Đây là mã QR của trình xác thực, nhưng nội dung bị hỏng hoặc không đầy đủ. Hãy hiển thị hoặc xuất lại mã trên thiết bị gốc rồi quét lại.",

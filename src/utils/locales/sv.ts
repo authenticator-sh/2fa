@@ -119,6 +119,7 @@ const strings: TranslationStrings = {
   "addAccount.errorNameRequired": "Namn och hemlig nyckel krävs",
   "addAccount.errorInvalidSecret": "Ogiltig hemlig nyckel. Måste vara Base32-kodad.",
   "addAccount.errorInvalidQR": "Den här QR-koden är ingen installationskod för en autentiserare. Välj alternativet autentiseringsapp på webbplatsen och skanna den QR-koden.",
+  "addAccount.errorMicrosoftQr": "Den här QR-koden fungerar bara med appen Microsoft Authenticator. Klicka på länken för att använda en annan autentiseringsapp på Microsofts sida och skanna sedan QR-koden som visas därefter.",
   "addAccount.errorHotp": "Räknarbaserade koder (HOTP) stöds inte",
   "addAccount.errorUnsupportedCode": "Den här koden använder en typ eller inställningar som appen inte kan generera (till exempel MD5-algoritmen, 4 siffror eller en ovanlig period). Den lades inte till, eftersom dess koder skulle bli fel.",
   "addAccount.errorDamagedQR": "Det här är en autentiserings-QR-kod, men innehållet är skadat eller ofullständigt. Visa eller exportera koden igen på den ursprungliga enheten och skanna den på nytt.",
